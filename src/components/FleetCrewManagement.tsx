@@ -228,10 +228,10 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
   // New Crew Form State
   const [newCrew, setNewCrew] = useState({
     name: '',
-    phone: '+62 8',
+    phone: '-',
     role: 'Driver Utama' as Crew['role'],
-    licenseNumber: '9204-' + Math.floor(Math.random() * 9000 + 1000) + '-' + Math.floor(Math.random() * 90000 + 10000),
-    licenseType: 'SIM B2 Umum' as Crew['licenseType'],
+    licenseNumber: '-',
+    licenseType: '-' as Crew['licenseType'],
     status: 'available' as CrewStatus
   });
 
@@ -315,14 +315,19 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     }
     setCrewFormErrors({});
 
-    const created = logisticsStore.addCrew(newCrew);
+    const created = logisticsStore.addCrew({
+      ...newCrew,
+      phone: '-',
+      licenseNumber: '-',
+      licenseType: '-'
+    });
     setIsAddCrewOpen(false);
     setNewCrew({
       name: '',
-      phone: '+62 8',
+      phone: '-',
       role: 'Driver Utama',
-      licenseNumber: '9204-' + Math.floor(Math.random() * 9000 + 1000) + '-' + Math.floor(Math.random() * 90000 + 10000),
-      licenseType: 'SIM B2 Umum',
+      licenseNumber: '-',
+      licenseType: '-',
       status: 'available'
     });
     setCrews(logisticsStore.getCrews());
@@ -423,7 +428,12 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     }
     setCrewFormErrors({});
 
-    logisticsStore.updateCrew(editingCrew.id, editingCrew);
+    logisticsStore.updateCrew(editingCrew.id, {
+      ...editingCrew,
+      phone: '-',
+      licenseNumber: '-',
+      licenseType: '-'
+    });
     setIsEditCrewOpen(false);
     setEditingCrew(null);
     setCrews(logisticsStore.getCrews());
@@ -1371,8 +1381,6 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   <th className="py-3 px-4 w-12 text-center">#</th>
                   <th className="py-3 px-4">Nama Lengkap Kru</th>
                   <th className="py-3 px-4">Peran Tugas</th>
-                  <th className="py-3 px-4">Kontak Telepon / WA</th>
-                  <th className="py-3 px-4">Lisensi SIM</th>
                   <th className="py-3 px-4 text-center">Status Operasional</th>
                   <th className="py-3 px-4">Armada Ditugaskan</th>
                   <th className="py-3 px-4 text-center">Performa Rit & Rating</th>
@@ -1383,7 +1391,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
               <tbody className="divide-y divide-slate-800/60">
                 {filteredCrews.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="py-12 text-center text-slate-400">
+                    <td colSpan={8} className="py-12 text-center text-slate-400">
                       <Users className="w-8 h-8 text-slate-600 mx-auto mb-2 opacity-60" />
                       <p className="font-semibold text-slate-300">Tidak ada kru ditemukan</p>
                       <p className="text-[11px] text-slate-500 mt-1">Coba sesuaikan kata kunci pencarian atau filter status kru.</p>
@@ -1417,19 +1425,6 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                           }`}>
                             {crew.role}
                           </span>
-                        </td>
-                        <td className="py-3 px-4">
-                          <a
-                            href={`tel:${crew.phone}`}
-                            className="text-blue-400 hover:text-blue-300 flex items-center gap-1 font-mono text-xs"
-                          >
-                            <Phone className="w-3 h-3 text-slate-500" />
-                            <span>{crew.phone}</span>
-                          </a>
-                        </td>
-                        <td className="py-3 px-4">
-                          <div className="font-semibold text-emerald-400">{crew.licenseType}</div>
-                          <div className="text-[10px] text-slate-400 font-mono">{crew.licenseNumber}</div>
                         </td>
                         <td className="py-3 px-4 text-center">
                           <button
@@ -1539,25 +1534,12 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                 </button>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
-                  <span className="text-slate-400 text-[11px]">Sertifikasi SIM:</span>
-                  <div className="font-semibold text-emerald-400 mt-0.5">{crew.licenseType}</div>
-                </div>
-                <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800">
-                  <span className="text-slate-400 text-[11px]">Total Perjalanan:</span>
-                  <div className="font-semibold text-white mt-0.5">{crew.tripsCompleted} Trip Sukses</div>
-                </div>
+              <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800 text-xs">
+                <span className="text-slate-400 text-[11px]">Total Perjalanan:</span>
+                <div className="font-semibold text-white mt-0.5">{crew.tripsCompleted} Trip Sukses</div>
               </div>
 
-              <div className="flex items-center justify-between pt-3 border-t border-slate-800 text-xs">
-                <a
-                  href={`tel:${crew.phone}`}
-                  className="text-blue-400 hover:text-blue-300 flex items-center gap-1.5"
-                >
-                  <Phone className="w-3.5 h-3.5" />
-                  <span>{crew.phone}</span>
-                </a>
+              <div className="flex items-center justify-end pt-3 border-t border-slate-800 text-xs">
 
                 <div className="flex items-center gap-1 text-amber-400 font-semibold">
                   <Award className="w-3.5 h-3.5" />
@@ -1984,32 +1966,12 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                 </div>
                 <div>
                   <label className="text-slate-400 block mb-1">Jenis SIM</label>
-                  <select
-                    value={newCrew.licenseType}
-                    onChange={(e) => {
-                      const newLic = e.target.value;
-                      setNewCrew({
-                        ...newCrew,
-                        licenseType: newLic as any,
-                        licenseNumber: newLic === '-' ? '-' : (newCrew.licenseNumber === '-' ? '' : newCrew.licenseNumber)
-                      });
-                      if (crewFormErrors.licenseType) setCrewFormErrors({ ...crewFormErrors, licenseType: '' });
-                    }}
-                    className={`w-full px-3 py-2 rounded-lg bg-slate-950 border text-white cursor-pointer ${
-                      crewFormErrors.licenseType ? 'border-rose-500 ring-1 ring-rose-500' : 'border-slate-800'
-                    }`}
-                  >
-                    <option value="SIM B2 Umum">SIM B2 Umum (Tronton / Container)</option>
-                    <option value="SIM B1 Umum">SIM B1 Umum (Fuso / CDD)</option>
-                    <option value="SIM A">SIM A (Kernet / Mobil Kecil)</option>
-                    <option value="-">- (Tanpa SIM / Belum Ada)</option>
-                  </select>
-                  {crewFormErrors.licenseType && (
-                    <p className="text-[10px] text-rose-400 mt-1 flex items-center gap-1 font-medium">
-                      <AlertCircle className="w-3 h-3 shrink-0" />
-                      <span>{crewFormErrors.licenseType}</span>
-                    </p>
-                  )}
+                  <input
+                    type="text"
+                    value="-"
+                    disabled
+                    className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-500 cursor-not-allowed"
+                  />
                 </div>
               </div>
 
@@ -2018,47 +1980,19 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   <label className="text-slate-400 block mb-1">Nomor Handphone / WhatsApp</label>
                   <input
                     type="text"
-                    required
-                    placeholder="+62 812..."
-                    value={newCrew.phone}
-                    onChange={(e) => {
-                      setNewCrew({ ...newCrew, phone: e.target.value });
-                      if (crewFormErrors.phone) setCrewFormErrors({ ...crewFormErrors, phone: '' });
-                    }}
-                    className={`w-full px-3 py-2 rounded-lg bg-slate-950 border text-white ${
-                      crewFormErrors.phone ? 'border-rose-500 ring-1 ring-rose-500' : 'border-slate-800'
-                    }`}
+                    value="-"
+                    disabled
+                    className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-500 cursor-not-allowed"
                   />
-                  {crewFormErrors.phone && (
-                    <p className="text-[10px] text-rose-400 mt-1 flex items-center gap-1 font-medium">
-                      <AlertCircle className="w-3 h-3 shrink-0" />
-                      <span>{crewFormErrors.phone}</span>
-                    </p>
-                  )}
                 </div>
                 <div>
-                  <label className="text-slate-400 block mb-1">
-                    Nomor Registrasi SIM {newCrew.licenseType === '-' ? '(Opsional)' : ''}
-                  </label>
+                  <label className="text-slate-400 block mb-1">Nomor Registrasi SIM</label>
                   <input
                     type="text"
-                    required={newCrew.licenseType !== '-'}
-                    placeholder={newCrew.licenseType === '-' ? '- (Tanpa SIM)' : 'Contoh: 9204-1234-56789'}
-                    value={newCrew.licenseNumber}
-                    onChange={(e) => {
-                      setNewCrew({ ...newCrew, licenseNumber: e.target.value });
-                      if (crewFormErrors.licenseNumber) setCrewFormErrors({ ...crewFormErrors, licenseNumber: '' });
-                    }}
-                    className={`w-full px-3 py-2 rounded-lg bg-slate-950 border text-white font-mono ${
-                      crewFormErrors.licenseNumber ? 'border-rose-500 ring-1 ring-rose-500' : 'border-slate-800'
-                    }`}
+                    value="-"
+                    disabled
+                    className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-500 cursor-not-allowed"
                   />
-                  {crewFormErrors.licenseNumber && (
-                    <p className="text-[10px] text-rose-400 mt-1 flex items-center gap-1 font-medium">
-                      <AlertCircle className="w-3 h-3 shrink-0" />
-                      <span>{crewFormErrors.licenseNumber}</span>
-                    </p>
-                  )}
                 </div>
               </div>
 
@@ -2614,66 +2548,33 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-slate-400 block mb-1">Peran Tugas</label>
-                  <select
-                    value={editingCrew.role}
-                    onChange={(e) => setEditingCrew({ ...editingCrew, role: e.target.value as any })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
-                  >
-                    <option value="Driver Utama">Driver Utama</option>
-                    <option value="Driver Cadangan">Driver Cadangan</option>
-                    <option value="Kernet / Helper">Kernet / Helper</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-slate-400 block mb-1">Jenis SIM</label>
-                  <select
-                    value={editingCrew.licenseType}
-                    onChange={(e) => {
-                      const newLic = e.target.value;
-                      setEditingCrew({
-                        ...editingCrew,
-                        licenseType: newLic as any,
-                        licenseNumber: newLic === '-' && (!editingCrew.licenseNumber || editingCrew.licenseNumber.startsWith('SIM-')) ? '-' : editingCrew.licenseNumber
-                      });
-                    }}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
-                  >
-                    <option value="SIM B2 Umum">SIM B2 Umum (Tronton / Container)</option>
-                    <option value="SIM B1 Umum">SIM B1 Umum (Fuso / CDD)</option>
-                    <option value="SIM A">SIM A (Kernet / Mobil Kecil)</option>
-                    <option value="-">- (Tanpa SIM / Belum Ada)</option>
-                  </select>
-                </div>
+              <div>
+                <label className="text-slate-400 block mb-1">Peran Tugas</label>
+                <select
+                  value={editingCrew.role}
+                  onChange={(e) => setEditingCrew({ ...editingCrew, role: e.target.value as any })}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
+                >
+                  <option value="Driver Utama">Driver Utama</option>
+                  <option value="Driver Cadangan">Driver Cadangan</option>
+                  <option value="Kernet / Helper">Kernet / Helper</option>
+                </select>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-slate-400 block mb-1">Nomor Handphone / WhatsApp</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="+62 812..."
-                    value={editingCrew.phone}
-                    onChange={(e) => setEditingCrew({ ...editingCrew, phone: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
-                  />
+                  <label className="text-slate-400 block mb-1">Jenis SIM</label>
+                  <input type="text" value="-" disabled className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-500 cursor-not-allowed" />
                 </div>
                 <div>
-                  <label className="text-slate-400 block mb-1">
-                    Nomor Registrasi SIM {editingCrew.licenseType === '-' ? '(Opsional)' : ''}
-                  </label>
-                  <input
-                    type="text"
-                    required={editingCrew.licenseType !== '-'}
-                    placeholder={editingCrew.licenseType === '-' ? '- (Tanpa SIM)' : 'SIM-XXXX...'}
-                    value={editingCrew.licenseNumber}
-                    onChange={(e) => setEditingCrew({ ...editingCrew, licenseNumber: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white font-mono"
-                  />
+                  <label className="text-slate-400 block mb-1">Nomor Handphone / WhatsApp</label>
+                  <input type="text" value="-" disabled className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-500 cursor-not-allowed" />
                 </div>
+              </div>
+
+              <div>
+                <label className="text-slate-400 block mb-1">Nomor Registrasi SIM</label>
+                <input type="text" value="-" disabled className="w-full px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-500 cursor-not-allowed" />
               </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">

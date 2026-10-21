@@ -503,12 +503,22 @@ export const googleSheetsApiService = {
         const val = String(row[c] || '').toUpperCase().trim();
         if (val === 'NO' || val === 'NO.' || val === 'NOMOR' || val === 'NO URUT' || val === 'URUT') noCol = c;
         if (val === 'DRIVER' || val === 'SUPIR') driverCol = c;
-        if (val === 'HELPER' || val === 'KERNET') {
-          helperCol = c;
-          // Check if next column in same or sub-row is Helper 2
-          if (c + 1 < row.length && (String(row[c + 1] || '').trim() === '2' || String(row[c + 1] || '').trim() === '')) {
-            helper2Col = c + 1;
+        if (val === 'HELPER' || val === 'KERNET' || val === 'HELPER 1' || val === 'KERNET 1') {
+          if (helperCol === -1) {
+            helperCol = c;
+            // Check if next column in same or sub-row might be explicitly marked as Helper 2
+            if (c + 1 < row.length) {
+              const nextVal = String(row[c + 1] || '').toUpperCase().trim();
+              if (nextVal === '2' || nextVal === 'HELPER 2' || nextVal === 'KERNET 2') {
+                helper2Col = c + 1;
+              }
+            }
+          } else {
+            helper2Col = c;
           }
+        }
+        if (val === 'HELPER 2' || val === 'KERNET 2') {
+          helper2Col = c;
         }
         if (val === '1' && helperCol === -1 && c > 1) {
           helperCol = c;
@@ -519,6 +529,10 @@ export const googleSheetsApiService = {
         if (val.includes('TANGGAL') || val.includes('DATE') || val.includes('HARI')) dateCol = c;
         if (val.includes('TARGET') || val.includes('JAM') || val.includes('BACKUP')) targetCol = c;
         if (val === 'PO' || val === 'NO PO' || val === 'NOMOR PO' || val === 'NO RESI' || val === 'RESI' || val === 'NO SJ' || val === 'SURAT JALAN' || val === 'INVOICE') poCol = c;
+      }
+
+      if (helperCol === -1 || helper2Col === -1) {
+        throw new Error(`Format kolom Helper tidak lengkap. Ditemukan Helper 1: ${helperCol !== -1 ? 'Ya' : 'Tidak'}, Helper 2: ${helper2Col !== -1 ? 'Ya' : 'Tidak'}. Pastikan kedua kolom Helper ada di file Excel Anda.`);
       }
 
       if (driverCol !== -1 && areaCol !== -1) {
@@ -717,10 +731,20 @@ export const googleSheetsApiService = {
         }
 
         // Helper 1 and Helper 2
-        const rawHelper1 = helperCol !== -1 ? String(rowData[helperCol] || '').trim() : undefined;
-        const rawHelper2 = helper2Col !== -1 ? String(rowData[helper2Col] || '').trim() : undefined;
-        const helper1Clean = (rawHelper1 && rawHelper1 !== '-' && rawHelper1 !== '0') ? rawHelper1 : undefined;
-        const helper2Clean = (rawHelper2 && rawHelper2 !== '-' && rawHelper2 !== '0') ? rawHelper2 : undefined;
+        let rawHelper1 = helperCol !== -1 ? String(rowData[helperCol] || '').trim() : undefined;
+        let rawHelper2 = helper2Col !== -1 ? String(rowData[helper2Col] || '').trim() : undefined;
+
+        // If rawHelper1 contains a comma/ampersand and rawHelper2 is empty, split it
+        if (rawHelper1 && (rawHelper1.includes(',') || rawHelper1.includes('&') || rawHelper1.includes('/')) && (!rawHelper2 || rawHelper2 === '-' || rawHelper2 === '0')) {
+          const splitParts = rawHelper1.split(/[,&/]+/);
+          if (splitParts.length > 1) {
+            rawHelper1 = splitParts[0].trim();
+            rawHelper2 = splitParts.slice(1).join(', ').trim();
+          }
+        }
+
+        const helper1Clean = (rawHelper1 && rawHelper1 !== '-' && rawHelper1 !== '0') ? rawHelper1 : '-';
+        const helper2Clean = (rawHelper2 && rawHelper2 !== '-' && rawHelper2 !== '0') ? rawHelper2 : '-';
 
         const target = targetCol !== -1 ? String(rowData[targetCol] || '').trim() : undefined;
         const poNumber = poCol !== -1 ? String(rowData[poCol] || '').trim() : undefined;
@@ -813,7 +837,7 @@ export const googleSheetsApiService = {
 
           trips.push({
             driver: item.driver,
-            helper: combinedHelper,
+            helper: item.helper1,
             helper2: item.helper2,
             rawArea: item.area,
             area: standardizedArea,

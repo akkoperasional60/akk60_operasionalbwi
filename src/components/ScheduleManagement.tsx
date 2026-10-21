@@ -1167,14 +1167,7 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
       )}
       </div>
 
-      {/* RENDER VIEW: Weekly Route Planner (Drag & Drop) */}
-      {activeMainTab === 'weekly_planner' && (
-        <WeeklyRoutePlanner
-          crews={crews}
-          fleets={fleets}
-          stores={stores}
-        />
-      )}
+
 
       {/* RENDER VIEW: Schedules List & Operational Panels */}
       {activeMainTab === 'schedules_list' && (

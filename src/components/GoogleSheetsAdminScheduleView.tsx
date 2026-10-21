@@ -2277,7 +2277,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                         <tr className="bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-100 font-extrabold border-b border-slate-200 dark:border-slate-700 uppercase tracking-wider text-[11px]">
                           <th className="p-3 text-center w-14 border-r border-slate-200 dark:border-slate-700"># NO</th>
                           <th className="p-3 border-r border-slate-200 dark:border-slate-700 w-44">DRIVER (PENGEMUDI)</th>
-                          <th className="p-3 border-r border-slate-200 dark:border-slate-700 w-40">HELPER / PIC</th>
+                          <th className="p-3 border-r border-slate-200 dark:border-slate-700 w-40">HELPER 1</th>
+                          <th className="p-3 border-r border-slate-200 dark:border-slate-700 w-40">HELPER 2</th>
                           <th className="p-3 border-r border-slate-200 dark:border-slate-700">KIRIM AREA (TUJUAN)</th>
                           <th className="p-3 border-r border-slate-200 dark:border-slate-700 w-44">ARMADA TRUK</th>
                           <th className="p-3 border-r border-slate-200 dark:border-slate-700 w-36">STATUS</th>
@@ -2320,10 +2321,16 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                 </div>
                               </td>
 
-                              {/* Helper */}
+                              {/* Helper 1 */}
                               <td className="p-3 border-r border-slate-200 dark:border-slate-800">
                                 <span className={`font-semibold ${p.helper && p.helper !== '-' ? 'text-slate-800 dark:text-slate-200' : 'text-slate-400'}`}>
                                   {p.helper || '-'}
+                                </span>
+                              </td>
+                              {/* Helper 2 */}
+                              <td className="p-3 border-r border-slate-200 dark:border-slate-800">
+                                <span className={`font-semibold ${p.helper2 && p.helper2 !== '-' ? 'text-slate-800 dark:text-slate-200' : 'text-slate-400'}`}>
+                                  {p.helper2 || '-'}
                                 </span>
                               </td>
 
@@ -2337,9 +2344,6 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                   }`}>
                                     {standardArea}
                                   </span>
-                                  <span className="text-[10px] text-slate-500 dark:text-slate-400 block mt-1">
-                                    {corridor}
-                                  </span>
                                 </div>
                               </td>
 
@@ -2348,9 +2352,6 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                 <div className="flex items-center gap-2">
                                   <span className="px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950/80 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 font-mono font-black text-xs">
                                     {p.armada}
-                                  </span>
-                                  <span className="text-[11px] text-slate-600 dark:text-slate-300 font-medium truncate">
-                                    {fleetSpec.model}
                                   </span>
                                 </div>
                               </td>

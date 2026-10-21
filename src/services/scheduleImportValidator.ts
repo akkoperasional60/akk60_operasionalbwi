@@ -29,6 +29,7 @@ export interface ValidatedImportItem {
   dateDisplay: string;
   driverName: string;
   helperName?: string;
+  helper2Name?: string;
   areaName: string;
   armadaName: string;
   target?: string;
@@ -472,6 +473,7 @@ export const scheduleImportValidator = {
         dateDisplay,
         driverName: cleanDriver,
         helperName: trip.helper && trip.helper !== '-' ? trip.helper.trim() : undefined,
+        helper2Name: trip.helper2 && trip.helper2 !== '-' ? trip.helper2.trim() : undefined,
         areaName: cleanArea,
         armadaName: cleanArmada || 'Truk Reguler',
         target: trip.target,

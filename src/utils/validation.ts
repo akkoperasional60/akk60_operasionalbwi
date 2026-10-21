@@ -146,28 +146,12 @@ export function validateCrew(
     errors.role = 'Pilih peran tugas yang valid (Driver Utama, Driver Cadangan, atau Kernet / Helper).';
   }
 
-  // 3. Nomor Handphone / WhatsApp
-  const phone = (crew.phone || '').trim().replace(/\s+|-/g, '');
-  if (!phone) {
-    errors.phone = 'Nomor handphone / WhatsApp wajib diisi.';
-  } else if (!INDONESIAN_PHONE_REGEX.test(phone)) {
-    errors.phone = 'Format nomor HP tidak valid. Gunakan format Indonesia (contoh: 081234567890 atau +6281234567890).';
-  }
+  // 3. Nomor Handphone / WhatsApp (Optional)
+  const phone = (crew.phone || '-').trim();
 
-  // 4. Jenis SIM & Nomor SIM
-  const isDriver = crew.role === 'Driver Utama' || crew.role === 'Driver Cadangan';
-  if (isDriver && (!crew.licenseType || crew.licenseType === '-')) {
-    errors.licenseType = 'Pengemudi (Driver) wajib memiliki jenis SIM yang valid (SIM B2 Umum, SIM B1 Umum, atau SIM A).';
-  }
-
-  if (crew.licenseType && crew.licenseType !== '-') {
-    const licNum = (crew.licenseNumber || '').trim();
-    if (!licNum || licNum === '-') {
-      errors.licenseNumber = 'Nomor registrasi SIM wajib diisi jika memiliki jenis SIM.';
-    } else if (licNum.length < 5) {
-      errors.licenseNumber = 'Nomor registrasi SIM minimal 5 karakter.';
-    }
-  }
+  // 4. Jenis SIM & Nomor SIM (Optional)
+  const licenseType = crew.licenseType || '-';
+  const licenseNumber = crew.licenseNumber || '-';
 
   // 5. Status
   const allowedStatuses: CrewStatus[] = ['available', 'on-duty', 'off'];

@@ -4,6 +4,7 @@ export interface DeliveryAssignment {
   id?: string;
   driver: string;
   helper: string;
+  helper2?: string;
   area: string;
   armada: string;
   backup?: string;
