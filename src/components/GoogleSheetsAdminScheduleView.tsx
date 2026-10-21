@@ -1593,9 +1593,11 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
           const resolvedArea = mappingDict[p.area] || standardizeAreaName(p.area);
           const resolvedDriver = crewMappingDict[p.driver] || p.driver;
           const resolvedHelper = p.helper ? (crewMappingDict[p.helper] || p.helper) : undefined;
+          const resolvedHelper2 = p.helper2 ? (crewMappingDict[p.helper2] || p.helper2) : undefined;
           tripsToSync.push({
             driver: resolvedDriver,
             helper: resolvedHelper,
+            helper2: resolvedHelper2,
             area: resolvedArea,
             armada: p.armada,
             target: p.target,

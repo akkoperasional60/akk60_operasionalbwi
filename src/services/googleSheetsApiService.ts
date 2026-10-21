@@ -531,8 +531,9 @@ export const googleSheetsApiService = {
         if (val === 'PO' || val === 'NO PO' || val === 'NOMOR PO' || val === 'NO RESI' || val === 'RESI' || val === 'NO SJ' || val === 'SURAT JALAN' || val === 'INVOICE') poCol = c;
       }
 
-      if (helperCol === -1 || helper2Col === -1) {
-        throw new Error(`Format kolom Helper tidak lengkap. Ditemukan Helper 1: ${helperCol !== -1 ? 'Ya' : 'Tidak'}, Helper 2: ${helper2Col !== -1 ? 'Ya' : 'Tidak'}. Pastikan kedua kolom Helper ada di file Excel Anda.`);
+      // Warning if helper columns are missing, but don't strictly block if we have at least one
+      if (helperCol === -1) {
+        console.warn('Kolom Helper tidak ditemukan di spreadsheet.');
       }
 
       if (driverCol !== -1 && areaCol !== -1) {

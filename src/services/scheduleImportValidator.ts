@@ -608,6 +608,8 @@ export const scheduleImportValidator = {
 
       // Dynamic Helper Resolution
       let matchedHelper: Crew | undefined = undefined;
+      let matchedHelper2: Crew | undefined = undefined;
+
       if (item.helperName && item.helperName !== '-' && item.helperName !== '0') {
         const resolvedHelperName = (options.customCrewMapping && options.customCrewMapping[item.helperName]) || item.helperName;
         matchedHelper = currentCrews.find(c => 
@@ -619,13 +621,34 @@ export const scheduleImportValidator = {
         if (!matchedHelper && resolvedHelperName) {
           matchedHelper = logisticsStore.addCrew({
             name: resolvedHelperName,
-            phone: '081234567890',
+            phone: '-',
             role: 'Kernet / Helper',
-            licenseNumber: `SIM-${Math.floor(10000000 + Math.random() * 89999999)}`,
-            licenseType: 'SIM A',
+            licenseNumber: '-',
+            licenseType: '-',
             status: 'available'
           });
           currentCrews.push(matchedHelper);
+        }
+      }
+
+      if (item.helper2Name && item.helper2Name !== '-' && item.helper2Name !== '0') {
+        const resolvedHelper2Name = (options.customCrewMapping && options.customCrewMapping[item.helper2Name]) || item.helper2Name;
+        matchedHelper2 = currentCrews.find(c => 
+          c.name.toUpperCase() === resolvedHelper2Name.toUpperCase() ||
+          c.name.toUpperCase().includes(resolvedHelper2Name.toUpperCase()) ||
+          resolvedHelper2Name.toUpperCase().includes(c.name.toUpperCase())
+        );
+
+        if (!matchedHelper2 && resolvedHelper2Name) {
+          matchedHelper2 = logisticsStore.addCrew({
+            name: resolvedHelper2Name,
+            phone: '-',
+            role: 'Kernet / Helper',
+            licenseNumber: '-',
+            licenseType: '-',
+            status: 'available'
+          });
+          currentCrews.push(matchedHelper2);
         }
       }
 
@@ -662,6 +685,8 @@ export const scheduleImportValidator = {
                 crew: matchedDriver || existing.crew,
                 crewHelperId: matchedHelper ? matchedHelper.id : undefined,
                 crewHelper: matchedHelper,
+                crewHelper2Id: matchedHelper2 ? matchedHelper2.id : undefined,
+                crewHelper2: matchedHelper2,
                 storeId: areaDestination.id,
                 store: areaDestination,
                 areaName: effectiveAreaName,
@@ -694,6 +719,8 @@ export const scheduleImportValidator = {
         crew: matchedDriver,
         crewHelperId: matchedHelper ? matchedHelper.id : undefined,
         crewHelper: matchedHelper,
+        crewHelper2Id: matchedHelper2 ? matchedHelper2.id : undefined,
+        crewHelper2: matchedHelper2,
         status: 'scheduled',
         departureDate: item.departureDateIso,
         estimatedArrival: item.estimatedArrivalIso,
