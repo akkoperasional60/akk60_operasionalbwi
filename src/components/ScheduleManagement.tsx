@@ -13,12 +13,11 @@ import { OutboundGapMonitoringPanel } from './OutboundGapMonitoringPanel';
 import { NextDayReadinessPanel } from './NextDayReadinessPanel';
 import { SmartFillModal } from './SmartFillModal';
 import { SmartFillResult } from '../services/scheduleInitializer';
-import { WeeklyRoutePlanner } from './WeeklyRoutePlanner';
+
 import { AreaRepetitionWarningModal } from './AreaRepetitionWarningModal';
 import { checkConsecutiveWeekConflict, AreaRepetitionConflict } from '../services/areaRotationValidator';
 import { scheduleImportValidator } from '../services/scheduleImportValidator';
 import { GoogleSheetsAdminScheduleView } from './GoogleSheetsAdminScheduleView';
-import { ScheduleRouteMap } from './ScheduleRouteMap';
 import { downloadScheduleManifestPdf } from '../utils/suratJalanPdfGenerator';
 import { useToast } from '../context/ToastContext';
 import { getAreaScheduleTiming, calculateScheduleTimestamps } from '../utils/areaScheduleRules';
@@ -81,12 +80,11 @@ export const ScheduleManagement: React.FC<ScheduleManagementProps> = ({
   const [isRouteOptimizerOpen, setIsRouteOptimizerOpen] = useState(false);
   const [isSmartFillOpen, setIsSmartFillOpen] = useState(false);
   const [autoInitMessage, setAutoInitMessage] = useState<string | null>(null);
-  const [activeMainTab, setActiveMainTab] = useState<'schedules_list' | 'weekly_planner' | 'schedule_route_map' | 'google_sheets_all'>('schedules_list');
+  const [activeMainTab, setActiveMainTab] = useState<'schedules_list' | 'google_sheets_all'>('schedules_list');
   const [selectedRouteScheduleId, setSelectedRouteScheduleId] = useState<string | null>(null);
 
   const handleViewRouteOnMap = (sch: Schedule) => {
     setSelectedRouteScheduleId(sch.id);
-    setActiveMainTab('schedule_route_map');
   };
   const [consecutiveConflict, setConsecutiveConflict] = useState<AreaRepetitionConflict | null>(null);
   const { addNotification } = useToast();
@@ -950,7 +948,7 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
           </div>
         </div>
 
-        {/* Primary View Switcher: Daftar Jadwal & Matriks vs Planner Rute Mingguan (Drag & Drop) vs Google Sheets (ALL) */}
+        {/* Primary View Switcher: Daftar Jadwal & Matriks vs Google Sheets (ALL) */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mt-6 pt-6 border-t border-slate-800">
           <div className="flex items-center gap-2 bg-slate-950 p-1.5 rounded-xl border border-slate-800 flex-wrap">
             <button
@@ -971,36 +969,6 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
             </button>
 
             <button
-              onClick={() => setActiveMainTab('weekly_planner')}
-              className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
-                activeMainTab === 'weekly_planner'
-                  ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md ring-2 ring-purple-400/40'
-                  : 'text-purple-300 hover:text-white hover:bg-slate-900'
-              }`}
-            >
-              <Move className="w-4 h-4 text-purple-300" />
-              <span>Planner Rute Mingguan (Drag & Drop)</span>
-              <span className="bg-purple-500/20 text-purple-200 border border-purple-500/30 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
-                Simulasi 4 Pekan
-              </span>
-            </button>
-
-            <button
-              onClick={() => setActiveMainTab('schedule_route_map')}
-              className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
-                activeMainTab === 'schedule_route_map'
-                  ? 'bg-gradient-to-r from-blue-600 to-cyan-600 text-white shadow-md ring-2 ring-cyan-400/40'
-                  : 'text-cyan-300 hover:text-white hover:bg-slate-900'
-              }`}
-            >
-              <Compass className="w-4 h-4 text-cyan-400" />
-              <span>Peta Rute Jadwal (Leaflet)</span>
-              <span className="bg-cyan-500/20 text-cyan-200 border border-cyan-500/30 text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
-                Interactive GIS
-              </span>
-            </button>
-
-            <button
               onClick={() => setActiveMainTab('google_sheets_all')}
               className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
                 activeMainTab === 'google_sheets_all'
@@ -1017,17 +985,7 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
           </div>
 
           <div className="text-xs text-slate-400 flex items-center gap-1.5">
-            {activeMainTab === 'weekly_planner' ? (
-              <span className="text-purple-300 font-medium flex items-center gap-1">
-                <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-                <span>Geser kartu jadwal untuk rotasi tugas Kru atau Truk</span>
-              </span>
-            ) : activeMainTab === 'schedule_route_map' ? (
-              <span className="text-cyan-300 font-medium flex items-center gap-1">
-                <Compass className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Visualisasi Jalur GIS Leaflet: Gudang Pusat DC Banyuwangi &rarr; Toko Retail</span>
-              </span>
-            ) : activeMainTab === 'google_sheets_all' ? (
+            {activeMainTab === 'google_sheets_all' ? (
               <span className="text-emerald-300 font-medium flex items-center gap-1">
                 <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
                 <span>Live Roster Sheet ALL Januari 2026 & Sinkronisasi Langsung</span>
@@ -1910,14 +1868,7 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
-                        <button
-                          onClick={() => handleViewRouteOnMap(sch)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 text-xs font-medium border border-cyan-500/40 transition cursor-pointer"
-                          title="Lihat Rute di Peta Interaktif Leaflet"
-                        >
-                          <Compass className="w-3.5 h-3.5 text-cyan-400" />
-                          <span>Peta Rute</span>
-                        </button>
+
                         <button
                           onClick={() => setSelectedManifest(sch)}
                           className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition cursor-pointer"
@@ -1936,27 +1887,6 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
         </div>
       )}
       </>
-      )}
-
-      {activeMainTab === 'weekly_planner' && (
-        <WeeklyRoutePlanner 
-          crews={crews} 
-          fleets={fleets} 
-          stores={stores} 
-        />
-      )}
-
-      {activeMainTab === 'schedule_route_map' && (
-        <ScheduleRouteMap
-          schedules={schedules}
-          stores={stores}
-          fleets={fleets}
-          crews={crews}
-          selectedScheduleId={selectedRouteScheduleId}
-          onSelectSchedule={(sch) => setSelectedRouteScheduleId(sch.id)}
-          onOpenManifest={(sch) => setSelectedManifest(sch)}
-          onBackToSchedules={() => setActiveMainTab('schedules_list')}
-        />
       )}
 
       {activeMainTab === 'google_sheets_all' && (
