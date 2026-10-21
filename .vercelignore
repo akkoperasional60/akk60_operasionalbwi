@@ -1,0 +1,13 @@
+.git
+.github
+.env
+.env.local
+.env.*.local
+node_modules
+dist
+dist-*
+downloads/*.apk.tmp
+downloads/*.apk
+scripts/build_apk.py
+.DS_Store
+*.log

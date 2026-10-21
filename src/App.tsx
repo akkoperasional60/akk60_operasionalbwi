@@ -1,0 +1,543 @@
+import React, { useState, useEffect } from 'react';
+import { Sidebar, NavTab } from './components/Sidebar';
+import { ExecutiveDashboard } from './components/ExecutiveDashboard';
+import { DashboardOverview } from './components/DashboardOverview';
+import { ScheduleManagement } from './components/ScheduleManagement';
+import { FleetCrewManagement } from './components/FleetCrewManagement';
+import { SparePartManagement } from './components/SparePartManagement';
+import { FuelEfficiencyManagement } from './components/FuelEfficiencyManagement';
+import { CrewDeliveryHistoryView } from './components/CrewDeliveryHistoryView';
+import { UserManagement } from './components/UserManagement';
+import { ExcelTrackingEvaluator } from './components/ExcelTrackingEvaluator';
+import { CustomerMapping } from './components/CustomerMapping';
+import { TracksolidGateway } from './components/TracksolidGateway';
+import { FleetFormCenter } from './components/FleetFormCenter';
+import { SupabaseSqlArchitecture } from './components/SupabaseSqlArchitecture';
+import { SalesAdminHub, SalesAdminSubTab } from './components/sales/SalesAdminHub';
+import { SalesKpi } from './components/sales/SalesKpi';
+import { PurchasingStockAnalysis } from './components/purchasing/PurchasingStockAnalysis';
+import { HelpDeskChat } from './components/HelpDeskChat';
+import { AuthModal } from './components/AuthModal';
+import { ThemeSwitcher } from './components/ThemeSwitcher';
+import { SystemActivityLog } from './components/SystemActivityLog';
+import { DepartmentDashboard } from './components/DepartmentDashboard';
+import { MarketingDashboard } from './components/MarketingDashboard';
+import { DriverMobileView } from './components/DriverMobileView';
+import { DriverReportsManagement } from './components/DriverReportsManagement';
+import { AnalyticsReportingModule } from './components/AnalyticsReportingModule';
+import { E2ETesterModule } from './components/E2ETesterModule';
+import { NetworkStatusBanner } from './components/NetworkStatusBanner';
+import { RealtimeShipmentListener } from './components/RealtimeShipmentListener';
+import { RetailStore, UserProfile } from './types';
+import { logisticsStore } from './services/store';
+import { ShieldCheck, Clock, AlertTriangle, LogIn, ChevronLeft, ChevronRight, Bell, Smartphone, Lock } from 'lucide-react';
+import { useToast } from './context/ToastContext';
+import { canAccess } from './utils/rbac';
+
+const LiveClockBadge: React.FC = () => {
+  const [time, setTime] = useState(() =>
+    new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' WIB'
+  );
+
+  useEffect(() => {
+    const updateTime = () => {
+      setTime(
+        new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' WIB'
+      );
+    };
+    const timer = setInterval(updateTime, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <div className="hidden xl:flex items-center gap-1.5 px-2 text-slate-500 dark:text-slate-400 font-mono text-xs tabular-nums">
+      <Clock className="w-3.5 h-3.5 text-slate-400" />
+      <span>{time}</span>
+    </div>
+  );
+};
+
+export default function App() {
+  const [currentTab, setCurrentTab] = useState<NavTab>(() => {
+    try {
+      const searchParams = new URLSearchParams(window.location.search);
+      const tabParam = searchParams.get('tab');
+      if (tabParam) return tabParam as NavTab;
+      if (window.location.hash) {
+        const hash = window.location.hash.replace('#', '');
+        if (hash) return hash as NavTab;
+      }
+      if (typeof navigator !== 'undefined' && navigator.userAgent && navigator.userAgent.includes('AKKDriverMobile')) {
+        return 'driver_portal';
+      }
+    } catch {}
+    return 'dashboard';
+  });
+  const [preselectedStore, setPreselectedStore] = useState<RetailStore | null>(null);
+  const [isAuthOpen, setIsAuthOpen] = useState(true);
+  const [authDefaultTab, setAuthDefaultTab] = useState<'login' | 'register'>('login');
+  const [currentUser, setCurrentUser] = useState<UserProfile>(logisticsStore.getCurrentUser());
+  const [isSidebarMinimized, setIsSidebarMinimized] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('akk_sidebar_minimized') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const { notifications, setOnNavigateCallback, setIsDrawerOpen } = useToast();
+  const unreadCount = notifications.filter(n => !n.read).length;
+
+  useEffect(() => {
+    setOnNavigateCallback((tab) => setCurrentTab(tab as NavTab));
+  }, [setOnNavigateCallback]);
+
+  const toggleSidebar = () => {
+    setIsSidebarMinimized(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('akk_sidebar_minimized', String(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    try {
+      const searchParams = new URLSearchParams(window.location.search);
+      if (searchParams.get('tab') === 'driver_portal' || (typeof navigator !== 'undefined' && navigator.userAgent && navigator.userAgent.includes('AKKDriverMobile'))) {
+        if (currentUser.role !== 'driver') {
+          logisticsStore.setCurrentRole('driver');
+        }
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    return logisticsStore.subscribe(() => {
+      const user = logisticsStore.getCurrentUser();
+      setCurrentUser(user);
+      if (currentTab === 'users' || !canAccess(user, currentTab)) {
+        if (user.role === 'driver' || user.role === 'crew_helper') {
+          setCurrentTab('driver_portal');
+        } else if (user.role === 'super_admin') {
+          setCurrentTab('dashboard');
+        } else {
+          setCurrentTab('operational_dashboard');
+        }
+      }
+    });
+  }, [currentTab]);
+
+  useEffect(() => {
+    const user = logisticsStore.getCurrentUser();
+    if (currentTab === 'users' || !canAccess(user, currentTab)) {
+      if (user.role === 'driver' || user.role === 'crew_helper') {
+        setCurrentTab('driver_portal');
+      } else if (user.role !== 'super_admin') {
+        setCurrentTab('operational_dashboard');
+      }
+    }
+  }, []);
+
+  const getTabTitle = (tab: NavTab): string => {
+    switch (tab) {
+      case 'dashboard': return 'Dashboard Eksekutif (Rangkuman Operasional & Penjualan)';
+      case 'driver_portal': return 'Portal Driver Mobile (Tugas Pengiriman & Status Supir)';
+      case 'driver_reports': return 'Laporan & Kendala Kiriman Kru (Driver & Helper)';
+      case 'analytics_reports': return 'Laporan Analitik Performa Armada & Kru';
+      case 'operational_dashboard': return 'Dashboard Logistik & Operasional';
+      case 'schedules': return 'Manajemen Jadwal Pengiriman & Muat';
+      case 'fleets': return 'Manajemen Armada & Kru Supir';
+      case 'spareparts': return 'Manajemen Stok & Pemakaian Sparepart';
+      case 'fuel_efficiency': return 'Efisiensi Bahan Bakar (BBM) & Konsumsi Armada';
+      case 'crew_history': return 'Riwayat Pengiriman & Audit SLA Kru';
+      case 'tracking_eval': return 'Audit Evaluasi Muat & Bongkar (Excel)';
+      case 'tracksolid': return 'Integrasi GPS Tracksolid Pro';
+      case 'fleet_forms': return 'Formulir Operasional Armada';
+      case 'sales_dashboard': return 'Sales Hub: Dashboard & SLA Penjualan';
+      case 'sales_activities': return 'Sales Hub: Aktivitas Harian Admin';
+      case 'sales_schedules': return 'Sales Hub: Jadwal Produksi & Kirim';
+      case 'sales_loading_duration': return 'Sales Hub: Durasi Muat Real-Time';
+      case 'sales_skill_matrix': return 'Sales Hub: Matriks Keterampilan Admin';
+      case 'sales_jobdesk': return 'Sales Hub: Konfigurasi SOP & Jobdesk';
+      case 'sales_kpi': return 'Sales Hub: Data Kinerja & KPI Penjualan';
+      case 'sales_kpi_individual': return 'KPI Individu Masing-masing Admin Penjualan';
+      case 'sales_kpi_fines': return 'Data Akumulasi Denda Checker';
+      case 'sales_kpi_nusantara': return 'Persentase Kiriman Nusantara';
+      case 'sales_kpi_omset': return 'Omset Admin Penjualan';
+      case 'hr_dashboard': return 'Dashboard Departemen HR (Presensi & Master Staff)';
+      case 'ga_security': return 'General Affair (GA): Security & Pos Keamanan Pabrik';
+      case 'ga_hk': return 'General Affair (GA): Housekeeping (HK) & Kebersihan 5R';
+      case 'ga_aset': return 'General Affair (GA): Manajemen Aset & Fasilitas Pabrik';
+      case 'training_videos': return 'Training & Development: Video Pembelajaran & SOP';
+      case 'training_karyawan': return 'Training & Development: Pelatihan & Sertifikasi Kru';
+      case 'finance_dashboard': return 'Dashboard Departemen Finance & Tax';
+      case 'warehouse_dashboard': return 'Dashboard Departemen Gudang';
+      case 'purchasing_dashboard': return 'Dashboard Departemen Adm. Pembelian';
+      case 'purchasing_stock_overview': return 'Analisa Stok: Ringkasan & Status';
+      case 'purchasing_stock_forecast': return 'Analisa Stok: Prediksi Kebutuhan';
+      case 'marketing_online': return 'Departemen Marketing: Prospek & Proaktif Online';
+      case 'marketing_offline': return 'Departemen Marketing: Canvasing & Kunjungan Offline';
+      case 'activity_log': return 'Audit Log & Aktivitas Sistem';
+      case 'customer_map': return 'Pemetaan Toko Retail & Mitra';
+      case 'users': return 'Approval & Manajemen Pengguna';
+      case 'architecture': return 'Arsitektur Database Supabase SQL';
+      case 'e2e_testing': return 'Pusat Pengujian E2E & Simulasi Akun Pengguna';
+      default: return 'Sistem Operasional AKK';
+    }
+  };
+
+  const handleScheduleForStore = (store: RetailStore) => {
+    setPreselectedStore(store);
+    setCurrentTab('schedules');
+  };
+
+  const handleOpenAuth = (defaultTab: 'login' | 'register' = 'login') => {
+    setAuthDefaultTab(defaultTab);
+    setIsAuthOpen(true);
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex antialiased selection:bg-amber-500 selection:text-slate-950">
+      {/* Network Connectivity & Offline Real-Time Tracking Warning Banner */}
+      <NetworkStatusBanner />
+      <RealtimeShipmentListener />
+
+      {/* Sidebar Navigation - Left Rail (Fixed on Desktop, Drawer on Mobile) */}
+      <Sidebar
+        currentTab={currentTab}
+        onSelectTab={setCurrentTab}
+        onOpenAuth={handleOpenAuth}
+        isMinimized={isSidebarMinimized}
+        onToggleMinimize={toggleSidebar}
+      />
+
+      {/* Main Content Area with offset for Sidebar */}
+      <div className={`flex-1 flex flex-col min-h-screen w-full transition-all duration-300 ${isSidebarMinimized ? 'lg:pl-20' : 'lg:pl-72'}`}>
+        {/* Desktop Top Header Bar with Clean Modern Styling */}
+        <header className="hidden lg:flex sticky top-0 z-20 h-14 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-6 lg:px-8 items-center justify-between shadow-xs">
+          <div className="flex items-center gap-3">
+            {/* Quick Toggle Button for Sidebar Minimization */}
+            <button
+              onClick={toggleSidebar}
+              className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-800 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+              title={isSidebarMinimized ? "Perlebar Sidebar" : "Minimalkan Sidebar"}
+              aria-label="Toggle Sidebar Size"
+            >
+              {isSidebarMinimized ? <ChevronRight className="w-4 h-4 text-blue-600 dark:text-blue-400" /> : <ChevronLeft className="w-4 h-4" />}
+            </button>
+
+            <div>
+              <div className="text-[10px] uppercase font-semibold tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                <span>PT Anugrah Kemasan Kreatif</span>
+                <span className="text-slate-300 dark:text-slate-600">&bull;</span>
+                <span className="text-slate-600 dark:text-slate-300 font-medium">Banyuwangi Hub</span>
+              </div>
+              <h1 className="text-sm font-bold text-slate-900 dark:text-white tracking-tight">
+                {getTabTitle(currentTab)}
+              </h1>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2.5">
+            {/* Quick Driver Mobile Mode Switcher */}
+            <button
+              onClick={() => setCurrentTab(currentTab === 'driver_portal' ? 'dashboard' : 'driver_portal')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer border ${
+                currentTab === 'driver_portal'
+                  ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                  : 'bg-slate-50 dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
+              }`}
+              title="Buka Tampilan Khusus Mobile Supir (Driver Portal)"
+            >
+              <Smartphone className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+              <span>{currentTab === 'driver_portal' ? 'Portal Admin' : 'Mode Driver Mobile'}</span>
+            </button>
+
+            {/* Clean Segmented Theme Switcher */}
+            <ThemeSwitcher variant="segmented" />
+
+            {/* Live Time */}
+            <LiveClockBadge />
+
+            {/* Notification Bell Button */}
+            <button
+              onClick={() => setIsDrawerOpen(true)}
+              className="relative p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer flex items-center justify-center"
+              title="Pusat Notifikasi Admin"
+            >
+              <Bell className="w-4 h-4" />
+              {unreadCount > 0 && (
+                <span className="absolute -top-1 -right-1 flex h-4 min-w-4 px-1 items-center justify-center rounded-full bg-blue-600 text-[9px] font-bold text-white shadow-xs">
+                  {unreadCount}
+                </span>
+              )}
+            </button>
+
+            {/* Quick Profile Pill */}
+            <button
+              onClick={() => handleOpenAuth('login')}
+              className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer"
+              title="Ganti Akun atau Kelola Sesi"
+            >
+              <div className="w-5 h-5 rounded-full bg-blue-600 text-white font-bold text-[10px] flex items-center justify-center">
+                {currentUser.fullName ? currentUser.fullName.charAt(0).toUpperCase() : 'U'}
+              </div>
+              <span className="font-medium max-w-[110px] truncate text-slate-800 dark:text-slate-100">
+                {currentUser.role === 'super_admin' ? 'Super Admin' : currentUser.fullName}
+              </span>
+            </button>
+          </div>
+        </header>
+
+        {/* Pending Approval Top Banner Alert if current user is pending */}
+        {currentUser.status === 'pending' && (
+          <div className="bg-amber-500/15 border-b border-amber-500/30 px-4 py-2.5 text-xs text-amber-200 flex flex-wrap items-center justify-between gap-2 mt-14 lg:mt-0">
+            <div className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-amber-400 shrink-0 animate-pulse" />
+              <span>
+                <strong>Perhatian:</strong> Akun Anda (<em>{currentUser.fullName}</em>) saat ini berstatus <strong>Menunggu Persetujuan (Pending Approval)</strong> dari Manager Operasional AKK.
+              </span>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => {
+                  logisticsStore.approveUser(currentUser.id);
+                }}
+                className="px-2.5 py-1 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[11px] shadow transition cursor-pointer"
+              >
+                Simulasi: Setujui Sekarang
+              </button>
+              <button
+                onClick={() => setCurrentTab('users')}
+                className="underline hover:text-white text-[11px]"
+              >
+                Lihat Menu Approval &rarr;
+              </button>
+            </div>
+          </div>
+        )}
+
+        <main className={`flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 ${
+          currentUser.status === 'pending' ? 'pt-4' : 'pt-18 lg:pt-6'
+        }`}>
+          {currentTab === 'dashboard' && (
+            canAccess(currentUser, 'dashboard') ? (
+              <ExecutiveDashboard onNavigate={(tab) => setCurrentTab(tab as NavTab)} />
+            ) : (
+              <div className="max-w-2xl mx-auto mt-16 p-8 rounded-2xl bg-slate-900 border border-amber-500/30 text-center space-y-6 shadow-2xl">
+                <div className="w-16 h-16 mx-auto rounded-full bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                  <Lock className="w-8 h-8" />
+                </div>
+                <div className="space-y-2">
+                  <h2 className="text-xl font-bold text-amber-300">Akses Terbatas: Dashboard Eksekutif</h2>
+                  <p className="text-sm text-slate-300">
+                    Akun Anda (<span className="text-amber-400 font-semibold">{currentUser.fullName}</span> / <span className="text-cyan-400">{currentUser.role}</span>) tidak memiliki izin untuk melihat Dashboard Eksekutif.
+                    Fitur ini dikhususkan untuk manajemen eksekutif dan akun dengan hak akses khusus yang dikonfigurasi melalui Manajemen Hak Akses.
+                  </p>
+                </div>
+                <div className="pt-4 flex justify-center gap-3">
+                  <button
+                    onClick={() => setCurrentTab('operational_dashboard')}
+                    className="px-5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-semibold text-xs transition cursor-pointer shadow-[0_0_12px_rgba(6,182,212,0.4)]"
+                  >
+                    Ke Dashboard Operasional &rarr;
+                  </button>
+                  <button
+                    onClick={() => setCurrentTab('users')}
+                    className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs transition cursor-pointer border border-slate-700"
+                  >
+                    Buka Manajemen Hak Akses
+                  </button>
+                </div>
+              </div>
+            )
+          )}
+
+          {currentTab === 'operational_dashboard' && (
+            <DashboardOverview onNavigate={(tab) => setCurrentTab(tab as NavTab)} />
+          )}
+
+          {currentTab === 'driver_reports' && (
+            <DriverReportsManagement />
+          )}
+
+          {currentTab === 'analytics_reports' && (
+            <AnalyticsReportingModule />
+          )}
+
+          {currentTab === 'schedules' && (
+            <ScheduleManagement
+              preselectedStore={preselectedStore}
+              onClearPreselectedStore={() => setPreselectedStore(null)}
+            />
+          )}
+
+          {currentTab === 'fleets' && (
+            <FleetCrewManagement
+              onNavigateToSpareParts={() => setCurrentTab('spareparts')}
+              onNavigateToFuelEfficiency={() => setCurrentTab('fuel_efficiency')}
+              onNavigateToTracksolid={() => setCurrentTab('tracksolid')}
+            />
+          )}
+
+          {currentTab === 'spareparts' && (
+            <SparePartManagement onNavigateToFleets={() => setCurrentTab('fleets')} />
+          )}
+
+          {currentTab === 'fuel_efficiency' && (
+            <FuelEfficiencyManagement onNavigateToFleets={() => setCurrentTab('fleets')} />
+          )}
+
+          {currentTab === 'crew_history' && (
+            <CrewDeliveryHistoryView />
+          )}
+
+          {currentTab === 'users' && (
+            <UserManagement
+              onNavigateToE2E={() => setCurrentTab('e2e_testing')}
+            />
+          )}
+
+          {currentTab === 'tracking_eval' && (
+            <ExcelTrackingEvaluator />
+          )}
+
+          {currentTab === 'customer_map' && (
+            <CustomerMapping onScheduleForStore={handleScheduleForStore} />
+          )}
+
+          {currentTab === 'tracksolid' && (
+            <TracksolidGateway />
+          )}
+
+          {currentTab === 'fleet_forms' && (
+            <FleetFormCenter />
+          )}
+
+          {currentTab === 'sales_dashboard' && (
+            <SalesAdminHub
+              activeSubTab="dashboard"
+              onSelectSubTab={(sub) => setCurrentTab(('sales_' + sub) as NavTab)}
+            />
+          )}
+
+          {currentTab === 'sales_activities' && (
+            <SalesAdminHub
+              activeSubTab="activities"
+              onSelectSubTab={(sub) => setCurrentTab(('sales_' + sub) as NavTab)}
+            />
+          )}
+
+          {currentTab === 'sales_schedules' && (
+            <SalesAdminHub
+              activeSubTab="schedules"
+              onSelectSubTab={(sub) => setCurrentTab(('sales_' + sub) as NavTab)}
+            />
+          )}
+
+          {currentTab === 'sales_loading_duration' && (
+            <SalesAdminHub
+              activeSubTab="loading_duration"
+              onSelectSubTab={(sub) => setCurrentTab(('sales_' + sub) as NavTab)}
+            />
+          )}
+
+          {currentTab === 'sales_skill_matrix' && (
+            <SalesAdminHub
+              activeSubTab="skill_matrix"
+              onSelectSubTab={(sub) => setCurrentTab(('sales_' + sub) as NavTab)}
+            />
+          )}
+
+          {currentTab === 'sales_jobdesk' && (
+            <SalesAdminHub
+              activeSubTab="jobdesk"
+              onSelectSubTab={(sub) => setCurrentTab(('sales_' + sub) as NavTab)}
+            />
+          )}
+
+          {(currentTab === 'sales_kpi' || (currentTab && currentTab.startsWith('sales_kpi_'))) && (
+            <SalesKpi defaultTab={currentTab} onChangeTab={(tab) => setCurrentTab(tab as NavTab)} />
+          )}
+
+          {currentTab === 'activity_log' && (
+            <SystemActivityLog />
+          )}
+
+          {(currentTab === 'hr_dashboard' || currentTab === 'ga_security' || currentTab === 'ga_hk' || currentTab === 'ga_aset' || currentTab === 'training_videos' || currentTab === 'training_karyawan') && (
+            <DepartmentDashboard 
+              dashboardType="hr" 
+              initialHrTab={
+                currentTab === 'ga_security' ? 'ga_security' :
+                currentTab === 'ga_hk' ? 'ga_hk' :
+                currentTab === 'ga_aset' ? 'ga_aset' :
+                currentTab === 'training_videos' ? 'training_videos' :
+                currentTab === 'training_karyawan' ? 'training_karyawan' : 'hr_core'
+              } 
+            />
+          )}
+          {currentTab === 'finance_dashboard' && (
+            <DepartmentDashboard dashboardType="finance" />
+          )}
+          {currentTab === 'warehouse_dashboard' && (
+            <DepartmentDashboard dashboardType="warehouse" />
+          )}
+          {currentTab === 'purchasing_dashboard' && (
+            <DepartmentDashboard dashboardType="purchasing" />
+          )}
+          {currentTab === 'purchasing_stock_overview' && (
+            <PurchasingStockAnalysis tab="overview" />
+          )}
+          {currentTab === 'purchasing_stock_forecast' && (
+            <PurchasingStockAnalysis tab="forecast" />
+          )}
+
+          {(currentTab === 'marketing_online' || currentTab === 'marketing_offline') && (
+            <MarketingDashboard activeTab={currentTab} />
+          )}
+
+          {currentTab === 'driver_portal' && (
+            <DriverMobileView
+              currentUser={currentUser}
+              initialDriverId={logisticsStore.getActiveDriverCrew()?.id}
+              onBackToPortal={() => setCurrentTab('dashboard')}
+            />
+          )}
+
+          {currentTab === 'architecture' && (
+            <SupabaseSqlArchitecture />
+          )}
+
+          {currentTab === 'e2e_testing' && (
+            <E2ETesterModule onNavigate={(tab) => setCurrentTab(tab)} />
+          )}
+        </main>
+
+        {/* Enterprise AKK Footer */}
+        <footer className="bg-slate-950 border-t border-slate-900 py-6 text-slate-500 text-xs text-center mt-auto">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-slate-400">
+              <span className="w-2 h-2 rounded-full bg-amber-500 inline-block"></span>
+              <span>PT Anugrah Kemasan Kreatif &bull; Sistem Distribusi & Manajemen Operasional</span>
+            </div>
+            <div className="flex items-center gap-4 text-slate-500 text-[11px]">
+              <span>Next.js App Router</span>
+              <span>Supabase RLS & PostgreSQL</span>
+              <span>Tracksolid Telematics</span>
+            </div>
+          </div>
+        </footer>
+      </div>
+
+      {/* Authentication Modal (Login & Register) */}
+      <AuthModal
+        isOpen={isAuthOpen}
+        onClose={() => setIsAuthOpen(false)}
+        defaultTab={authDefaultTab}
+      />
+      <HelpDeskChat activeTab={currentTab} user={currentUser} />
+    </div>
+  );
+}
