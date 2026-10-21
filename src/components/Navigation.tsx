@@ -102,7 +102,7 @@ export const Navigation: React.FC<NavigationProps> = ({ currentTab, onSelectTab 
                 <div className="text-xs font-bold text-white leading-tight">{currentUser.fullName}</div>
                 <div className="text-[10px] text-slate-400 capitalize">
                   {currentUser.role === 'super_admin' && 'Super Admin (Logistik Mgr)'}
-                  {currentUser.role === 'spv_logistik' && 'Dispatcher / Planner'}
+                  {currentUser.role === 'spv_logistik' && 'SPV Logistik / Planner'}
                   {currentUser.role === 'driver' && 'Driver / Kru Lapangan'}
                   {currentUser.role === 'sales_admin' && 'Adm. Penjualan'}
                 </div>
@@ -138,7 +138,7 @@ export const Navigation: React.FC<NavigationProps> = ({ currentTab, onSelectTab 
                   }`}
                 >
                   <div>
-                    <div className="font-bold">Dispatcher / Route Planner</div>
+                    <div className="font-bold">SPV Logistik / Route Planner</div>
                     <div className="text-[10px] text-slate-400">Penjadwalan, armada, tiket kapal</div>
                   </div>
                   {currentUser.role === 'spv_logistik' && <Shield className="w-3.5 h-3.5 text-blue-400" />}

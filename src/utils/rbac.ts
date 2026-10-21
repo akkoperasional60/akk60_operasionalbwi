@@ -1,7 +1,7 @@
 import { UserProfile, UserRole } from '../types';
 
-export const isDispatcherRole = (role: UserRole | string): boolean => {
-  return role === 'spv_logistik' || role === 'dispatcher' || role === 'operasional';
+export const isSpvLogistikRole = (role: UserRole | string): boolean => {
+  return role === 'spv_logistik' || role === 'spv logistik' || role === 'operasional';
 };
 
 export const isDriverRole = (role: UserRole | string): boolean => {
@@ -17,8 +17,8 @@ export const getUserRoleDisplayTitle = (role: UserRole | string): string => {
     case 'super_admin':
       return 'Super Administrator (Full Access)';
     case 'spv_logistik':
-    case 'dispatcher':
-      return 'Dispatcher / SPV Logistik';
+    case 'spv logistik':
+      return 'SPV Logistik';
     case 'driver':
       return 'Driver / Pengemudi Utama';
     case 'crew_helper':
@@ -63,8 +63,8 @@ export const canAccess = (user: UserProfile, moduleId: string, subMenuId?: strin
     return false;
   }
 
-  // 3. Dispatcher / SPV Logistik Role Boundaries: Operational logistics, scheduling, fleets, tracking, reports
-  if (isDispatcherRole(role)) {
+  // 3. SPV Logistik Role Boundaries: Operational logistics, scheduling, fleets, tracking, reports
+  if (isSpvLogistikRole(role)) {
     // Restricted from Super Admin user management, system architecture, and finance configuration
     if (['users', 'sistem_pengguna', 'architecture', 'finance_tax', 'finance_dashboard'].includes(moduleId)) {
       return false;
@@ -80,6 +80,3 @@ export const canAccess = (user: UserProfile, moduleId: string, subMenuId?: strin
 
   return true;
 };
-
-
-

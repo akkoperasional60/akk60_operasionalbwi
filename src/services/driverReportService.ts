@@ -112,7 +112,7 @@ class DriverReportService {
         longitude: 114.1530,
         gmapsUrl: 'https://www.google.com/maps?q=-8.3650,114.1530',
         status: 'verified',
-        verifiedBy: 'Dispatcher DC',
+        verifiedBy: 'SPV Logistik',
         verifiedAt: new Date(Date.now() - 86400000 - 1000 * 60 * 60).toISOString()
       }
     ];

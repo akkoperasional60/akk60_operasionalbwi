@@ -149,6 +149,25 @@ export interface Schedule {
   podPhotoTimestamp?: string;
   podReceiverName?: string;
   podConditionNote?: string;
+  transferRequest?: {
+    status: 'pending' | 'approved' | 'rejected';
+    requestedAt: string;
+    requestedByDriverId: string;
+    requestedByDriverName: string;
+    reason: string;
+    transferType: string;
+    notes?: string;
+    gpsPhotoUrl?: string;
+    constraintNote?: string;
+  };
+  leaveRequest?: {
+    status: 'pending' | 'approved' | 'rejected';
+    requestedAt: string;
+    person: 'driver' | 'helper' | 'keduanya';
+    personName: string;
+    leaveType: string;
+    notes?: string;
+  };
 }
 
 export interface CrewDeliveryHistory {
@@ -589,8 +608,11 @@ export interface DriverShiftCheckin {
 export interface SwapShiftRequest {
   id: string;
   requesterCrewId: string;
+  requesterCrewName?: string;
   targetCrewId: string;
-  scheduleId: string;
+  targetCrewName?: string;
+  scheduleId?: string;
+  shiftDate?: string;
   reason: string;
   status: 'pending' | 'approved' | 'rejected';
   requestedAt: string;

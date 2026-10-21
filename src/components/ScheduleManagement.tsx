@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Calendar, Plus, Truck, Store, User, Users, Ship, Clock, CheckCircle2, AlertTriangle, FileText, Search, ChevronRight, ChevronDown, ChevronUp, CalendarDays, X, LayoutList, MapPin, Printer, ShieldAlert, Edit, Trash2, Sparkles, CalendarCheck, Repeat, Layers, Move, FileSpreadsheet, History, RefreshCw, Zap, Download, Loader2, Compass, Navigation } from 'lucide-react';
+import { Calendar, Plus, Truck, Store, User, Users, Ship, Clock, CheckCircle2, AlertTriangle, FileText, Search, ChevronRight, ChevronDown, ChevronUp, CalendarDays, X, LayoutList, MapPin, Printer, ShieldAlert, Edit, Trash2, Sparkles, CalendarCheck, Repeat, Layers, Move, FileSpreadsheet, History, RefreshCw, Zap, Download, Loader2, Compass, Navigation, ArrowRightLeft, UserX } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Schedule, RetailStore, Fleet, Crew, ShipmentStatus, CrewDeliveryHistory } from '../types';
 import { logisticsStore } from '../services/store';
@@ -21,6 +21,7 @@ import { GoogleSheetsAdminScheduleView } from './GoogleSheetsAdminScheduleView';
 import { ScheduleRouteMap } from './ScheduleRouteMap';
 import { downloadScheduleManifestPdf } from '../utils/suratJalanPdfGenerator';
 import { useToast } from '../context/ToastContext';
+import { getAreaScheduleTiming, calculateScheduleTimestamps } from '../utils/areaScheduleRules';
 
 interface ScheduleManagementProps {
   preselectedStore?: RetailStore | null;
@@ -30,6 +31,7 @@ interface ScheduleManagementProps {
 
 const AREA_MAP: Record<string, string> = {
   'GROSIR1': 'GROSIR 1',
+  'SITUBONDO': 'SITUBONDO',
   'RITEL_ROGOJAMPI': 'RITEL ROGOJAMPI',
   'RITEL_SONGGON': 'RITEL SONGGON',
   'SUSULAN_ROGOJAMPI_MUNCAR': 'SUSULAN ROGOJAMPI-MUNCAR',
@@ -676,12 +678,13 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
     const formattedDate = `${dd} ${months[d.getMonth()]} ${yyyy}`;
     const shortDate = `${dd} ${months[d.getMonth()].substring(0, 3)}`;
 
+    const timing = getAreaScheduleTiming(sch.areaName, sch.store?.storeName, sch.store?.city);
     const depTime = sch.departureDate 
       ? new Date(sch.departureDate).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
-      : '07:30';
+      : timing.departureLabel.replace(' WIB', '');
     const arrTime = sch.estimatedArrival
       ? new Date(sch.estimatedArrival).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
-      : '17:00';
+      : timing.returnLabel.replace(' WIB', '');
 
     return {
       dateKey,
@@ -690,6 +693,7 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
       shortDate,
       depTime: `${depTime} WIB`,
       arrTime: `${arrTime} WIB`,
+      timing,
       rawDate: d
     };
   };
@@ -868,7 +872,7 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
           <div>
             <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-indigo-500/10 text-indigo-400 text-xs font-semibold mb-2">
               <Calendar className="w-3.5 h-3.5" />
-              <span>Dispatcher & Route Planner Hub</span>
+              <span>SPV Logistik & Route Planner Hub</span>
             </div>
             <h2 className="text-xl font-bold text-white tracking-tight">
               Manajemen Jadwal Pengiriman & Penugasan Armada
@@ -2002,7 +2006,19 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                   <select
                     required
                     value={newSchedule.storeId}
-                    onChange={(e) => setNewSchedule({ ...newSchedule, storeId: e.target.value })}
+                    onChange={(e) => {
+                      const selectedVal = e.target.value;
+                      const baseDate = newSchedule.departureDate ? new Date(newSchedule.departureDate) : new Date();
+                      const timestamps = calculateScheduleTimestamps(baseDate, selectedVal);
+                      const isBaliIsland = selectedVal.includes('DENPASAR') || selectedVal.includes('SINGARAJA') || selectedVal.includes('NEGARA');
+                      setNewSchedule({
+                        ...newSchedule,
+                        storeId: selectedVal,
+                        departureDate: timestamps.departureDate,
+                        estimatedArrival: timestamps.estimatedArrival,
+                        isInterIsland: isBaliIsland
+                      });
+                    }}
                     className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white font-semibold"
                   >
                     <option value="">-- Pilih Area --</option>
@@ -2011,27 +2027,47 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                     <option value="RITEL_SONGGON">RITEL SONGGON</option>
                     <option value="SUSULAN_ROGOJAMPI_MUNCAR">SUSULAN ROGOJAMPI-MUNCAR</option>
                     <option value="JAJAG_RETAIL">JAJAG RETAIL</option>
-                    <option value="DENPASAR2">DENPASAR 2</option>
+                    <option value="DENPASAR2">DENPASAR 2 (Malam 21.00 WIB)</option>
                     <option value="SUSULAN_SANGGAR_JAJAG">SUSULAN SANGGAR-JAJAG</option>
-                    <option value="DENPASAR1">DENPASAR 1</option>
+                    <option value="DENPASAR1">DENPASAR 1 (Malam 21.00 WIB)</option>
                     <option value="BWI_KOTA_SELATAN">BWI KOTA SELATAN</option>
                     <option value="KETAPANG_WONGSOREJO">KETAPANG - WONGSOREJO</option>
                     <option value="RITEL_SRONO">RITEL SRONO</option>
                     <option value="GALEKAN">GALEKAN</option>
-                    <option value="JEMBER_BARAT">JEMBER BARAT</option>
+                    <option value="JEMBER_BARAT">JEMBER BARAT (Malam 21.00 WIB)</option>
                     <option value="RITEL_KALIBARU">RITEL KALIBARU</option>
                     <option value="PURWO_DAMBUNTUNG">PURWO DAMBUNTUNG</option>
                     <option value="PURWO_PASAR">PURWO PASAR</option>
                     <option value="SUMBERAYU_RETAIL">SUMBERAYU RETAIL</option>
-                    <option value="SSLN_SINGARAJA">SSLN SINGARAJA</option>
+                    <option value="SSLN_SINGARAJA">SSLN SINGARAJA (Malam 21.00 WIB)</option>
                     <option value="SEMPU_KALISTAIL">SEMPU KALISTAIL</option>
-                    <option value="JEMBER_KOTA">JEMBER KOTA</option>
-                    <option value="BONDOWOSO">BONDOWOSO</option>
-                    <option value="SSLN_STB_BDWS">SSLN STB BDWS</option>
+                    <option value="JEMBER_KOTA">JEMBER KOTA (Malam 21.00 WIB)</option>
+                    <option value="BONDOWOSO">BONDOWOSO (Malam 21.00 WIB)</option>
+                    <option value="SITUBONDO">SITUBONDO (Pagi 07.15 WIB)</option>
+                    <option value="SSLN_STB_BDWS">SSLN STB BDWS (Pagi 07.30 WIB)</option>
                     <option value="RITEL_SANGGAR">RITEL SANGGAR</option>
-                    <option value="NEGARA">NEGARA</option>
-                    <option value="JEMBER_SELATAN">JEMBER SELATAN</option>
+                    <option value="NEGARA">NEGARA (Pagi 07.15 WIB)</option>
+                    <option value="JEMBER_SELATAN">JEMBER SELATAN (Malam 21.00 WIB)</option>
                   </select>
+
+                  {newSchedule.storeId && (
+                    <div className="mt-2 p-2 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-slate-300 flex items-center justify-between">
+                      {(() => {
+                        const timing = getAreaScheduleTiming(newSchedule.storeId);
+                        return (
+                          <>
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                              <span className="truncate">SOP: Berangkat <strong>{timing.departureLabel}</strong> • Kepulangan <strong>{timing.isNextDayReturn ? 'Besok ' : ''}{timing.returnLabel}</strong></span>
+                            </div>
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 ${timing.isNightDeparture ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'}`}>
+                              {timing.isNightDeparture ? '🌙 Berangkat Malam' : '☀️ Berangkat Pagi'}
+                            </span>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -2147,11 +2183,11 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                     type="button"
                     onClick={() => {
                       const now = new Date();
-                      const arr = new Date(now.getTime() + 4 * 3600000);
+                      const timestamps = calculateScheduleTimestamps(now, newSchedule.storeId || 'JAJAG_RETAIL');
                       setNewSchedule({
                         ...newSchedule,
-                        departureDate: now.toISOString().substring(0, 16),
-                        estimatedArrival: arr.toISOString().substring(0, 16)
+                        departureDate: timestamps.departureDate,
+                        estimatedArrival: timestamps.estimatedArrival
                       });
                     }}
                     className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 cursor-pointer"
@@ -2163,12 +2199,11 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                     onClick={() => {
                       const tomorrow = new Date();
                       tomorrow.setDate(tomorrow.getDate() + 1);
-                      tomorrow.setHours(7, 30, 0, 0);
-                      const arr = new Date(tomorrow.getTime() + 8 * 3600000);
+                      const timestamps = calculateScheduleTimestamps(tomorrow, newSchedule.storeId || 'JAJAG_RETAIL');
                       setNewSchedule({
                         ...newSchedule,
-                        departureDate: tomorrow.toISOString().substring(0, 16),
-                        estimatedArrival: arr.toISOString().substring(0, 16)
+                        departureDate: timestamps.departureDate,
+                        estimatedArrival: timestamps.estimatedArrival
                       });
                     }}
                     className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 cursor-pointer flex items-center gap-1"

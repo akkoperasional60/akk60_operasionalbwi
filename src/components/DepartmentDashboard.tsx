@@ -429,7 +429,7 @@ const HRDashboard: React.FC<{ activeHrTab?: HrSubTab; onSelectHrTab?: (tab: HrSu
                   <span>Buku Catatan Log Pos Keamanan (Gate Log Terintegrasi)</span>
                 </h4>
                 <p className="text-[10px] text-slate-400 mt-0.5">
-                  Terupdate otomatis saat driver/dispatcher konfirmasi Gate-Out atau security input kedatangan armada.
+                  Terupdate otomatis saat driver/spv logistik konfirmasi Gate-Out atau security input kedatangan armada.
                 </p>
               </div>
               <span className="text-[11px] text-slate-400 font-mono">Tanggal: {new Date().toLocaleDateString('id-ID', { dateStyle: 'long' })}</span>

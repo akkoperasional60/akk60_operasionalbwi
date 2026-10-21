@@ -420,6 +420,42 @@ class LogisticsStore {
     this.users = this.loadFromStorage(STORAGE_KEYS.USERS, INITIAL_PROFILES);
     this.currentUser = this.loadFromStorage(STORAGE_KEYS.CURRENT_USER, INITIAL_PROFILES[0]);
 
+    // Pastikan jadwal Denpasar untuk supir Budiono selalu tersedia & terstandarisasi sesuai SOP AKK
+    const hasBudionoDps = this.schedules.some(s => 
+      s.id === 'sch-budiono-dps' || 
+      ((s.crewId === 'crw-06' || s.crew?.name?.toLowerCase().includes('budiono')) && 
+       (s.areaName?.includes('DENPASAR') || s.storeId === 'str-04'))
+    );
+    if (!hasBudionoDps) {
+      const dpsStore = this.stores.find(s => s.id === 'str-04') || this.stores[0];
+      const budCrew = this.crews.find(c => c.id === 'crw-06' || c.name.toLowerCase().includes('budiono')) || this.crews[0];
+      const flt = this.fleets.find(f => f.plateNumber === 'P 8509 VQ') || this.fleets[0];
+      this.schedules.unshift({
+        id: 'sch-budiono-dps',
+        trackingNumber: 'TRK-2026-DPS-BUDIONO',
+        originName: 'Gudang Pusat Banyuwangi DC',
+        originCoords: [-8.1906, 114.3708],
+        storeId: 'str-04',
+        store: dpsStore,
+        fleetId: flt.id,
+        fleet: flt,
+        crewId: budCrew.id,
+        crew: budCrew,
+        status: 'scheduled',
+        areaName: 'DENPASAR 1',
+        departureDate: '2026-09-17T21:00:00+07:00',
+        estimatedArrival: '2026-09-18T17:30:00+07:00',
+        cargoDescription: 'Karton Box & FMCG Dry Food Denpasar 1 (Palet Standar)',
+        cargoWeightTon: 14.5,
+        isInterIsland: true,
+        ferryBookingCode: 'ASDP-KTG-GLM-99411',
+        transitPort: 'Pelabuhan Ketapang Banyuwangi -> Gilimanuk Bali',
+        notes: 'Jadwal Luar Kota Denpasar: Berangkat nanti malam 21.00 WIB, target kepulangan besok 17.30 WIB.',
+        createdAt: new Date().toISOString()
+      });
+      this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
+    }
+
     // Ensure super admin user has generic name 'Super Admin' and email 'bayun791@gmail.com'
     const superAdminUser = this.users.find(u => u.role === 'super_admin' || u.id === 'usr-001');
     if (superAdminUser) {
@@ -1634,7 +1670,7 @@ class LogisticsStore {
   }
 
   /**
-   * Returns the official name of the Koordinator Logistik / Dispatcher.
+   * Returns the official name of the Koordinator Logistik / SPV Logistik.
    * Dynamically integrates with user management roles and names:
    * 1. If currently logged-in user is an active spv_logistik, returns their name.
    * 2. Finds approved users with role 'spv_logistik'.
@@ -1646,13 +1682,13 @@ class LogisticsStore {
     if (this.currentUser && this.currentUser.role === 'spv_logistik' && this.currentUser.status === 'approved') {
       return this.currentUser.fullName;
     }
-    const approvedDispatchers = this.users.filter(u => u.role === 'spv_logistik' && u.status === 'approved');
-    const bahriDispatcher = approvedDispatchers.find(u => u.fullName.toLowerCase().includes('syaiful bahri'));
-    if (bahriDispatcher) {
-      return bahriDispatcher.fullName;
+    const approvedSpvLogistiks = this.users.filter(u => u.role === 'spv_logistik' && u.status === 'approved');
+    const bahriSpvLogistik = approvedSpvLogistiks.find(u => u.fullName.toLowerCase().includes('syaiful bahri'));
+    if (bahriSpvLogistik) {
+      return bahriSpvLogistik.fullName;
     }
-    if (approvedDispatchers.length > 0) {
-      return approvedDispatchers[0].fullName;
+    if (approvedSpvLogistiks.length > 0) {
+      return approvedSpvLogistiks[0].fullName;
     }
     const anyBahri = this.users.find(u => u.fullName.toLowerCase().includes('syaiful bahri'));
     if (anyBahri) {

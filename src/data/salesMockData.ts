@@ -308,7 +308,7 @@ export const INITIAL_SKILL_PROFILES: AdminSkillProfile[] = [
   {
     id: 'sk-002',
     adminName: 'Budi Santoso',
-    roleTitle: 'Sales Order & Warehouse Loading Dispatcher',
+    roleTitle: 'Sales Order & Warehouse Loading SPV Logistik',
     experienceYears: 4,
     overallScore: 88,
     recentTraining: 'SOP Keselamatan Pergudangan & Loading Bay Management (Juli 2026)',

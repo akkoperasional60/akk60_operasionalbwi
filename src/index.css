@@ -488,14 +488,18 @@ html.light .text-emerald-400 {
 html.light .text-emerald-500 {
   color: #047857 !important;
 }
+html.light .text-amber-100,
+html.light .text-amber-200 {
+  color: #78350f !important;
+}
+html.light .text-amber-300 {
+  color: #92400e !important;
+}
 html.light .text-amber-400 {
   color: #b45309 !important;
 }
 html.light .text-amber-500 {
   color: #b45309 !important;
-}
-html.light .text-amber-300 {
-  color: #92400e !important;
 }
 html.light .text-blue-400 {
   color: #1d4ed8 !important;
@@ -514,6 +518,11 @@ html.light .text-purple-400 {
 }
 html.light .text-purple-500 {
   color: #5b21b6 !important;
+}
+html.light .text-rose-100,
+html.light .text-rose-200,
+html.light .text-rose-300 {
+  color: #881337 !important;
 }
 html.light .text-rose-400 {
   color: #be123c !important;

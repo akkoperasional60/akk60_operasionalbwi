@@ -56,7 +56,8 @@ import {
   LogIn,
   UserPlus,
   Mail,
-  EyeOff
+  EyeOff,
+  Moon
 } from 'lucide-react';
 import {
   Schedule,
@@ -79,6 +80,8 @@ import { driverWaybillService } from '../services/driverWaybillService';
 import { driverShiftService } from '../services/driverShiftService';
 import { getSupabaseClient } from '../services/supabaseService';
 import { useToast } from '../context/ToastContext';
+import { getDriverPortalDepartureLabel, getAreaScheduleTiming } from '../utils/areaScheduleRules';
+import { attendanceService } from '../services/attendanceService';
 import { DriverPodCameraModal } from './DriverPodCameraModal';
 import { DriverSuratJalanModal } from './DriverSuratJalanModal';
 import { DriverVehicleChecklistModal } from './DriverVehicleChecklistModal';
@@ -402,28 +405,15 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     delivery: Schedule | null;
     reason: string;
     transferType: string;
-    notes: string;
+    gpsPhotoUrl: string;
+    constraintNote: string;
   }>({
     isOpen: false,
     delivery: null,
-    reason: 'Kapasitas Muatan Berlebih (Overload)',
-    transferType: 'Oper ke Driver Lain',
-    notes: ''
-  });
-
-  // 🏥 Pengajuan Ijin Tidak Masuk Kru (Driver / Helper)
-  const [leaveModal, setLeaveModal] = useState<{
-    isOpen: boolean;
-    delivery: Schedule | null;
-    person: 'driver' | 'helper' | 'keduanya';
-    leaveType: string;
-    notes: string;
-  }>({
-    isOpen: false,
-    delivery: null,
-    person: 'driver',
-    leaveType: 'Sakit (Surat Dokter Menyusul)',
-    notes: ''
+    reason: 'Darurat / Halangan pribadi',
+    transferType: 'Oper ke driver lain (Driver cari pengganti)',
+    gpsPhotoUrl: 'https://images.unsplash.com/photo-1526778548025-fa2f459cd5c1?w=600&auto=format&fit=crop&q=80',
+    constraintNote: ''
   });
 
   // 🗑️ Konfirmasi Hapus Riwayat Pengiriman Selesai (Khusus Super Admin)
@@ -733,7 +723,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     const notes = `KENDALA: ${delayModal.reason}${delayModal.customNote ? ` - ${delayModal.customNote}` : ''}`;
     await handleUpdateStatus(delayModal.delivery, 'delayed', notes);
 
-    // Otomatis terdata ke modul Laporan Kiriman Kru untuk Dispatcher DC
+    // Otomatis terdata ke modul Laporan Kiriman Kru untuk SPV Logistik
     driverReportService.addReport({
       driverId: selectedDriverId,
       driverName: currentDriver?.name || 'Driver',
@@ -746,65 +736,80 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       photoUrl: null
     });
 
-    addNotification('sla_warning', 'Laporan Kendala Terkirim', `Kendala "${delayModal.reason}" telah diteruskan ke Dispatcher DC.`);
+    addNotification('sla_warning', 'Laporan Kendala Terkirim', `Kendala "${delayModal.reason}" telah diteruskan ke SPV Logistik.`);
     setDelayModal({ isOpen: false, delivery: null, reason: 'Driver / Helper Tidak Masuk (Harus Segera Diganti)', customNote: '' });
   };
 
-  // Submit transfer request (Minta Oper Jadwal)
+  // Submit transfer request (Minta Oper Jadwal) - Terintegrasi dengan Jadwal, Penugasan & Laporan Kiriman Kru
   const submitTransferRequest = async () => {
     if (!transferModal.delivery) return;
-    const notes = `[PERMINTAAN OPER JADWAL: ${transferModal.reason} (${transferModal.transferType})${transferModal.notes ? ` - ${transferModal.notes}` : ''}]`;
-    logisticsStore.updateSchedule(transferModal.delivery.id, { notes });
+    const targetArea = transferModal.delivery.areaName || transferModal.delivery.store?.storeName || 'Area Distribusi';
+    const driverName = currentDriver?.name || 'Driver';
+    const notes = `[OPER JADWAL: ${transferModal.reason} (${transferModal.transferType})${transferModal.constraintNote ? ` - Kendala: ${transferModal.constraintNote}` : ''}]`;
+    
+    const transferData = {
+      status: 'pending' as const,
+      requestedAt: new Date().toISOString(),
+      requestedByDriverId: selectedDriverId,
+      requestedByDriverName: driverName,
+      reason: transferModal.reason,
+      transferType: transferModal.transferType,
+      gpsPhotoUrl: transferModal.gpsPhotoUrl,
+      constraintNote: transferModal.constraintNote,
+      notes: transferModal.constraintNote
+    };
 
+    // 1. Integrasikan langsung ke data jadwal di logisticsStore & penugasan
+    logisticsStore.updateSchedule(transferModal.delivery.id, {
+      transferRequest: transferData,
+      notes
+    });
+
+    // 2. Kirim permintaan pertukaran shift ke pool antrean (Plot ulang kru pengganti)
+    logisticsStore.submitSwapShiftRequest({
+      requesterCrewId: selectedDriverId,
+      requesterCrewName: driverName,
+      targetCrewId: 'unassigned',
+      targetCrewName: 'SPV Logistik (Plot Ulang Kru Pengganti)',
+      shiftDate: transferModal.delivery.departureDate || new Date().toISOString().split('T')[0],
+      reason: `${transferModal.reason} (${transferModal.transferType}) - ${targetArea}`
+    });
+
+    // 3. Rekam ke menu Laporan Kiriman Kru & Kendala Oper Jadwal
     driverReportService.addReport({
       driverId: selectedDriverId,
-      driverName: currentDriver?.name || 'Driver',
+      driverName,
       helperName: transferModal.delivery?.crewHelper?.name,
       plateNumber: assignedFleet?.plateNumber || 'P 8125 VC',
       category: 'kendala_jalan',
-      areaName: transferModal.delivery.areaName || transferModal.delivery.store?.storeName || 'Area Distribusi',
+      areaName: targetArea,
       deliveryId: transferModal.delivery.id,
-      notes,
-      photoUrl: null
+      notes: `[KENDALA OPER JADWAL] Alasan: ${transferModal.reason} (${transferModal.transferType}). Catatan: ${transferModal.constraintNote || 'Tanpa catatan'}`,
+      photoUrl: transferModal.gpsPhotoUrl
     });
 
-    addNotification('schedule', 'Permintaan Oper Jadwal Terkirim', 'Permintaan oper jadwal telah diteruskan ke Dispatcher Logistik DC.');
+    // 4. Catat ke System Activity Log
+    logisticsStore.logActivity(
+      'Permintaan Oper Jadwal & Kendala',
+      transferModal.delivery.trackingNumber,
+      `[OPER JADWAL] Driver ${driverName} meminta oper rute ${targetArea}. Alasan: ${transferModal.reason} (${transferModal.transferType}). Kendala: ${transferModal.constraintNote}. SPV Logistik segera plot kru pengganti agar tidak terjadi double kiriman.`
+    );
+
+    // 5. Notifikasi prioritas tinggi ke SPV Logistik & Super Admin
+    addNotification(
+      'schedule',
+      '🚨 PERMINTAAN OPER JADWAL & KENDALA (SPV Logistik & Super Admin)',
+      `Driver ${driverName} mengajukan oper rute ${targetArea} (${transferModal.reason}). Segera input kru pengganti di menu jadwal & penugasan untuk mencegah double kiriman.`,
+      true
+    );
+
     setTransferModal({
       isOpen: false,
       delivery: null,
-      reason: 'Kapasitas Muatan Berlebih (Overload)',
-      transferType: 'Oper ke Driver Lain',
-      notes: ''
-    });
-    await loadDeliveries(true);
-  };
-
-  // Submit leave request (Ijin Tidak Masuk Kru)
-  const submitLeaveRequest = async () => {
-    if (!leaveModal.delivery) return;
-    const personLabel = leaveModal.person === 'driver' ? 'Driver' : leaveModal.person === 'helper' ? 'Helper' : 'Driver & Helper';
-    const notes = `[IJIN TIDAK MASUK: ${personLabel} tidak masuk (${leaveModal.leaveType})${leaveModal.notes ? ` - ${leaveModal.notes}` : ''} - PERLU PENGGANTI SEGERA]`;
-    logisticsStore.updateSchedule(leaveModal.delivery.id, { notes });
-
-    driverReportService.addReport({
-      driverId: selectedDriverId,
-      driverName: currentDriver?.name || 'Driver',
-      helperName: leaveModal.delivery?.crewHelper?.name,
-      plateNumber: assignedFleet?.plateNumber || 'P 8125 VC',
-      category: 'kendala_jalan',
-      areaName: leaveModal.delivery.areaName || leaveModal.delivery.store?.storeName || 'Area Distribusi',
-      deliveryId: leaveModal.delivery.id,
-      notes,
-      photoUrl: null
-    });
-
-    addNotification('sla_warning', 'Pengajuan Ijin Terkirim (Prioritas Tinggi)', `Laporan ${personLabel} tidak masuk telah diteruskan ke Dispatcher DC untuk dialokasikan pengganti.`);
-    setLeaveModal({
-      isOpen: false,
-      delivery: null,
-      person: 'driver',
-      leaveType: 'Sakit (Surat Dokter Menyusul)',
-      notes: ''
+      reason: 'Darurat / Halangan pribadi',
+      transferType: 'Oper ke driver lain (Driver cari pengganti)',
+      gpsPhotoUrl: 'https://images.unsplash.com/photo-1526778548025-fa2f459cd5c1?w=600&auto=format&fit=crop&q=80',
+      constraintNote: ''
     });
     await loadDeliveries(true);
   };
@@ -1695,186 +1700,148 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                             </div>
                           </div>
                         </div>
-                      ) : (
-                        <div className="grid grid-cols-2 gap-2 text-xs">
-                          <div className="bg-slate-950/40 p-2 rounded-xl border border-slate-800/60">
-                            <span className="text-[10px] text-slate-400 block flex items-center gap-1">
-                              <Calendar className="w-3.5 h-3.5 text-emerald-400" />
-                              <span>Tanggal Kirim</span>
-                            </span>
-                            <div className="font-bold text-white text-xs mt-0.5">
-                              {delivery.departureDate 
-                                ? new Date(delivery.departureDate).toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
-                                : 'Hari ini'}
-                            </div>
-                            <div className="text-[10px] text-emerald-400 font-semibold mt-0.5 flex items-center gap-1">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                              <span>
-                                {delivery.departureDate && new Date(delivery.departureDate).getDate() !== new Date().getDate()
-                                  ? 'Jadwal H+1 (Besok)'
-                                  : 'Jadwal Kirim'}
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="bg-slate-950/40 p-2 rounded-xl border border-slate-800/60">
-                            <span className="text-[10px] text-slate-400 block flex items-center gap-1">
-                              <Clock className="w-3.5 h-3.5 text-blue-400" />
-                              <span>Waktu &amp; ETA</span>
-                            </span>
-                            <div className="font-semibold text-slate-200 mt-0.5">
-                              <span>{new Date(delivery.departureDate || Date.now()).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB</span>
-                            </div>
-                            <div className="text-[10px] text-slate-400 mt-0.5">
-                              Tiba: {new Date(delivery.estimatedArrival || (Date.now() + 3600000 * 4)).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Catatan Rute: Hanya ditampilkan ketika helper / driver input kendala/catatan (menghilangkan default teks import Sheets) */}
-                      {delivery.notes && 
-                       !delivery.notes.startsWith('Import Tervalidasi') && 
-                       !delivery.notes.includes('Import Tervalidasi Google Sheets') && (
-                        <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-2 text-[11px] text-amber-300">
-                          <strong>Catatan Rute:</strong> {delivery.notes}
-                        </div>
-                      )}
-
-                      {/* Quick Communication, Navigation & Camera Bar */}
-                      <div className="flex items-center gap-2 pt-1">
-                        <a
-                          href={googleMapsUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex-1 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-xs"
-                        >
-                          <Navigation className="w-3.5 h-3.5" />
-                          <span>Google Maps</span>
-                        </a>
-
-                        <button
-                          type="button"
-                          onClick={() => setCameraModal({ isOpen: true, delivery })}
-                          className={`px-3 py-2 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-xs cursor-pointer ${
-                            delivery.podPhotoUrl
-                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-500/30'
-                              : 'bg-cyan-600/20 text-cyan-300 hover:bg-cyan-600/30 border border-cyan-500/40'
-                          }`}
-                          title={delivery.podPhotoUrl ? 'Bukti foto barang telah diambil. Klik untuk foto ulang.' : 'Ambil foto bukti serah terima (Kamera)'}
-                        >
-                          <Camera className="w-3.5 h-3.5" />
-                          <span>{delivery.podPhotoUrl ? 'Foto OK' : 'Foto'}</span>
-                        </button>
-
-                        <a
-                          href={waUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-xs"
-                          title="Hubungi PIC Toko via WhatsApp"
-                        >
-                          <MessageSquare className="w-3.5 h-3.5" />
-                          <span>WA</span>
-                        </a>
-
-                        <a
-                          href={`tel:${phoneNum}`}
-                          className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 border border-slate-700 shadow-xs"
-                          title="Telepon Langsung"
-                        >
-                          <Phone className="w-3.5 h-3.5" />
-                          <span>Telp</span>
-                        </a>
-                      </div>
-
-                      {/* Captured POD Photo Preview Strip on Card */}
-                      {delivery.podPhotoUrl && (
-                        <div className="bg-slate-950 p-2.5 rounded-xl border border-emerald-500/30 flex items-center justify-between gap-2 shadow-inner">
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <img
-                              src={delivery.podPhotoUrl}
-                              alt="POD Barang"
-                              className="w-11 h-11 object-cover rounded-lg border border-slate-700 cursor-pointer shrink-0 shadow-xs"
-                              onClick={() => setViewPhotoModal({
-                                isOpen: true,
-                                photoUrl: delivery.podPhotoUrl!,
-                                title: `Bukti Foto POD - ${delivery.store?.storeName}`,
-                                subtitle: `Area: ${delivery.store?.storeName || delivery.areaName || 'Tujuan'} | Driver: ${currentDriver?.name || 'Supir'}`
-                              })}
-                            />
-                            <div className="min-w-0">
-                              <div className="text-[11px] font-bold text-emerald-400 flex items-center gap-1 truncate">
-                                <CheckCircle2 className="w-3 h-3 shrink-0" />
-                                <span className="truncate">Foto Barang Terstempel POD</span>
+                      ) : (() => {
+                        const portalTiming = getDriverPortalDepartureLabel(
+                          delivery.departureDate,
+                          delivery.areaName,
+                          store?.storeName || delivery.store?.storeName
+                        );
+                        return (
+                          <div className="space-y-2">
+                            {/* Banner Khusus Area Luar Kota Berangkat Malam vs Reguler */}
+                            {portalTiming.isNightRun ? (
+                              <div className="p-2.5 rounded-xl bg-gradient-to-r from-amber-500/20 via-indigo-950/60 to-amber-500/10 border border-amber-500/40 flex items-center justify-between gap-2 shadow-xs">
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  <div className="w-7 h-7 rounded-lg bg-amber-500/25 border border-amber-500/40 text-amber-300 flex items-center justify-center shrink-0 font-bold">
+                                    <Moon className="w-4 h-4 text-amber-400" />
+                                  </div>
+                                  <div className="min-w-0">
+                                    <div className="font-black text-amber-300 text-xs truncate flex items-center gap-1.5">
+                                      <span>{portalTiming.badgeTitle}</span>
+                                      <span className="text-[10px] bg-amber-500/20 px-1.5 py-0.2 rounded text-amber-200 border border-amber-500/30">
+                                        {portalTiming.timing.departureLabel}
+                                      </span>
+                                    </div>
+                                    <div className="text-[10px] text-slate-300 truncate mt-0.5">
+                                      Target Kepulangan: Besok jam <strong className="text-white">{portalTiming.timing.returnLabel}</strong>
+                                    </div>
+                                  </div>
+                                </div>
+                                <span className="px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-amber-500 text-slate-950 shrink-0">
+                                  Luar Kota
+                                </span>
                               </div>
-                              <div className="text-[10px] text-slate-400 mt-0.5 truncate">
-                                {delivery.podPhotoTimestamp ? new Date(delivery.podPhotoTimestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB' : 'Stempel Valid'}
+                            ) : (
+                              <div className="px-2.5 py-1.5 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between gap-2 text-[11px]">
+                                <div className="flex items-center gap-1.5 text-slate-300 min-w-0">
+                                  <Clock className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                  <span className="truncate">
+                                    Berangkat <strong className="text-white">{portalTiming.timing.departureLabel}</strong> • Kepulangan <strong className="text-white">{portalTiming.timing.returnLabel}</strong>
+                                  </span>
+                                </div>
+                                <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-slate-800 text-slate-400 shrink-0">
+                                  Reguler
+                                </span>
+                              </div>
+                            )}
+
+                            <div className="grid grid-cols-2 gap-2 text-xs">
+                              <div className="bg-slate-950/40 p-2 rounded-xl border border-slate-800/60">
+                                <span className="text-[10px] text-slate-400 block flex items-center gap-1">
+                                  <Calendar className="w-3.5 h-3.5 text-emerald-400" />
+                                  <span>Tanggal Kirim</span>
+                                </span>
+                                <div className="font-bold text-white text-xs mt-0.5">
+                                  {delivery.departureDate 
+                                    ? new Date(delivery.departureDate).toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+                                    : 'Hari ini'}
+                                </div>
+                                <div className="text-[10px] text-emerald-400 font-semibold mt-0.5 flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                                  <span>
+                                    {portalTiming.isNightRun
+                                      ? (delivery.departureDate && new Date(delivery.departureDate).getDate() !== new Date().getDate()
+                                          ? 'Jadwal H+1 (Berangkat Nanti Malam)'
+                                          : 'Berangkat Nanti Malam')
+                                      : (delivery.departureDate && new Date(delivery.departureDate).getDate() !== new Date().getDate()
+                                          ? 'Jadwal H+1 (Besok)'
+                                          : 'Jadwal Kirim')}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="bg-slate-950/40 p-2 rounded-xl border border-slate-800/60">
+                                <span className="text-[10px] text-slate-400 block flex items-center gap-1">
+                                  <Clock className="w-3.5 h-3.5 text-blue-400" />
+                                  <span>Waktu &amp; Kepulangan</span>
+                                </span>
+                                <div className="font-bold text-amber-300 text-xs mt-0.5">
+                                  <span>{portalTiming.departureText}</span>
+                                </div>
+                                <div className="text-[10px] text-slate-300 font-medium mt-0.5">
+                                  {portalTiming.returnText}
+                                </div>
                               </div>
                             </div>
                           </div>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => setViewPhotoModal({
-                                isOpen: true,
-                                photoUrl: delivery.podPhotoUrl!,
-                                title: `Bukti Foto POD - ${delivery.store?.storeName}`,
-                                subtitle: `Area: ${delivery.store?.storeName || delivery.areaName || 'Tujuan'} | Driver: ${currentDriver?.name || 'Supir'}`
-                              })}
-                              className="text-[10px] font-bold text-cyan-300 bg-slate-800 hover:bg-slate-700 px-2 py-1 rounded-md flex items-center gap-1 cursor-pointer"
-                            >
-                              <Eye className="w-3 h-3" />
-                              <span>Lihat</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setCameraModal({ isOpen: true, delivery })}
-                              className="text-[10px] font-bold text-slate-300 hover:text-white bg-slate-800/80 px-2 py-1 rounded-md cursor-pointer"
-                              title="Foto Ulang"
-                            >
-                              <RefreshCw className="w-3 h-3" />
-                            </button>
+                        );
+                      })()}
+
+                      {/* Status Terintegrasi: Permintaan Oper Jadwal */}
+                      {delivery.transferRequest?.status === 'pending' && (
+                        <div className="bg-amber-500/15 dark:bg-amber-950/40 border border-amber-400 dark:border-amber-600/70 rounded-xl p-3 space-y-1 shadow-xs">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-1.5 text-xs font-black text-amber-950 dark:text-amber-300">
+                              <ArrowRightLeft className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                              <span>Permintaan Oper Jadwal Diajukan</span>
+                            </div>
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-200 dark:bg-amber-900/70 text-amber-950 dark:text-amber-200 border border-amber-300 dark:border-amber-700">
+                              Menunggu SPV Logistik
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-800 dark:text-slate-200 space-y-0.5">
+                            <div>Alasan: <strong className="text-slate-950 dark:text-white font-bold">{delivery.transferRequest.reason}</strong></div>
+                            {delivery.transferRequest.transferType && (
+                              <div className="text-slate-600 dark:text-slate-400 text-[10px]">Jenis Pengalihan: {delivery.transferRequest.transferType}</div>
+                            )}
+                            {delivery.transferRequest.notes && (
+                              <div className="text-slate-600 dark:text-slate-400 text-[10px] italic">"{delivery.transferRequest.notes}"</div>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-amber-800 dark:text-amber-400 font-semibold flex items-center gap-1 pt-0.5">
+                            <CheckCircle2 className="w-3 h-3 text-amber-600 dark:text-amber-400 shrink-0" />
+                            <span>Notifikasi telah terkirim ke SPV Logistik &amp; Super Admin</span>
                           </div>
                         </div>
                       )}
+
+
 
                       {/* Driver Status Action Workflow Buttons */}
-                      <div className="pt-2 border-t border-slate-800/80">
+                      <div className="pt-2 border-t border-slate-200 dark:border-slate-800/80">
                         {delivery.status === 'scheduled' && (
-                          <div className="space-y-1.5">
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => setTransferModal({
-                                  isOpen: true,
-                                  delivery,
-                                  reason: 'Kapasitas Muatan Berlebih (Overload)',
-                                  transferType: 'Oper ke Driver Lain',
-                                  notes: ''
-                                })}
-                                className="flex-1 py-2.5 px-3 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-xs cursor-pointer"
-                              >
-                                <ArrowRightLeft className="w-4 h-4 text-amber-400" />
-                                <span>Minta Oper Jadwal</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setLeaveModal({
-                                  isOpen: true,
-                                  delivery,
-                                  person: 'driver',
-                                  leaveType: 'Sakit (Surat Dokter Menyusul)',
-                                  notes: ''
-                                })}
-                                className="flex-1 py-2.5 px-3 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-xs cursor-pointer"
-                              >
-                                <UserX className="w-4 h-4 text-rose-400" />
-                                <span>Ijin Tidak Masuk</span>
-                              </button>
-                            </div>
-                            <span className="text-[10px] text-slate-500 block text-center">
-                              Jadwal persiapan muat esok hari (H+1). Ajukan oper jadwal atau ijin kru jika berhalangan.
+                          <div className="space-y-2">
+                            <button
+                              type="button"
+                              onClick={() => setTransferModal({
+                                isOpen: true,
+                                delivery,
+                                reason: delivery.transferRequest?.reason || 'Darurat / Halangan pribadi',
+                                transferType: delivery.transferRequest?.transferType || 'Oper ke driver lain (Driver cari pengganti)',
+                                gpsPhotoUrl: delivery.transferRequest?.gpsPhotoUrl || 'https://images.unsplash.com/photo-1526778548025-fa2f459cd5c1?w=600&auto=format&fit=crop&q=80',
+                                constraintNote: delivery.transferRequest?.constraintNote || delivery.transferRequest?.notes || ''
+                              })}
+                              className={`w-full py-2.5 px-3 rounded-xl border-2 font-black text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-xs cursor-pointer ${
+                                delivery.transferRequest?.status === 'pending'
+                                  ? 'bg-amber-100 dark:bg-amber-950/60 border-amber-600 dark:border-amber-400 text-amber-950 dark:text-amber-200'
+                                  : 'bg-amber-50 hover:bg-amber-100 dark:bg-amber-500/15 dark:hover:bg-amber-500/25 border-amber-500 text-amber-950 dark:text-amber-200'
+                              }`}
+                            >
+                              <ArrowRightLeft className="w-4 h-4 text-amber-700 dark:text-amber-400" />
+                              <span>{delivery.transferRequest?.status === 'pending' ? 'Edit Oper Jadwal' : 'Minta Oper Jadwal'}</span>
+                            </button>
+                            <span className="text-[10px] text-slate-500 dark:text-slate-400 block text-center font-medium">
+                              Jadwal persiapan muat esok hari (H+1). Ajukan oper jadwal jika berhalangan.
                             </span>
                           </div>
                         )}
@@ -1954,7 +1921,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                               </button>
                             </div>
                             <span className="text-[10px] text-rose-300/80 block text-center">
-                              Status saat ini: Terlaporkan Kendala ke Dispatcher DC.
+                              Status saat ini: Terlaporkan Kendala ke SPV Logistik.
                             </span>
                           </div>
                         )}
@@ -2840,198 +2807,152 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       {/* MODAL 1B: Minta Oper Jadwal (Pengalihan / Handoff Penugasan) */}
       {transferModal.isOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
-          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-t-2xl sm:rounded-2xl p-5 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-              <div className="flex items-center gap-2 text-amber-400">
-                <ArrowRightLeft className="w-5 h-5 shrink-0" />
-                <h3 className="text-sm font-black text-white">Minta Oper Jadwal Pengiriman</h3>
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-t-2xl sm:rounded-2xl p-5 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400">
+                  <ArrowRightLeft className="w-5 h-5 shrink-0" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white">Minta Oper Jadwal Pengiriman</h3>
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400">Pengalihan jadwal penugasan ke SPV Logistik &amp; Super Admin</p>
+                </div>
               </div>
               <button
-                onClick={() => setTransferModal({ isOpen: false, delivery: null, reason: 'Kapasitas Muatan Berlebih (Overload)', transferType: 'Oper ke Driver Lain', notes: '' })}
-                className="p-1 rounded-lg text-slate-400 hover:text-white cursor-pointer"
+                onClick={() => setTransferModal({ isOpen: false, delivery: null, reason: 'Darurat / Halangan pribadi', transferType: 'Oper ke driver lain (Driver cari pengganti)', gpsPhotoUrl: 'https://images.unsplash.com/photo-1526778548025-fa2f459cd5c1?w=600&auto=format&fit=crop&q=80', constraintNote: '' })}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 text-xs space-y-1">
-              <div className="text-slate-400">
-                Tujuan: <strong className="text-white">{transferModal.delivery?.store?.storeName || transferModal.delivery?.areaName}</strong>
+            <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-700/60 rounded-xl p-3 text-xs text-amber-950 dark:text-amber-200 flex items-start gap-2.5 shadow-xs">
+              <Clock className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+              <p className="text-[11px] leading-relaxed font-medium">
+                Permintaan ini otomatis masuk ke antrean SPV Logistik &amp; Super Admin serta terintegrasi ke menu laporan kiriman agar kru pengganti segera terinput tanpa double kiriman.
+              </p>
+            </div>
+
+            <div className="bg-slate-50 dark:bg-slate-950 p-3 rounded-xl border border-slate-200 dark:border-slate-800 text-xs space-y-1">
+              <div className="text-slate-600 dark:text-slate-400 font-medium">
+                Tujuan: <strong className="text-slate-900 dark:text-white font-bold">{transferModal.delivery?.store?.storeName || transferModal.delivery?.areaName}</strong>
               </div>
-              <div className="text-slate-400">
-                Area Distribusi: <span className="text-amber-400 font-semibold">{transferModal.delivery?.areaName || 'Banyuwangi'}</span>
+              <div className="text-slate-600 dark:text-slate-400 font-medium">
+                Area Distribusi: <span className="text-amber-700 dark:text-amber-400 font-bold">{transferModal.delivery?.areaName || 'Banyuwangi'}</span>
               </div>
             </div>
 
+            {/* Alasan Pengajuan Oper Jadwal */}
             <div className="space-y-2">
-              <label className="text-xs font-bold text-slate-300 block">Alasan Pengajuan Oper Jadwal:</label>
+              <label className="text-xs font-bold text-slate-800 dark:text-slate-200 block">Alasan Pengajuan Oper Jadwal:</label>
               {[
-                'Kapasitas Muatan Berlebih (Overload)',
-                'Kendala Kerusakan Armada / Perlu Servis',
-                'Jadwal Bertabrakan dengan Rute Lain',
-                'Permintaan Khusus Logistik DC',
-                'Kondisi Mendesak Lainnya'
-              ].map((reason) => (
-                <label
-                  key={reason}
-                  onClick={() => setTransferModal(prev => ({ ...prev, reason }))}
-                  className={`flex items-center gap-2.5 p-2 rounded-xl border text-xs cursor-pointer transition ${
-                    transferModal.reason === reason ? 'bg-amber-500/15 border-amber-500/50 text-amber-200 font-bold' : 'bg-slate-950 border-slate-800 text-slate-400'
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="transferReason"
-                    checked={transferModal.reason === reason}
-                    onChange={() => {}}
-                    className="text-amber-500 focus:ring-0"
-                  />
-                  <span>{reason}</span>
-                </label>
-              ))}
+                'Darurat / Halangan pribadi',
+                'Sakit (surat dokter menyusul)',
+                'Keperluan keluarga mendesak'
+              ].map((reason) => {
+                const isSelected = transferModal.reason === reason;
+                return (
+                  <label
+                    key={reason}
+                    onClick={() => setTransferModal(prev => ({ ...prev, reason }))}
+                    className={`flex items-center gap-2.5 p-2.5 rounded-xl border text-xs cursor-pointer transition select-none ${
+                      isSelected
+                        ? 'bg-amber-50 dark:bg-amber-950/60 border-2 border-amber-500 text-slate-950 dark:text-white font-black shadow-xs'
+                        : 'bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="transferReason"
+                      checked={isSelected}
+                      onChange={() => {}}
+                      className="text-amber-600 focus:ring-amber-500 shrink-0 w-4 h-4 cursor-pointer"
+                    />
+                    <span className="flex-1">{reason}</span>
+                  </label>
+                );
+              })}
             </div>
 
+            {/* Jenis Pengalihan */}
             <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-300 block">Jenis Pengalihan:</label>
+              <label className="text-xs font-bold text-slate-800 dark:text-slate-200 block">Jenis Pengalihan:</label>
               <select
                 value={transferModal.transferType}
                 onChange={(e) => setTransferModal(prev => ({ ...prev, transferType: e.target.value }))}
-                className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl p-2.5 focus:outline-none focus:border-amber-500"
+                className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 font-semibold text-xs rounded-xl p-2.5 focus:outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer"
               >
-                <option value="Oper ke Driver Lain">Oper ke Driver Lain (Dispatcher Mengatur)</option>
-                <option value="Tunda ke Hari Berikutnya">Tunda / Geser ke Hari Berikutnya</option>
-                <option value="Pecah Muatan Armada">Pecah Muatan ke 2 Armada</option>
+                <option value="Oper ke driver lain (Driver cari pengganti)">Oper ke driver lain (Driver cari pengganti)</option>
+                <option value="Tunda / Geser ke hari berikutnya">Tunda / Geser ke hari berikutnya</option>
               </select>
             </div>
 
+            {/* Foto GPS & Lokasi */}
             <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-300 block">Keterangan Tambahan (Opsional):</label>
+              <label className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center justify-between">
+                <span>Foto GPS &amp; Lokasi Terkini:</span>
+                <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold">Valid GPS Terkunci</span>
+              </label>
+              <div className="flex items-center gap-3 bg-slate-50 dark:bg-slate-950 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800">
+                <div className="w-16 h-12 rounded-lg overflow-hidden bg-slate-200 dark:bg-slate-800 shrink-0 relative border border-slate-300 dark:border-slate-700">
+                  <img
+                    src={transferModal.gpsPhotoUrl || 'https://images.unsplash.com/photo-1526778548025-fa2f459cd5c1?w=600&auto=format&fit=crop&q=80'}
+                    alt="GPS Location"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+                <div className="flex-1 text-[11px] space-y-0.5">
+                  <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1">
+                    <MapPin className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                    <span>Lat: -8.2192, Lng: 114.3691</span>
+                  </div>
+                  <div className="text-slate-500 dark:text-slate-400 text-[10px]">Terintegrasi ke modul Laporan Kiriman Kru</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const samplePhotos = [
+                      'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?w=600&auto=format&fit=crop&q=80',
+                      'https://images.unsplash.com/photo-1506015391300-4802dc74de2e?w=600&auto=format&fit=crop&q=80',
+                      'https://images.unsplash.com/photo-1526778548025-fa2f459cd5c1?w=600&auto=format&fit=crop&q=80'
+                    ];
+                    const next = samplePhotos[Math.floor(Math.random() * samplePhotos.length)];
+                    setTransferModal(prev => ({ ...prev, gpsPhotoUrl: next }));
+                  }}
+                  className="px-2.5 py-1.5 rounded-lg bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 font-bold text-[10px] hover:bg-amber-200 transition cursor-pointer"
+                >
+                  Ambil Ulang
+                </button>
+              </div>
+            </div>
+
+            {/* Kendala Oper Jadwal & Catatan Penugasan */}
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-800 dark:text-slate-200 block">Kendala Oper Jadwal &amp; Catatan Penugasan:</label>
               <textarea
-                value={transferModal.notes}
-                onChange={(e) => setTransferModal(prev => ({ ...prev, notes: e.target.value }))}
-                placeholder="Contoh: Estimasi box muatan berlebih 30 karton, tidak cukup di L300..."
+                value={transferModal.constraintNote}
+                onChange={(e) => setTransferModal(prev => ({ ...prev, constraintNote: e.target.value }))}
+                placeholder="Tuliskan kendala oper jadwal agar SPV Logistik segera input kru pengganti & hindari double kiriman..."
                 rows={2}
-                className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl p-2.5 focus:outline-none focus:border-amber-500"
+                className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-slate-100 text-xs rounded-xl p-2.5 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500"
               />
             </div>
 
-            <div className="flex items-center gap-2 pt-2">
+            <div className="flex items-center gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
               <button
                 type="button"
-                onClick={() => setTransferModal({ isOpen: false, delivery: null, reason: 'Kapasitas Muatan Berlebih (Overload)', transferType: 'Oper ke Driver Lain', notes: '' })}
-                className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs cursor-pointer"
+                onClick={() => setTransferModal({ isOpen: false, delivery: null, reason: 'Darurat / Halangan pribadi', transferType: 'Oper ke driver lain (Driver cari pengganti)', gpsPhotoUrl: 'https://images.unsplash.com/photo-1526778548025-fa2f459cd5c1?w=600&auto=format&fit=crop&q=80', constraintNote: '' })}
+                className="flex-1 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs border border-slate-300 dark:border-slate-700 cursor-pointer"
               >
                 Batal
               </button>
               <button
                 type="button"
                 onClick={submitTransferRequest}
-                className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer active:scale-95"
+                className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer active:scale-95"
               >
                 <ArrowRightLeft className="w-4 h-4" />
                 <span>Kirim Permintaan Oper</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL 1C: Ijin Tidak Masuk Kru (Driver / Helper) */}
-      {leaveModal.isOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
-          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-t-2xl sm:rounded-2xl p-5 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-              <div className="flex items-center gap-2 text-rose-400">
-                <UserX className="w-5 h-5 shrink-0" />
-                <h3 className="text-sm font-black text-white">Pengajuan Ijin Tidak Masuk Kru</h3>
-              </div>
-              <button
-                onClick={() => setLeaveModal({ isOpen: false, delivery: null, person: 'driver', leaveType: 'Sakit (Surat Dokter Menyusul)', notes: '' })}
-                className="p-1 rounded-lg text-slate-400 hover:text-white cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="bg-rose-500/10 border border-rose-500/30 rounded-xl p-2.5 text-xs text-rose-300">
-              <strong>Perhatian Segera:</strong> Laporan ini akan diprioritaskan agar Dispatcher DC segera mengalokasikan driver/helper pengganti sebelum jadwal kirim dimulai.
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-300 block">Kru yang Berhalangan Masuk:</label>
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  { id: 'driver', label: `Driver (${currentDriver?.name || 'Driver'})` },
-                  { id: 'helper', label: `Helper (${leaveModal.delivery?.crewHelper?.name || 'Helper'})` },
-                  { id: 'keduanya', label: 'Keduanya' }
-                ].map(opt => (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() => setLeaveModal(prev => ({ ...prev, person: opt.id as any }))}
-                    className={`p-2 rounded-xl border text-[11px] font-bold text-center transition cursor-pointer ${
-                      leaveModal.person === opt.id ? 'bg-rose-500/20 border-rose-500/50 text-rose-200' : 'bg-slate-950 border-slate-800 text-slate-400'
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs font-bold text-slate-300 block">Alasan Ijin:</label>
-              {[
-                'Sakit (Surat Dokter Menyusul)',
-                'Keperluan Keluarga Mendesak',
-                'Darurat / Halangan Pribadi',
-                'Dispensasi Khusus Logistik'
-              ].map(reason => (
-                <label
-                  key={reason}
-                  onClick={() => setLeaveModal(prev => ({ ...prev, leaveType: reason }))}
-                  className={`flex items-center gap-2.5 p-2 rounded-xl border text-xs cursor-pointer transition ${
-                    leaveModal.leaveType === reason ? 'bg-rose-500/15 border-rose-500/50 text-rose-200 font-bold' : 'bg-slate-950 border-slate-800 text-slate-400'
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="leaveReason"
-                    checked={leaveModal.leaveType === reason}
-                    onChange={() => {}}
-                    className="text-rose-500 focus:ring-0"
-                  />
-                  <span>{reason}</span>
-                </label>
-              ))}
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-xs font-bold text-slate-300 block">Catatan / Detail Keterangan:</label>
-              <textarea
-                value={leaveModal.notes}
-                onChange={(e) => setLeaveModal(prev => ({ ...prev, notes: e.target.value }))}
-                placeholder="Tuliskan keterangan detail untuk pertimbangan Dispatcher..."
-                rows={2}
-                className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl p-2.5 focus:outline-none focus:border-rose-500"
-              />
-            </div>
-
-            <div className="flex items-center gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setLeaveModal({ isOpen: false, delivery: null, person: 'driver', leaveType: 'Sakit (Surat Dokter Menyusul)', notes: '' })}
-                className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs cursor-pointer"
-              >
-                Batal
-              </button>
-              <button
-                type="button"
-                onClick={submitLeaveRequest}
-                className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer active:scale-95"
-              >
-                <UserX className="w-4 h-4" />
-                <span>Kirim Pengajuan Ijin</span>
               </button>
             </div>
           </div>

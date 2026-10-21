@@ -2443,7 +2443,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ onNavigate
                     </td>
                     <td className="p-3">
                       <span className="px-2 py-0.5 rounded text-[11px] font-medium bg-amber-500/10 text-amber-300 border border-amber-500/30">
-                        Super Admin / Dispatcher
+                        Super Admin / SPV Logistik
                       </span>
                     </td>
                     <td className="p-3 font-mono text-[11px] text-slate-400">

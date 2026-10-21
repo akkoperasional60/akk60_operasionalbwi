@@ -1393,7 +1393,7 @@ export const FleetLiveMap: React.FC<FleetLiveMapProps> = ({
                     <th className="p-2.5 font-semibold">Durasi Diam</th>
                     <th className="p-2.5 font-semibold">Jarak dari DC</th>
                     <th className="p-2.5 font-semibold">Lokasi Terkini</th>
-                    <th className="p-2.5 font-semibold text-center">Tindakan Dispatcher</th>
+                    <th className="p-2.5 font-semibold text-center">Tindakan SPV Logistik</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800 text-slate-300">

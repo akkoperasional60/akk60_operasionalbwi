@@ -318,7 +318,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     </div>
                     <div className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
                       {currentUser.role === 'super_admin' && 'Super Admin / Mgr'}
-                      {currentUser.role === 'spv_logistik' && 'Dispatcher Logistik'}
+                      {currentUser.role === 'spv_logistik' && 'SPV Logistik Logistik'}
                       {currentUser.role === 'driver' && 'Kru Supir Utama'}
                       {currentUser.role === 'sales_admin' && 'Admin Penjualan'}
                       {currentUser.role === 'purchasing_admin' && 'Admin Pembelian'}
