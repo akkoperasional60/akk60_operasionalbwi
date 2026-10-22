@@ -266,6 +266,11 @@ export const ScheduleManagement: React.FC<ScheduleManagementProps> = ({
               (p.helper || '').toLowerCase().includes(c.name.toLowerCase())
             ) : undefined;
 
+            const matchedHelper2 = p.helper2 && p.helper2 !== '-' ? curCrews.find(c =>
+              c.name.toLowerCase().includes((p.helper2 || '').toLowerCase()) ||
+              (p.helper2 || '').toLowerCase().includes(c.name.toLowerCase())
+            ) : undefined;
+
             const existingList = logisticsStore.getSchedules();
             const existingIdx = existingList.findIndex(s => s.id === targetId || s.trackingNumber === targetTracking || (p.id && s.id === p.id));
 
@@ -297,6 +302,8 @@ export const ScheduleManagement: React.FC<ScheduleManagementProps> = ({
               crew: matchedDriver,
               crewHelperId: matchedHelper ? matchedHelper.id : undefined,
               crewHelper: matchedHelper,
+              crewHelper2Id: matchedHelper2 ? matchedHelper2.id : undefined,
+              crewHelper2: matchedHelper2,
               status: 'scheduled',
               departureDate: depIso,
               estimatedArrival: arrIso,
@@ -1428,75 +1435,53 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                         <thead className="bg-slate-950 text-slate-400 border-b border-slate-800">
                           <tr>
                             <th className="p-4 text-center w-12 font-semibold">#</th>
-                            <th className="p-4 font-semibold">Area Kirim (Tujuan)</th>
-                            <th className="p-4 font-semibold">Rincian Tanggal & Jam</th>
+                            <th className="p-4 font-semibold">Driver (Pengemudi)</th>
+                            <th className="p-4 font-semibold">Helper 1</th>
+                            <th className="p-4 font-semibold">Helper 2</th>
+                            <th className="p-4 font-semibold">Kirim Area (Tujuan)</th>
                             <th className="p-4 font-semibold">Armada Truk</th>
-                            <th className="p-4 font-semibold">Supir & Helper</th>
                             <th className="p-4 font-semibold">Status</th>
                             <th className="p-4 font-semibold text-right">Aksi</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-800 text-slate-300">
                           {group.trips.map((sch, idx) => {
-                            const isOuter = sch.isInterIsland;
-                            const dateDetails = getScheduleDateDetails(sch);
-
                             return (
                               <tr key={sch.id} className="hover:bg-slate-800/40 transition">
                                 <td className="p-4 text-center font-bold text-slate-500 w-12 border-r border-slate-800/60">
                                   {idx + 1}
                                 </td>
 
+                                {/* Kolom Driver */}
                                 <td className="p-4">
-                                  <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
-                                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                                      {dateDetails.dayName}
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-7 h-7 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center font-bold text-xs shrink-0">
+                                      <User className="w-3.5 h-3.5" />
+                                    </div>
+                                    <span className="font-extrabold text-white text-xs">
+                                      {sch.crew?.name || (typeof sch.crewId === 'string' && !sch.crewId.startsWith('crw-') ? sch.crewId : 'Driver')}
                                     </span>
-                                    {sch.notes?.includes('Susulan') ? (
-                                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                                        Susulan
-                                      </span>
-                                    ) : sch.notes?.includes('Grosir') ? (
-                                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                                        Grosir
-                                      </span>
-                                    ) : isOuter ? (
-                                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                                        🚢 Luar Kota (Bali)
-                                      </span>
-                                    ) : (
-                                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                                        🚛 Lokal Jatim
-                                      </span>
-                                    )}
-                                    <span className="text-[10px] font-mono text-slate-400 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800">
-                                      {sch.trackingNumber}
-                                    </span>
-                                  </div>
-                                  <div className="font-extrabold text-white text-sm">
-                                    {sch.areaName || sch.store?.storeName || AREA_MAP[sch.storeId] || 'Area Pengiriman'}
-                                  </div>
-                                  <div className="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5">
-                                    <MapPin className="w-3 h-3 text-slate-500" />
-                                    <span>{sch.store?.city || 'Banyuwangi DC'}, {sch.store?.island || 'Jawa Timur'}</span>
                                   </div>
                                 </td>
 
-                                {/* Kolom Rincian Tanggal & Jam Berangkat / Tiba */}
+                                {/* Kolom Helper 1 */}
                                 <td className="p-4">
-                                  <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-800 space-y-1 w-fit min-w-[155px]">
-                                    <div className="text-[11px] font-black text-amber-300 flex items-center gap-1.5">
-                                      <Calendar className="w-3 h-3 text-amber-400" />
-                                      <span>{dateDetails.formattedDate}</span>
-                                    </div>
-                                    <div className="text-[10px] text-slate-300 flex items-center gap-1">
-                                      <Clock className="w-3 h-3 text-emerald-400" />
-                                      <span>ETD: <strong>{dateDetails.depTime}</strong></span>
-                                    </div>
-                                    <div className="text-[10px] text-slate-400 flex items-center gap-1">
-                                      <Clock className="w-3 h-3 text-blue-400" />
-                                      <span>ETA: <strong>{dateDetails.arrTime}</strong></span>
-                                    </div>
+                                  <span className={`text-xs font-semibold ${sch.crewHelper?.name || (sch as any).helper ? 'text-slate-200' : 'text-slate-400'}`}>
+                                    {sch.crewHelper?.name || (sch as any).helper || '-'}
+                                  </span>
+                                </td>
+
+                                {/* Kolom Helper 2 */}
+                                <td className="p-4">
+                                  <span className={`text-xs font-semibold ${sch.crewHelper2?.name || (sch as any).helper2 ? 'text-slate-200' : 'text-slate-400'}`}>
+                                    {sch.crewHelper2?.name || (sch as any).helper2 || '-'}
+                                  </span>
+                                </td>
+
+                                {/* Kolom Kirim Area (Tujuan) */}
+                                <td className="p-4">
+                                  <div className="font-extrabold text-white text-xs uppercase tracking-wide">
+                                    {sch.areaName || sch.store?.storeName || AREA_MAP[sch.storeId] || 'Area Pengiriman'}
                                   </div>
                                 </td>
 
@@ -1509,61 +1494,38 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                                         {sch.fleet.initialCode}
                                       </span>
                                     )}
-                                    <span className="font-mono font-bold text-white text-xs">{sch.fleet?.plateNumber || '-'}</span>
+                                    <span className="font-mono font-bold text-white text-xs">{sch.fleet?.plateNumber || sch.fleetId || '-'}</span>
                                   </div>
-                                  <div className="text-[10px] text-slate-400 mt-0.5">
-                                    {sch.fleet?.vehicleType || 'Engkel STD'} {sch.fleet?.brand ? `• ${sch.fleet.brand}` : ''}
-                                  </div>
-                                </td>
-
-                                {/* Kolom Supir & Helper */}
-                                <td className="p-4">
-                                  <div className="flex flex-col gap-1 text-[11px] text-slate-400">
-                                    <div className="flex items-center gap-1.5">
-                                      <User className="w-3 h-3 text-emerald-400 shrink-0" />
-                                      <span>Supir: <strong className="text-slate-100">{sch.crew?.name || '-'}</strong></span>
-                                    </div>
-                                    <div className="flex items-center gap-1.5">
-                                      <User className="w-3 h-3 text-blue-400 shrink-0" />
-                                      <span>Helper 1: <strong className="text-slate-300">{sch.crewHelper?.name || '-'}</strong></span>
-                                    </div>
-                                    {sch.crewHelper2 && (
-                                      <div className="flex items-center gap-1.5">
-                                        <User className="w-3 h-3 text-purple-400 shrink-0" />
-                                        <span>Helper 2: <strong className="text-slate-300">{sch.crewHelper2.name}</strong></span>
-                                      </div>
-                                    )}
-                                  </div>
-                                  {sch.areaApprovalStatus === 'approved' && (
-                                    <div className="mt-1">
-                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                                        <ShieldAlert className="w-2.5 h-2.5" />
-                                        <span>Otorisasi Khusus Disetujui</span>
-                                      </span>
-                                    </div>
-                                  )}
                                 </td>
 
                                 {/* Status */}
                                 <td className="p-4">
-                                  <select
-                                    value={sch.status}
-                                    onChange={(e) => handleUpdateStatus(sch.id, e.target.value as ShipmentStatus)}
-                                    className={`px-2 py-1 rounded text-xs font-semibold cursor-pointer border ${
-                                      sch.status === 'in_transit'
-                                        ? 'bg-blue-500/20 text-blue-400 border-blue-500/40'
-                                        : sch.status === 'scheduled'
-                                        ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
-                                        : sch.status === 'delivered'
-                                        ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
-                                        : 'bg-red-500/20 text-red-400 border-red-500/40'
-                                    }`}
-                                  >
-                                    <option value="scheduled">Terjadwal</option>
-                                    <option value="in_transit">Dalam Perjalanan</option>
-                                    <option value="delivered">Terkirim (Selesai)</option>
-                                    <option value="delayed">Tertunda (Delayed)</option>
-                                  </select>
+                                  <div className="flex flex-col gap-1">
+                                    <select
+                                      value={sch.status}
+                                      onChange={(e) => handleUpdateStatus(sch.id, e.target.value as ShipmentStatus)}
+                                      className={`px-2 py-1 rounded text-xs font-semibold cursor-pointer border ${
+                                        sch.status === 'in_transit'
+                                          ? 'bg-blue-500/20 text-blue-400 border-blue-500/40'
+                                          : sch.status === 'scheduled'
+                                          ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
+                                          : sch.status === 'delivered'
+                                          ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
+                                          : 'bg-red-500/20 text-red-400 border-red-500/40'
+                                      }`}
+                                    >
+                                      <option value="scheduled">Terjadwal</option>
+                                      <option value="in_transit">Dalam Perjalanan</option>
+                                      <option value="delivered">Terkirim (Selesai)</option>
+                                      <option value="delayed">Tertunda (Delayed)</option>
+                                    </select>
+                                    {sch.areaApprovalStatus === 'approved' && (
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 w-fit">
+                                        <ShieldAlert className="w-2.5 h-2.5" />
+                                        <span>Otorisasi Khusus</span>
+                                      </span>
+                                    )}
+                                  </div>
                                 </td>
 
                                 {/* Aksi */}
@@ -1663,75 +1625,53 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
               <thead className="bg-slate-950 text-slate-400 border-b border-slate-800">
                 <tr>
                   <th className="p-4 text-center w-12 font-semibold">#</th>
-                  <th className="p-4 font-semibold">Area Kirim (Tujuan)</th>
-                  <th className="p-4 font-semibold">Rincian Tanggal & Jam</th>
+                  <th className="p-4 font-semibold">Driver (Pengemudi)</th>
+                  <th className="p-4 font-semibold">Helper 1</th>
+                  <th className="p-4 font-semibold">Helper 2</th>
+                  <th className="p-4 font-semibold">Kirim Area (Tujuan)</th>
                   <th className="p-4 font-semibold">Armada Truk</th>
-                  <th className="p-4 font-semibold">Supir & Helper</th>
                   <th className="p-4 font-semibold">Status</th>
                   <th className="p-4 font-semibold text-right">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800 text-slate-300">
                 {sortedFilteredSchedules.map((sch, idx) => {
-                  const isOuter = sch.isInterIsland;
-                  const dateDetails = getScheduleDateDetails(sch);
-
                   return (
                     <tr key={sch.id} className="hover:bg-slate-800/40 transition">
                       <td className="p-4 text-center font-bold text-slate-500 w-12 border-r border-slate-800/60">
                         {idx + 1}
                       </td>
 
+                      {/* Kolom Driver */}
                       <td className="p-4">
-                        <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                            {dateDetails.dayName}
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center font-bold text-xs shrink-0">
+                            <User className="w-3.5 h-3.5" />
+                          </div>
+                          <span className="font-extrabold text-white text-xs">
+                            {sch.crew?.name || (typeof sch.crewId === 'string' && !sch.crewId.startsWith('crw-') ? sch.crewId : 'Driver')}
                           </span>
-                          {sch.notes?.includes('Susulan') ? (
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                              Susulan
-                            </span>
-                          ) : sch.notes?.includes('Grosir') ? (
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                              Grosir
-                            </span>
-                          ) : isOuter ? (
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                              🚢 Luar Kota (Bali)
-                            </span>
-                          ) : (
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                              🚛 Lokal Jatim
-                            </span>
-                          )}
-                          <span className="text-[10px] font-mono text-slate-400 bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800">
-                            {sch.trackingNumber}
-                          </span>
-                        </div>
-                        <div className="font-extrabold text-white text-sm">
-                          {sch.areaName || sch.store?.storeName || AREA_MAP[sch.storeId] || 'Area Pengiriman'}
-                        </div>
-                        <div className="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5">
-                          <MapPin className="w-3 h-3 text-slate-500" />
-                          <span>{sch.store?.city || 'Banyuwangi DC'}, {sch.store?.island || 'Jawa Timur'}</span>
                         </div>
                       </td>
 
-                      {/* Kolom Rincian Tanggal & Jam Berangkat / Tiba */}
+                      {/* Kolom Helper 1 */}
                       <td className="p-4">
-                        <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-800 space-y-1 w-fit min-w-[155px]">
-                          <div className="text-[11px] font-black text-amber-300 flex items-center gap-1.5">
-                            <Calendar className="w-3 h-3 text-amber-400" />
-                            <span>{dateDetails.formattedDate}</span>
-                          </div>
-                          <div className="text-[10px] text-slate-300 flex items-center gap-1">
-                            <Clock className="w-3 h-3 text-emerald-400" />
-                            <span>ETD: <strong>{dateDetails.depTime}</strong></span>
-                          </div>
-                          <div className="text-[10px] text-slate-400 flex items-center gap-1">
-                            <Clock className="w-3 h-3 text-blue-400" />
-                            <span>ETA: <strong>{dateDetails.arrTime}</strong></span>
-                          </div>
+                        <span className={`text-xs font-semibold ${sch.crewHelper?.name || (sch as any).helper ? 'text-slate-200' : 'text-slate-400'}`}>
+                          {sch.crewHelper?.name || (sch as any).helper || '-'}
+                        </span>
+                      </td>
+
+                      {/* Kolom Helper 2 */}
+                      <td className="p-4">
+                        <span className={`text-xs font-semibold ${sch.crewHelper2?.name || (sch as any).helper2 ? 'text-slate-200' : 'text-slate-400'}`}>
+                          {sch.crewHelper2?.name || (sch as any).helper2 || '-'}
+                        </span>
+                      </td>
+
+                      {/* Kolom Kirim Area (Tujuan) */}
+                      <td className="p-4">
+                        <div className="font-extrabold text-white text-xs uppercase tracking-wide">
+                          {sch.areaName || sch.store?.storeName || AREA_MAP[sch.storeId] || 'Area Pengiriman'}
                         </div>
                       </td>
 
@@ -1744,61 +1684,38 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                               {sch.fleet.initialCode}
                             </span>
                           )}
-                          <span className="font-mono font-bold text-white text-xs">{sch.fleet?.plateNumber || '-'}</span>
+                          <span className="font-mono font-bold text-white text-xs">{sch.fleet?.plateNumber || sch.fleetId || '-'}</span>
                         </div>
-                        <div className="text-[10px] text-slate-400 mt-0.5">
-                          {sch.fleet?.vehicleType || 'Engkel STD'} {sch.fleet?.brand ? `• ${sch.fleet.brand}` : ''}
-                        </div>
-                      </td>
-
-                      {/* Kolom Supir & Helper */}
-                      <td className="p-4">
-                        <div className="flex flex-col gap-1 text-[11px] text-slate-400">
-                          <div className="flex items-center gap-1.5">
-                            <User className="w-3 h-3 text-emerald-400 shrink-0" />
-                            <span>Supir: <strong className="text-slate-100">{sch.crew?.name || '-'}</strong></span>
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            <User className="w-3 h-3 text-blue-400 shrink-0" />
-                            <span>Helper 1: <strong className="text-slate-300">{sch.crewHelper?.name || '-'}</strong></span>
-                          </div>
-                          {sch.crewHelper2 && (
-                            <div className="flex items-center gap-1.5">
-                              <User className="w-3 h-3 text-purple-400 shrink-0" />
-                              <span>Helper 2: <strong className="text-slate-300">{sch.crewHelper2.name}</strong></span>
-                            </div>
-                          )}
-                        </div>
-                        {sch.areaApprovalStatus === 'approved' && (
-                          <div className="mt-1">
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                              <ShieldAlert className="w-2.5 h-2.5" />
-                              <span>Otorisasi Khusus Disetujui</span>
-                            </span>
-                          </div>
-                        )}
                       </td>
 
                       {/* Status */}
                       <td className="p-4">
-                        <select
-                          value={sch.status}
-                          onChange={(e) => handleUpdateStatus(sch.id, e.target.value as ShipmentStatus)}
-                          className={`px-2 py-1 rounded text-xs font-semibold cursor-pointer border ${
-                            sch.status === 'in_transit'
-                              ? 'bg-blue-500/20 text-blue-400 border-blue-500/40'
-                              : sch.status === 'scheduled'
-                              ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
-                              : sch.status === 'delivered'
-                              ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
-                              : 'bg-red-500/20 text-red-400 border-red-500/40'
-                          }`}
-                        >
-                          <option value="scheduled">Terjadwal</option>
-                          <option value="in_transit">Dalam Perjalanan</option>
-                          <option value="delivered">Terkirim (Selesai)</option>
-                          <option value="delayed">Tertunda (Delayed)</option>
-                        </select>
+                        <div className="flex flex-col gap-1">
+                          <select
+                            value={sch.status}
+                            onChange={(e) => handleUpdateStatus(sch.id, e.target.value as ShipmentStatus)}
+                            className={`px-2 py-1 rounded text-xs font-semibold cursor-pointer border ${
+                              sch.status === 'in_transit'
+                                ? 'bg-blue-500/20 text-blue-400 border-blue-500/40'
+                                : sch.status === 'scheduled'
+                                ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
+                                : sch.status === 'delivered'
+                                ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
+                                : 'bg-red-500/20 text-red-400 border-red-500/40'
+                            }`}
+                          >
+                            <option value="scheduled">Terjadwal</option>
+                            <option value="in_transit">Dalam Perjalanan</option>
+                            <option value="delivered">Terkirim (Selesai)</option>
+                            <option value="delayed">Tertunda (Delayed)</option>
+                          </select>
+                          {sch.areaApprovalStatus === 'approved' && (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 w-fit">
+                              <ShieldAlert className="w-2.5 h-2.5" />
+                              <span>Otorisasi Khusus</span>
+                            </span>
+                          )}
+                        </div>
                       </td>
 
                       {/* Aksi */}

@@ -86,14 +86,19 @@ export const scheduleImportValidator = {
       return { date: fallbackDate };
     }
 
-    // 1. Handle numeric Excel serial dates (e.g. 46026 for Jan 2026)
+    // 1. Handle numeric Excel serial dates (e.g. 46027 for 5 Jan 2026, 46030 for 8 Jan 2026)
     if (typeof dateStr === 'number' || (!isNaN(Number(dateStr)) && Number(dateStr) > 30000 && Number(dateStr) < 70000)) {
       const serial = Number(dateStr);
-      // Excel base date: 1899-12-30 (due to 1900 leap year bug)
+      // Excel base date: 1899-12-30 (due to 1900 leap year bug, offset 25569 to 1970-01-01)
       const msPerDay = 86400000;
-      const parsedDate = new Date((serial - 25569) * msPerDay);
-      if (!isNaN(parsedDate.getTime()) && parsedDate.getFullYear() >= 2020 && parsedDate.getFullYear() <= 2035) {
-        return { date: parsedDate };
+      const utcDate = new Date(Math.round((serial - 25569) * msPerDay));
+      if (!isNaN(utcDate.getTime())) {
+        const yr = utcDate.getUTCFullYear();
+        const mo = utcDate.getUTCMonth();
+        const dy = utcDate.getUTCDate();
+        if (yr >= 2020 && yr <= 2035) {
+          return { date: new Date(yr, mo, dy, 7, 30, 0) };
+        }
       }
     }
 

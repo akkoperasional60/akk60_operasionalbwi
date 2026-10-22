@@ -205,6 +205,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     scheduleId?: string;
     driver: string;
     helper: string;
+    helper2: string;
     area: string;
     armada: string;
     target: string;
@@ -235,6 +236,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       scheduleId: p.id,
       driver: p.driver,
       helper: p.helper && p.helper !== '-' ? p.helper : '',
+      helper2: p.helper2 && p.helper2 !== '-' ? p.helper2 : '',
       area: p.area,
       armada: p.armada,
       target: p.target || '',
@@ -251,6 +253,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       scheduleId: undefined,
       driver: 'Supri',
       helper: 'Rifal',
+      helper2: '',
       area: 'DENPASAR 1',
       armada: 'DS3',
       target: 'Gudang Pusat AKK Banyuwangi DC',
@@ -503,7 +506,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
   const handleSaveTripModal = () => {
     if (!editingTripModal) return;
-    const { dayNumber, dateString, tripIndex, scheduleId, driver, helper, area, armada, target, isNew } = editingTripModal;
+    const { dayNumber, dateString, tripIndex, scheduleId, driver, helper, helper2, area, armada, target, isNew } = editingTripModal;
 
     const effectiveMonth = selectedMonth === -1 ? 0 : selectedMonth;
     const monthPadded = String(effectiveMonth + 1).padStart(2, '0');
@@ -527,6 +530,11 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     const matchedHelper = helper && helper.trim() && helper !== '-' ? crews.find(c => 
       c.name.toLowerCase().includes(helper.toLowerCase()) || 
       helper.toLowerCase().includes(c.name.toLowerCase())
+    ) : undefined;
+
+    const matchedHelper2 = helper2 && helper2.trim() && helper2 !== '-' ? crews.find(c => 
+      c.name.toLowerCase().includes(helper2.toLowerCase()) || 
+      helper2.toLowerCase().includes(c.name.toLowerCase())
     ) : undefined;
 
     const stdArea = standardizeAreaName(area);
@@ -562,6 +570,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         crew: matchedDriver,
         crewHelperId: matchedHelper ? matchedHelper.id : undefined,
         crewHelper: matchedHelper,
+        crewHelper2Id: matchedHelper2 ? matchedHelper2.id : undefined,
+        crewHelper2: matchedHelper2,
         status: 'scheduled',
         departureDate: departureIso,
         estimatedArrival: estArrivalIso,
@@ -591,6 +601,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   id: newSchId,
                   driver,
                   helper: helper || '-',
+                  helper2: helper2 || '-',
                   area: stdArea,
                   armada,
                   target,
@@ -632,6 +643,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
           crew: matchedDriver,
           crewHelperId: matchedHelper ? matchedHelper.id : undefined,
           crewHelper: matchedHelper,
+          crewHelper2Id: matchedHelper2 ? matchedHelper2.id : undefined,
+          crewHelper2: matchedHelper2,
           areaName: stdArea,
           notes: target,
           isManuallyEdited: true
@@ -667,6 +680,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
           crew: matchedDriver,
           crewHelperId: matchedHelper ? matchedHelper.id : undefined,
           crewHelper: matchedHelper,
+          crewHelper2Id: matchedHelper2 ? matchedHelper2.id : undefined,
+          crewHelper2: matchedHelper2,
           status: 'scheduled',
           departureDate: departureIso,
           estimatedArrival: estArrivalIso,
@@ -696,6 +711,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 id: targetId || newPengiriman[tripIndex].id,
                 driver,
                 helper: helper || '-',
+                helper2: helper2 || '-',
                 area: stdArea,
                 armada,
                 target,
@@ -977,6 +993,14 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
           if (p.driver) crews.push({ name: p.driver, roleHint: 'Driver' });
           if (p.helper) {
             p.helper.split(/[,&/]+/).forEach((h: string) => {
+              const cleanH = h.trim();
+              if (cleanH && cleanH !== '-' && cleanH !== '0') {
+                crews.push({ name: cleanH, roleHint: 'Helper' });
+              }
+            });
+          }
+          if (p.helper2) {
+            p.helper2.split(/[,&/]+/).forEach((h: string) => {
               const cleanH = h.trim();
               if (cleanH && cleanH !== '-' && cleanH !== '0') {
                 crews.push({ name: cleanH, roleHint: 'Helper' });
@@ -1456,6 +1480,14 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         if (t.driver) rawCrews.push({ name: t.driver, roleHint: 'Driver' });
         if (t.helper) {
           t.helper.split(/[,&/]+/).forEach(h => {
+            const cleanH = h.trim();
+            if (cleanH && cleanH !== '-' && cleanH !== '0') {
+              rawCrews.push({ name: cleanH, roleHint: 'Helper' });
+            }
+          });
+        }
+        if (t.helper2) {
+          t.helper2.split(/[,&/]+/).forEach(h => {
             const cleanH = h.trim();
             if (cleanH && cleanH !== '-' && cleanH !== '0') {
               rawCrews.push({ name: cleanH, roleHint: 'Helper' });
@@ -2454,23 +2486,44 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 </datalist>
               </div>
 
-              <div>
-                <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
-                  Helper / Kernet (Opsional)
-                </label>
-                <input
-                  type="text"
-                  list="helper-options"
-                  value={editingTripModal.helper}
-                  onChange={(e) => setEditingTripModal({ ...editingTripModal, helper: e.target.value })}
-                  placeholder="Nama Helper / PIC (atau -)"
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-emerald-500"
-                />
-                <datalist id="helper-options">
-                  {logisticsStore.getCrews().map(c => (
-                    <option key={c.id} value={c.name} />
-                  ))}
-                </datalist>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
+                    Helper / Kernet 1 (Opsional)
+                  </label>
+                  <input
+                    type="text"
+                    list="helper1-options"
+                    value={editingTripModal.helper}
+                    onChange={(e) => setEditingTripModal({ ...editingTripModal, helper: e.target.value })}
+                    placeholder="Nama Helper 1 (atau -)"
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-emerald-500"
+                  />
+                  <datalist id="helper1-options">
+                    {logisticsStore.getCrews().map(c => (
+                      <option key={c.id} value={c.name} />
+                    ))}
+                  </datalist>
+                </div>
+
+                <div>
+                  <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
+                    Helper / Kernet 2 (Opsional)
+                  </label>
+                  <input
+                    type="text"
+                    list="helper2-options"
+                    value={editingTripModal.helper2}
+                    onChange={(e) => setEditingTripModal({ ...editingTripModal, helper2: e.target.value })}
+                    placeholder="Nama Helper 2 (atau -)"
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-emerald-500"
+                  />
+                  <datalist id="helper2-options">
+                    {logisticsStore.getCrews().map(c => (
+                      <option key={c.id} value={c.name} />
+                    ))}
+                  </datalist>
+                </div>
               </div>
 
               <div>

@@ -351,6 +351,7 @@ export function buildMonthSpecificSchedule(year: number, month: number): AdminSc
 export function convertParsedTripsToWeeks(trips: Array<{
   driver: string;
   helper?: string;
+  helper2?: string;
   area: string;
   armada: string;
   target?: string;
@@ -389,7 +390,8 @@ export function convertParsedTripsToWeeks(trips: Array<{
     targetDay.pengiriman.push({
       id: (t as any).id || `sch-trip-${dateKey}-${(t.armada || 'FLT').replace(/[^A-Za-z0-9]/g, '')}-${targetDay.pengiriman.length + 1}`,
       driver: t.driver,
-      helper: t.helper || '-',
+      helper: t.helper && t.helper !== '-' ? t.helper : '-',
+      helper2: t.helper2 && t.helper2 !== '-' ? t.helper2 : (t as any).helper2Name || '-',
       area: t.area,
       armada: t.armada,
       target: t.target,
@@ -452,7 +454,8 @@ export function convertSchedulesToAdminWeeks(
 
     const dayObj = dayMap.get(dayNum)!;
     const driverName = sch.crew?.name || (typeof sch.crewId === 'string' && !sch.crewId.startsWith('crw-') ? sch.crewId : (sch.crewId ? 'Driver ' + sch.crewId.replace('crw-', '') : 'Driver'));
-    const helperName = sch.crewHelper?.name || (sch.crewHelperId ? (typeof sch.crewHelperId === 'string' && !sch.crewHelperId.startsWith('crw-') ? sch.crewHelperId : 'Helper ' + sch.crewHelperId.replace('crw-', '')) : '-');
+    const helperName = sch.crewHelper?.name || (sch.crewHelperId ? (typeof sch.crewHelperId === 'string' && !sch.crewHelperId.startsWith('crw-') ? sch.crewHelperId : 'Helper ' + sch.crewHelperId.replace('crw-', '')) : (sch.helper && sch.helper !== '-' ? sch.helper : '-'));
+    const helper2Name = sch.crewHelper2?.name || (sch.crewHelper2Id ? (typeof sch.crewHelper2Id === 'string' && !sch.crewHelper2Id.startsWith('crw-') ? sch.crewHelper2Id : 'Helper ' + sch.crewHelper2Id.replace('crw-', '')) : (sch.helper2 && sch.helper2 !== '-' ? sch.helper2 : '-'));
     const areaName = sch.areaName || sch.store?.storeName || 'Area Kirim';
     const armadaName = sch.fleet?.initialCode || sch.fleet?.plateNumber || sch.fleetId || 'DS3';
     const targetDesc = sch.notes || sch.cargoDescription || 'Gudang Pusat AKK Banyuwangi DC';
@@ -461,6 +464,7 @@ export function convertSchedulesToAdminWeeks(
       id: sch.id,
       driver: driverName,
       helper: helperName || '-',
+      helper2: helper2Name || '-',
       area: areaName,
       armada: armadaName,
       target: targetDesc,

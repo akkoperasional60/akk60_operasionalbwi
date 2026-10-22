@@ -477,11 +477,14 @@ export const googleSheetsApiService = {
   /**
    * Parse rows from Sheet "ALL" or general tabular schedule
    */
+  /**
+   * Parse rows from Sheet "ALL" or general tabular schedule
+   */
   parseScheduleRows(rows: any[][], customAreaMapping?: Record<string, string>): ParsedSheetTrip[] {
     const trips: ParsedSheetTrip[] = [];
     if (!rows || rows.length === 0) return trips;
 
-    // Check if format is raw Sheet "ALL" (column headers like DRIVER, HELPER, AREA, ARMADA)
+    // Check if format is raw Sheet "ALL" (column headers like DRIVER, HELPER 1, HELPER 2, AREA, ARMADA)
     // Or standard 2D table
     let driverCol = -1;
     let helperCol = -1;
@@ -494,95 +497,99 @@ export const googleSheetsApiService = {
     let poCol = -1;
     let headerRowIdx = -1;
 
+    // Regex definitions for robust header detection (normalized whitespace & case-insensitive)
+    const RE_NO = /^(NO|NO\.|NOMOR|NO[_\s.-]*URUT|URUT|#)(\b|$)/i;
+    const RE_DRIVER = /^(DRIVER|SUPIR|PENGEMUDI|SOPIR)(\b|$)/i;
+    const RE_HELPER_2 = /^(HELPER|KERNET|KENEK)[_\s/.-]*(2|II|B|DUA|KEDUA)(\b|$)/i;
+    const RE_HELPER_1 = /^(HELPER|KERNET|KENEK)[_\s/.-]*(1|I|A|SATU|PERTAMA)?(\b|$)/i;
+    const RE_HELPER_GENERIC = /^(HELPER|KERNET|KENEK)(\b|$)/i;
+    const RE_AREA = /^(AREA|TUJUAN|KIRIM[_\s.-]*AREA|RUTE|WILAYAH|DESTINASI)(\b|$)/i;
+    const RE_ARMADA = /^(ARMADA|MOBIL|PLAT|TRUK|NOPOL|NO[_\s.-]*POL|KENDARAAN)(\b|$)/i;
+    const RE_DATE = /^(TANGGAL|TGL|DATE|HARI)(\b|$)/i;
+    const RE_TARGET = /^(TARGET|CATATAN|NOTES|KETERANGAN|JAM|PO|NO[_\s.-]*PO|RESI|SJ)(\b|$)/i;
+
     // Search header row across first 10 rows
     for (let r = 0; r < Math.min(rows.length, 10); r++) {
       const row = rows[r];
-      if (!row) continue;
+      if (!row || !Array.isArray(row)) continue;
+
+      const nextRow = r + 1 < rows.length ? rows[r + 1] : null;
 
       for (let c = 0; c < row.length; c++) {
-        const val = String(row[c] || '').toUpperCase().trim();
-        if (val === 'NO' || val === 'NO.' || val === 'NOMOR' || val === 'NO URUT' || val === 'URUT') noCol = c;
-        if (val === 'DRIVER' || val === 'SUPIR') driverCol = c;
-        if (val === 'HELPER' || val === 'KERNET' || val === 'HELPER 1' || val === 'KERNET 1') {
+        const rawVal = String(row[c] || '').replace(/\s+/g, ' ').trim();
+        const nextRowVal = nextRow && nextRow[c] !== undefined ? String(nextRow[c] || '').replace(/\s+/g, ' ').trim() : '';
+
+        // Combined header if subheader exists (e.g. Row 0: "HELPER", Row 1: "1" -> "HELPER 1")
+        const combinedVal = `${rawVal} ${nextRowVal}`.trim();
+
+        if (RE_NO.test(rawVal)) noCol = c;
+        if (RE_DRIVER.test(rawVal)) driverCol = c;
+
+        // Specific Helper 2 check first
+        if (RE_HELPER_2.test(combinedVal) || RE_HELPER_2.test(rawVal) || (nextRowVal === '2' && c > 1)) {
+          helper2Col = c;
+        } else if (RE_HELPER_1.test(combinedVal) || RE_HELPER_1.test(rawVal) || (nextRowVal === '1' && c > 1)) {
           if (helperCol === -1) {
             helperCol = c;
-            // Check if next column in same or sub-row might be explicitly marked as Helper 2
+          } else if (helper2Col === -1 && c > helperCol) {
+            helper2Col = c;
+          }
+        } else if (RE_HELPER_GENERIC.test(rawVal)) {
+          if (helperCol === -1) {
+            helperCol = c;
+            // Check if column immediately to the right is sub-labeled "2" or "HELPER"
             if (c + 1 < row.length) {
-              const nextVal = String(row[c + 1] || '').toUpperCase().trim();
-              if (nextVal === '2' || nextVal === 'HELPER 2' || nextVal === 'KERNET 2') {
+              const rightVal = String(row[c + 1] || '').replace(/\s+/g, ' ').trim();
+              const rightNextVal = nextRow && nextRow[c + 1] !== undefined ? String(nextRow[c + 1] || '').replace(/\s+/g, ' ').trim() : '';
+              if (rightVal === '2' || rightNextVal === '2' || RE_HELPER_2.test(rightVal) || RE_HELPER_GENERIC.test(rightVal)) {
                 helper2Col = c + 1;
               }
             }
-          } else {
+          } else if (helper2Col === -1) {
             helper2Col = c;
           }
         }
-        if (val === 'HELPER 2' || val === 'KERNET 2') {
-          helper2Col = c;
-        }
-        if (val === '1' && helperCol === -1 && c > 1) {
-          helperCol = c;
-          if (c + 1 < row.length) helper2Col = c + 1;
-        }
-        if (val.includes('AREA') || val.includes('TUJUAN') || val.includes('RUTE')) areaCol = c;
-        if (val === 'ARMADA' || val === 'MOBIL' || val === 'PLAT') armadaCol = c;
-        if (val.includes('TANGGAL') || val.includes('DATE') || val.includes('HARI')) dateCol = c;
-        if (val.includes('TARGET') || val.includes('JAM') || val.includes('BACKUP')) targetCol = c;
-        if (val === 'PO' || val === 'NO PO' || val === 'NOMOR PO' || val === 'NO RESI' || val === 'RESI' || val === 'NO SJ' || val === 'SURAT JALAN' || val === 'INVOICE') poCol = c;
-      }
 
-      // Warning if helper columns are missing, but don't strictly block if we have at least one
-      if (helperCol === -1) {
-        console.warn('Kolom Helper tidak ditemukan di spreadsheet.');
+        if (RE_AREA.test(rawVal) || rawVal.toUpperCase().includes('AREA') || rawVal.toUpperCase().includes('TUJUAN')) areaCol = c;
+        if (RE_ARMADA.test(rawVal) || rawVal.toUpperCase().includes('ARMADA') || rawVal.toUpperCase().includes('PLAT')) armadaCol = c;
+        if (RE_DATE.test(rawVal) || rawVal.toUpperCase().includes('TANGGAL') || rawVal.toUpperCase().includes('DATE')) dateCol = c;
+        if (RE_TARGET.test(rawVal)) targetCol = c;
       }
 
       if (driverCol !== -1 && areaCol !== -1) {
         headerRowIdx = r;
         if (noCol === -1 && driverCol > 0) noCol = driverCol - 1;
 
-        // If dateCol wasn't found on the driver header row, look in previous rows (e.g. Row 3 has "Tanggal" in Col 0)
+        // Resolve dateCol if not on header row
         if (dateCol === -1) {
           for (let pr = 0; pr < r; pr++) {
             const prevRow = rows[pr];
             if (!prevRow) continue;
             for (let pc = 0; pc < prevRow.length; pc++) {
-              const pVal = String(prevRow[pc] || '').toUpperCase().trim();
-              if (pVal.includes('TANGGAL') || pVal.includes('DATE')) {
+              const pVal = String(prevRow[pc] || '').replace(/\s+/g, ' ').trim().toUpperCase();
+              if (RE_DATE.test(pVal) || pVal.includes('TANGGAL') || pVal.includes('DATE')) {
                 dateCol = pc;
                 break;
               }
             }
           }
-          if (dateCol === -1) {
-            // Only default to Column 0 if Column 0 is NOT the No urut column
-            if (noCol !== 0) {
-              dateCol = 0;
-            }
+          if (dateCol === -1 && noCol !== 0) {
+            dateCol = 0;
           }
         }
         if (dateCol === noCol) {
           dateCol = -1;
         }
 
-        // If helperCol wasn't found on driver row, check row above for "Helper"
-        if (helperCol === -1) {
-          for (let pr = 0; pr < r; pr++) {
-            const prevRow = rows[pr];
-            if (!prevRow) continue;
-            for (let pc = 0; pc < prevRow.length; pc++) {
-              const pVal = String(prevRow[pc] || '').toUpperCase().trim();
-              if (pVal === 'HELPER') {
-                helperCol = pc;
-                helper2Col = pc + 1;
-                break;
-              }
-            }
-          }
-          if (helperCol === -1 && driverCol !== -1 && areaCol !== -1 && areaCol > driverCol + 1) {
-            helperCol = driverCol + 1;
-            if (areaCol > driverCol + 2) helper2Col = driverCol + 2;
-          }
+        // Positional fallback for Helper 1 and Helper 2 between Driver and Area columns
+        // e.g. DRIVER is col 2, AREA is col 5 -> col 3 is Helper 1, col 4 is Helper 2!
+        if (helperCol === -1 && areaCol > driverCol + 1) {
+          helperCol = driverCol + 1;
         }
+        if (helper2Col === -1 && helperCol !== -1 && areaCol > helperCol + 1) {
+          helper2Col = helperCol + 1;
+        }
+
         break;
       }
     }
@@ -593,10 +600,11 @@ export const googleSheetsApiService = {
         if (!row || row.length === 0) return null;
         
         // 1. Check explicit dateCol if defined
-        if (dateCol !== -1 && row[dateCol]) {
-          const val = String(row[dateCol] || '').trim();
+        if (dateCol !== -1 && row[dateCol] !== undefined && row[dateCol] !== null) {
+          const rawCell = row[dateCol];
+          const val = String(rawCell).trim();
           if (val && val !== '-' && val !== '0') {
-            const p = scheduleImportValidator.parseDate(val);
+            const p = scheduleImportValidator.parseDate(rawCell, new Date(2026, 0, 5));
             if (p.date && !p.error) return val;
           }
         }
@@ -838,8 +846,8 @@ export const googleSheetsApiService = {
 
           trips.push({
             driver: item.driver,
-            helper: item.helper1,
-            helper2: item.helper2,
+            helper: item.helper1 && item.helper1 !== '-' ? item.helper1 : '-',
+            helper2: item.helper2 && item.helper2 !== '-' ? item.helper2 : '-',
             rawArea: item.area,
             area: standardizedArea,
             armada: item.armada,
@@ -862,32 +870,51 @@ export const googleSheetsApiService = {
         return;
       }
 
-      // Check first 6 columns
+      // Check first 8 columns
       for (let c = 0; c < row.length - 2; c++) {
         const potentialDriver = String(row[c] || '').trim();
-        const potentialHelper = String(row[c + 1] || '').trim();
-        const potentialArea = String(row[c + 2] || '').trim();
-        const potentialArmada = String(row[c + 3] || '').trim();
+        const potentialHelper1 = String(row[c + 1] || '').trim();
+        const col2 = String(row[c + 2] || '').trim();
+        const col3 = c + 3 < row.length ? String(row[c + 3] || '').trim() : '';
+        const col4 = c + 4 < row.length ? String(row[c + 4] || '').trim() : '';
 
         if (
           potentialDriver.length >= 3 && 
           !potentialDriver.includes('MINGGU') && 
           !potentialDriver.includes('JANUARI') &&
-          potentialArea.length >= 3 && 
-          potentialArmada.length >= 2
+          !potentialDriver.toUpperCase().includes('DRIVER')
         ) {
-          const standardizedArea = (customAreaMapping && customAreaMapping[potentialArea]) || standardizeAreaName(potentialArea);
-          trips.push({
-            driver: potentialDriver,
-            helper: potentialHelper !== '-' ? potentialHelper : undefined,
-            rawArea: potentialArea,
-            area: standardizedArea,
-            armada: potentialArmada,
-            dateStr: '2026-01-05',
-            dayName: 'SENIN',
-            notes: `Row ${rowIdx + 1}`
-          });
-          break;
+          let helper1 = potentialHelper1;
+          let helper2 = '-';
+          let potentialArea = '';
+          let potentialArmada = '';
+
+          if (col3.length >= 3 && col4.length >= 2) {
+            // 5-column: Driver, Helper 1, Helper 2, Area, Armada
+            helper2 = col2;
+            potentialArea = col3;
+            potentialArmada = col4;
+          } else if (col2.length >= 3 && col3.length >= 2) {
+            // 4-column: Driver, Helper 1, Area, Armada
+            potentialArea = col2;
+            potentialArmada = col3;
+          }
+
+          if (potentialArea.length >= 3 && potentialArmada.length >= 2) {
+            const standardizedArea = (customAreaMapping && customAreaMapping[potentialArea]) || standardizeAreaName(potentialArea);
+            trips.push({
+              driver: potentialDriver,
+              helper: helper1 && helper1 !== '-' ? helper1 : '-',
+              helper2: helper2 && helper2 !== '-' ? helper2 : '-',
+              rawArea: potentialArea,
+              area: standardizedArea,
+              armada: potentialArmada,
+              dateStr: '2026-01-05',
+              dayName: 'SENIN',
+              notes: `Row ${rowIdx + 1}`
+            });
+            break;
+          }
         }
       }
     });
