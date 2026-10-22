@@ -286,9 +286,9 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
               </div>
             </div>
 
-            {/* Quick Metrics: Odometer & Fuel */}
-            <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800/80">
-              <div className="bg-slate-900/80 p-2 rounded-lg border border-slate-800 space-y-1">
+            {/* Quick Metrics: Odometer (Tanpa BBM Solar) */}
+            <div className="pt-2 border-t border-slate-800/80">
+              <div className="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800 space-y-1">
                 <div className="text-[10px] text-slate-400 flex items-center gap-1">
                   <Gauge className="w-3.5 h-3.5 text-blue-400" />
                   <span>Odometer (KM):</span>
@@ -297,26 +297,7 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
                   type="number"
                   value={odometerKm}
                   onChange={(e) => setOdometerKm(Number(e.target.value))}
-                  className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-slate-200 font-mono font-bold text-xs focus:outline-none focus:border-amber-500"
-                />
-              </div>
-
-              <div className="bg-slate-900/80 p-2 rounded-lg border border-slate-800 space-y-1">
-                <div className="text-[10px] text-slate-400 flex items-center justify-between">
-                  <span className="flex items-center gap-1">
-                    <Fuel className="w-3.5 h-3.5 text-amber-400" />
-                    <span>BBM Solar:</span>
-                  </span>
-                  <span className="font-mono text-amber-300 font-bold">{fuelPercent}%</span>
-                </div>
-                <input
-                  type="range"
-                  min="10"
-                  max="100"
-                  step="5"
-                  value={fuelPercent}
-                  onChange={(e) => setFuelPercent(Number(e.target.value))}
-                  className="w-full accent-amber-500 cursor-pointer"
+                  className="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-slate-200 font-mono font-bold text-xs focus:outline-none focus:border-amber-500"
                 />
               </div>
             </div>

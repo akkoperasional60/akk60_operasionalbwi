@@ -167,7 +167,30 @@ class DriverWaybillService {
     const stored = this.getStoredWaybills();
     const key = `WB-${schedule.id}`;
     if (stored[key]) {
-      return stored[key];
+      const existing = stored[key];
+      let changed = false;
+      if (schedule.fleet?.plateNumber && existing.fleet.plateNumber !== schedule.fleet.plateNumber) {
+        existing.fleet = {
+          id: schedule.fleetId,
+          plateNumber: schedule.fleet.plateNumber,
+          vehicleType: schedule.fleet.vehicleType,
+          initialCode: schedule.fleet.initialCode || existing.fleet.initialCode
+        };
+        changed = true;
+      }
+      if (schedule.status === 'delivered' && existing.status !== 'delivered') {
+        existing.status = 'delivered';
+        existing.statusLabel = 'Diterima Toko (Selesai)';
+        changed = true;
+      } else if (schedule.status === 'in_transit' && existing.status === 'checker_verified') {
+        existing.status = 'in_transit';
+        existing.statusLabel = 'Dalam Perjalanan Pengantaran';
+        changed = true;
+      }
+      if (changed) {
+        this.saveWaybill(existing);
+      }
+      return existing;
     }
     const generated = this.generateWaybillFromSchedule(schedule);
     stored[key] = generated;
@@ -177,10 +200,15 @@ class DriverWaybillService {
 
   public getWaybillsForDriver(driverId: string, schedules: Schedule[]): OutboundWaybill[] {
     const driverSchedules = schedules.filter(
-      s => s.crewId === driverId || (s.crew && s.crew.id === driverId)
+      s =>
+        s.crewId === driverId ||
+        (s.crew && s.crew.id === driverId) ||
+        s.crewHelperId === driverId ||
+        s.crewHelper2Id === driverId
     );
 
-    return driverSchedules.map(sch => this.getWaybillForSchedule(sch));
+    const targetSchedules = driverSchedules.length > 0 ? driverSchedules : schedules;
+    return targetSchedules.map(sch => this.getWaybillForSchedule(sch));
   }
 
   public updateWaybillStatus(

@@ -434,7 +434,35 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   const [waybillStatusFilter, setWaybillStatusFilter] = useState<'all' | 'gate_out' | 'in_transit' | 'delivered'>('all');
   const [checklistTabCategory, setChecklistTabCategory] = useState<ChecklistItemCategory | 'all'>('all');
 
-  // 🕒 Driver Check-in Shift Management (PIN 2x Verification)
+  // 🕒 Realtime Hari, Tanggal & Waktu Portal
+  const [realtimeNow, setRealtimeNow] = useState<Date>(() => new Date());
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setRealtimeNow(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const realtimeDayDateStr = useMemo(() => {
+    return realtimeNow.toLocaleDateString('id-ID', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric'
+    });
+  }, [realtimeNow]);
+
+  const realtimeTimeStr = useMemo(() => {
+    return (
+      realtimeNow.toLocaleTimeString('id-ID', {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      }) + ' WIB'
+    );
+  }, [realtimeNow]);
+
+  // 🕒 Driver Check-in Shift Management (PIN 2x Verification) & Alur Pasca Check-In
   const [activeShift, setActiveShift] = useState<DriverShiftCheckin | null>(() =>
     driverShiftService.getActiveShift(selectedDriverId)
   );
@@ -444,10 +472,42 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   const [isApkModalOpen, setIsApkModalOpen] = useState<boolean>(false);
   const [isGmapsShareModalOpen, setIsGmapsShareModalOpen] = useState<boolean>(false);
 
+  // Alur Baru: Setelah Check-In -> Pilih/Kunci Armada -> Isi Checklist Armada -> Simpan -> Mulai Berangkat -> Konfirmasi Tiba di Gudang
+  const [selectedFleetId, setSelectedFleetId] = useState<string>(() => {
+    try {
+      return localStorage.getItem(`akk_locked_fleet_${selectedDriverId}`) || '';
+    } catch {
+      return '';
+    }
+  });
+  const [isFleetLockedAfterCheckin, setIsFleetLockedAfterCheckin] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(`akk_fleet_locked_flag_${selectedDriverId}`) === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [isHelperPositionSkipped, setIsHelperPositionSkipped] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(`akk_helper_skipped_${selectedDriverId}`) === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [isPostCheckinFleetModalOpen, setIsPostCheckinFleetModalOpen] = useState<boolean>(false);
+
   // Sync active shift on driver change or shift event
   useEffect(() => {
     if (selectedDriverId) {
       setActiveShift(driverShiftService.getActiveShift(selectedDriverId));
+      try {
+        const savedFleet = localStorage.getItem(`akk_locked_fleet_${selectedDriverId}`) || '';
+        const savedLocked = localStorage.getItem(`akk_fleet_locked_flag_${selectedDriverId}`) === 'true';
+        const savedHelperSkip = localStorage.getItem(`akk_helper_skipped_${selectedDriverId}`) === 'true';
+        setSelectedFleetId(savedFleet);
+        setIsFleetLockedAfterCheckin(savedLocked);
+        setIsHelperPositionSkipped(savedHelperSkip);
+      } catch {}
     }
 
     const onShiftUpdated = (e: any) => {
@@ -570,7 +630,10 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   });
 
   const [checklistInspectionType, setChecklistInspectionType] = useState<'pre_trip' | 'post_trip'>('pre_trip');
-  const [selectedDateFilter, setSelectedDateFilter] = useState<string>('');
+  const [dateFilterStart, setDateFilterStart] = useState<string>('');
+  const [dateFilterEnd, setDateFilterEnd] = useState<string>('');
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const ITEMS_PER_PAGE = 4;
 
   // Proof of Delivery (Konfirmasi Tiba di Gudang Argo) completion modal state
   const [podModal, setPodModal] = useState<{
@@ -633,11 +696,22 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     return crews[0] ? { ...crews[0], name: portalDisplayName } : null;
   }, [crews, selectedDriverId, syncedCrew, portalDisplayName]);
 
-  // Assigned Fleet for current driver
+  // Assigned Fleet for current driver (Prioritizes locked fleet selected after Check-In)
   const assignedFleet = useMemo(() => {
-    if (!currentDriver) return null;
-    return fleets.find(f => f.driverId === currentDriver.id || f.id === currentDriver.currentFleetId) || fleets[0] || null;
-  }, [fleets, currentDriver]);
+    if (selectedFleetId) {
+      const lockedMatch = fleets.find(f => f.id === selectedFleetId);
+      if (lockedMatch) return lockedMatch;
+    }
+    if (currentDriver?.currentFleetId) {
+      const currentFleetMatch = fleets.find(f => f.id === currentDriver.currentFleetId);
+      if (currentFleetMatch) return currentFleetMatch;
+    }
+    if (currentDriver) {
+      const driverMatch = fleets.find(f => f.driverId === currentDriver.id);
+      if (driverMatch) return driverMatch;
+    }
+    return fleets[0] || null;
+  }, [fleets, currentDriver, selectedFleetId]);
 
   // Derived Outbound Waybills (Surat Jalan Keluar) for current driver's deliveries
   const driverWaybills = useMemo(() => {
@@ -646,8 +720,60 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
   // Latest vehicle checklist for current driver/fleet
   const latestChecklist = useMemo(() => {
-    return checklists.find(c => c.driverId === selectedDriverId) || checklists[0] || null;
-  }, [checklists, selectedDriverId]);
+    if (assignedFleet) {
+      const byFleet = checklists.find(
+        c => c.driverId === selectedDriverId && (c.fleetId === assignedFleet.id || c.plateNumber === assignedFleet.plateNumber)
+      );
+      if (byFleet) return byFleet;
+    }
+    return checklists.find(c => c.driverId === selectedDriverId) || null;
+  }, [checklists, selectedDriverId, assignedFleet]);
+
+  const hasChecklistToday = useMemo(() => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    return Boolean(latestChecklist && latestChecklist.date === todayStr);
+  }, [latestChecklist]);
+
+  const isUserHelperRole = useMemo(() => {
+    return (
+      syncedUserRoleInfo.roleLabel === 'Helper' ||
+      String(currentUser?.role || '').toLowerCase() === 'crew_helper' ||
+      isHelperPositionSkipped
+    );
+  }, [syncedUserRoleInfo.roleLabel, currentUser?.role, isHelperPositionSkipped]);
+
+  // Helper to lock selected fleet after check-in and propagate to active schedules
+  const lockSelectedFleetForDriver = (fleetIdToLock: string) => {
+    const targetF = fleets.find(f => f.id === fleetIdToLock) || assignedFleet || fleets[0];
+    if (!targetF) return null;
+    setSelectedFleetId(targetF.id);
+    setIsFleetLockedAfterCheckin(true);
+    setIsHelperPositionSkipped(false);
+    try {
+      localStorage.setItem(`akk_locked_fleet_${selectedDriverId}`, targetF.id);
+      localStorage.setItem(`akk_fleet_locked_flag_${selectedDriverId}`, 'true');
+      localStorage.setItem(`akk_helper_skipped_${selectedDriverId}`, 'false');
+    } catch {}
+    if (selectedDriverId) {
+      logisticsStore.updateCrew(selectedDriverId, { currentFleetId: targetF.id });
+    }
+    // Kunci nomor kendaraan armada pada jadwal aktif driver ini
+    const currentSchedules = logisticsStore.getSchedules();
+    currentSchedules.forEach(s => {
+      if (
+        s.status !== 'delivered' &&
+        (s.crewId === selectedDriverId ||
+          (currentDriver && s.crew?.name?.toLowerCase() === currentDriver.name.toLowerCase()))
+      ) {
+        logisticsStore.updateSchedule(s.id, {
+          fleetId: targetF.id,
+          fleet: targetF
+        });
+      }
+    });
+    loadDeliveries(true);
+    return targetF;
+  };
 
   // Load deliveries with offline local caching (IndexedDB & LocalStorage)
   const loadDeliveries = async (silent = false) => {
@@ -738,8 +864,10 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     };
   }, [selectedDriverId]);
 
-  // Cek peran user saat ini untuk hak akses khusus Super Admin
-  const isSuperAdmin = currentUser?.role === 'super_admin';
+  // Cek peran user saat ini untuk hak akses khusus Super Admin (Hanya Super Admin yang melihat tombol Hapus Riwayat Selesai)
+  const isSuperAdmin =
+    currentUser?.role === 'super_admin' &&
+    String(syncedUserRoleInfo.rawRole).toLowerCase() === 'super_admin';
 
   // 📦 Pemisahan tugas pengiriman dengan progresi jadwal otomatis sesuai tanggal hari ini:
   // - Jika tanggal keberangkatan (departureDate) <= hari ini (todayIso) dan belum 'delivered',
@@ -782,7 +910,47 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     };
   }, [deliveries]);
 
-  // Filtered deliveries berdasarkan activeTab, selectedDateFilter, dan searchQuery
+  // Helper resolusi komposisi kru (Driver Utama, Helper 1, dan Helper 2 untuk kondisi tertentu)
+  const getDeliveryCrewComposition = (d: Schedule) => {
+    const resolvedDriver =
+      d.crew?.name ||
+      crews.find(c => c.id === d.crewId)?.name ||
+      currentDriver?.name ||
+      portalDisplayName ||
+      'Driver Utama';
+
+    const rawHelper1 =
+      d.crewHelper?.name ||
+      (d.crewHelperId ? crews.find(c => c.id === d.crewHelperId)?.name : '') ||
+      '';
+    const rawHelper2 =
+      d.crewHelper2?.name ||
+      (d.crewHelper2Id ? crews.find(c => c.id === d.crewHelper2Id)?.name : '') ||
+      '';
+
+    let helper1Name = rawHelper1.trim() || 'Tanpa Helper';
+    let helper2Name = rawHelper2.trim();
+
+    // Jika Helper 1 memuat 2 nama dipisahkan "/" atau "&" atau "," dan Helper 2 belum terisi terpisah
+    if (!helper2Name && rawHelper1 && /[,&/]/.test(rawHelper1)) {
+      const parts = rawHelper1.split(/[,&/]/).map(s => s.trim()).filter(Boolean);
+      if (parts.length >= 2) {
+        helper1Name = parts[0];
+        helper2Name = parts.slice(1).join(', ');
+      }
+    }
+
+    const hasHelper2 = Boolean(helper2Name && helper2Name !== '-' && helper2Name.toLowerCase() !== 'tanpa helper');
+
+    return {
+      driverName: resolvedDriver,
+      helper1Name,
+      helper2Name: hasHelper2 ? helper2Name : '',
+      hasHelper2
+    };
+  };
+
+  // Filtered deliveries berdasarkan activeTab, rentang tanggal (dateFilterStart - dateFilterEnd), batasan sebulan pada 'all', dan searchQuery
   const filteredDeliveries = useMemo(() => {
     let sourceList: Schedule[] = [];
     if (activeTab === 'active') sourceList = activeDeliveries;
@@ -790,11 +958,22 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     else if (activeTab === 'delivered') sourceList = deliveredDeliveries;
     else sourceList = [...activeDeliveries, ...scheduledDeliveries, ...deliveredDeliveries];
 
-    if (selectedDateFilter) {
+    const hasCustomDateRange = Boolean(dateFilterStart || dateFilterEnd);
+    const currentMonthPrefix = new Date().toISOString().slice(0, 7); // YYYY-MM
+
+    if (hasCustomDateRange) {
       sourceList = sourceList.filter(d => {
-        const dDate = d.departureDate ? d.departureDate.substring(0, 10) : '';
-        const cDate = d.createdAt ? d.createdAt.substring(0, 10) : '';
-        return dDate === selectedDateFilter || cDate === selectedDateFilter;
+        const itemDate = (d.departureDate || d.createdAt || '').substring(0, 10);
+        if (!itemDate) return false;
+        if (dateFilterStart && itemDate < dateFilterStart) return false;
+        if (dateFilterEnd && itemDate > dateFilterEnd) return false;
+        return true;
+      });
+    } else if (activeTab === 'all') {
+      // Pada tab "Semua", batasi otomatis dalam sebulan berjalan. Pergantian bulan masuk melalui Filter Tanggal Kirim.
+      sourceList = sourceList.filter(d => {
+        const itemDate = (d.departureDate || d.createdAt || '').substring(0, 7);
+        return !itemDate || itemDate === currentMonthPrefix;
       });
     }
 
@@ -807,9 +986,35 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       const area = d.areaName?.toLowerCase() || '';
       const tracking = d.trackingNumber?.toLowerCase() || '';
       const cargo = d.cargoDescription?.toLowerCase() || '';
-      return storeName.includes(q) || city.includes(q) || area.includes(q) || tracking.includes(q) || cargo.includes(q);
+      const plate = d.fleet?.plateNumber?.toLowerCase() || '';
+      const { driverName, helper1Name, helper2Name } = getDeliveryCrewComposition(d);
+      return (
+        area.includes(q) ||
+        storeName.includes(q) ||
+        city.includes(q) ||
+        driverName.toLowerCase().includes(q) ||
+        helper1Name.toLowerCase().includes(q) ||
+        helper2Name.toLowerCase().includes(q) ||
+        tracking.includes(q) ||
+        cargo.includes(q) ||
+        plate.includes(q)
+      );
     });
-  }, [activeDeliveries, scheduledDeliveries, deliveredDeliveries, activeTab, searchQuery, selectedDateFilter]);
+  }, [activeDeliveries, scheduledDeliveries, deliveredDeliveries, activeTab, searchQuery, dateFilterStart, dateFilterEnd, crews, currentDriver, portalDisplayName]);
+
+  // Reset halaman paging ke 1 setiap kali tab, pencarian, atau filter tanggal berubah
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeTab, searchQuery, dateFilterStart, dateFilterEnd]);
+
+  const totalPages = useMemo(() => {
+    return Math.max(1, Math.ceil(filteredDeliveries.length / ITEMS_PER_PAGE));
+  }, [filteredDeliveries.length]);
+
+  const paginatedDeliveries = useMemo(() => {
+    const startIdx = (currentPage - 1) * ITEMS_PER_PAGE;
+    return filteredDeliveries.slice(startIdx, startIdx + ITEMS_PER_PAGE);
+  }, [filteredDeliveries, currentPage]);
 
   // Completed deliveries for History sub-tab
   const completedDeliveries = useMemo(() => {
@@ -877,6 +1082,28 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
     await loadDeliveries(true);
     setIsRefreshing(false);
+  };
+
+  // Saat klik Mulai Berangkat pada jadwal hari ini, langsung masuk alur ke SJ Keluar
+  const handleStartDepartureToSjKeluar = async (delivery: Schedule) => {
+    await handleUpdateStatus(delivery, 'in_transit');
+    const updatedSchedule: Schedule = {
+      ...delivery,
+      status: 'in_transit',
+      fleet: assignedFleet || delivery.fleet,
+      fleetId: assignedFleet?.id || delivery.fleetId
+    };
+    const wb = driverWaybillService.getWaybillForSchedule(updatedSchedule);
+    driverWaybillService.updateWaybillStatus(wb.id, 'in_transit');
+    setWaybillStatusFilter('all');
+    setBottomNav('surat_jalan');
+    setActiveWaybillToView(driverWaybillService.getWaybillForSchedule(updatedSchedule));
+    setIsWaybillModalOpen(true);
+    addNotification(
+      'delivery',
+      'Berangkat Dimulai • Masuk Alur SJ Keluar',
+      `Rute ${delivery.areaName || delivery.store?.storeName || 'Pengiriman'} telah berangkat dan diarahkan langsung ke Surat Jalan Keluar (SJ Keluar).`
+    );
   };
 
   // Submit delay report (Lapor Kendala Pengiriman)
@@ -1074,6 +1301,25 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       photoUrl: podModal.photoUrl
     });
 
+    // Jika dalam kondisi Check-In (activeShift), otomatis terhitung Check-Out saat klik Konfirmasi Tiba di Gudang
+    let autoCheckedOut = false;
+    const currentActiveShift = activeShift || driverShiftService.getActiveShift(selectedDriverId);
+    if (currentActiveShift) {
+      const targetDriverId = currentActiveShift.driverId || selectedDriverId;
+      await driverShiftService.checkOutDriver(
+        targetDriverId,
+        undefined,
+        {
+          driverName: currentDriver?.name || currentActiveShift.driverName || portalDisplayName,
+          userRole: syncedUserRoleInfo.roleLabel,
+          plateNumber: assignedFleet?.plateNumber || currentActiveShift.plateNumber || podModal.delivery?.fleet?.plateNumber || 'P 8125 VC',
+          areaName: podModal.delivery.areaName || podModal.delivery.store?.storeName || 'Gudang Argo'
+        }
+      );
+      setActiveShift(null);
+      autoCheckedOut = true;
+    }
+
     setPodModal({
       isOpen: false,
       delivery: null,
@@ -1086,8 +1332,12 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     });
     addNotification(
       'delivery',
-      'Konfirmasi Tiba di Gudang Argo Berhasil',
-      `Armada ${podModal.delivery.fleet?.plateNumber || ''} tercatat sampai di Argo dengan status: "${statusText}"`
+      autoCheckedOut
+        ? 'Tiba di Gudang & Otomatis Check-Out Berhasil'
+        : 'Konfirmasi Tiba di Gudang Argo Berhasil',
+      autoCheckedOut
+        ? `Armada ${podModal.delivery.fleet?.plateNumber || assignedFleet?.plateNumber || ''} tercatat tiba di Gudang Argo (${statusText}) dan shift Anda otomatis terhitung Check-Out.`
+        : `Armada ${podModal.delivery.fleet?.plateNumber || ''} tercatat sampai di Argo dengan status: "${statusText}"`
     );
   };
 
@@ -1381,8 +1631,20 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           </div>
         </div>
 
+        {/* Fitur Hari, Tanggal, dan Waktu Realtime di Tampilan Portal */}
+        <div className="mt-2.5 px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between gap-2 text-[11px]">
+          <div className="flex items-center gap-1.5 text-slate-200 font-semibold truncate">
+            <Calendar className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span className="truncate">{realtimeDayDateStr}</span>
+          </div>
+          <div className="flex items-center gap-1.5 font-mono font-black text-amber-400 shrink-0 bg-amber-500/10 px-2 py-0.5 rounded-lg border border-amber-500/30">
+            <Clock className="w-3 h-3 text-amber-400 animate-pulse" />
+            <span>{realtimeTimeStr}</span>
+          </div>
+        </div>
+
         {/* Driver/Helper Account Display Integrated with User Management & Assigned Truck Bar */}
-        <div className="mt-3 pt-2.5 border-t border-slate-800/80 flex items-center justify-between gap-2 text-xs">
+        <div className="mt-2.5 pt-2.5 border-t border-slate-800/80 flex items-center justify-between gap-2 text-xs">
           <div className="flex items-center gap-1.5 text-slate-300 min-w-0">
             <span className="text-[10px] text-slate-400 font-semibold uppercase">{syncedUserRoleInfo.roleLabel}:</span>
             <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg px-2.5 py-1 font-bold truncate">
@@ -1400,23 +1662,37 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
           <div className="flex items-center gap-1.5 shrink-0">
             <span className="text-[10px] text-slate-400 font-semibold uppercase">Armada:</span>
-            <select
-              value={assignedFleet?.id || ''}
-              onChange={(e) => {
-                const targetF = fleets.find(f => f.id === e.target.value);
-                if (targetF && selectedDriverId) {
-                  logisticsStore.updateCrew(selectedDriverId, { currentFleetId: targetF.id });
-                  addNotification('delivery', 'Armada Diperbarui', `Armada supir dialihkan ke ${targetF.plateNumber} (${targetF.initialCode || targetF.vehicleType})`);
-                }
-              }}
-              className="bg-slate-950 border border-slate-800 text-emerald-400 font-mono font-bold text-xs rounded-lg px-2 py-1 focus:outline-none focus:border-emerald-500"
-            >
-              {fleets.map(f => (
-                <option key={f.id} value={f.id}>
-                  {f.plateNumber} {f.initialCode ? `(${f.initialCode})` : ''}
-                </option>
-              ))}
-            </select>
+            {activeShift || isFleetLockedAfterCheckin ? (
+              <div
+                className="bg-slate-950 border border-emerald-500/50 text-emerald-400 font-mono font-bold text-xs rounded-lg px-2.5 py-1 flex items-center gap-1.5 select-none"
+              >
+                <Lock className="w-3 h-3 text-emerald-400 shrink-0" />
+                <span>
+                  {assignedFleet?.plateNumber} {assignedFleet?.initialCode ? `(${assignedFleet.initialCode})` : ''}
+                </span>
+              </div>
+            ) : (
+              <select
+                value={assignedFleet?.id || ''}
+                onChange={(e) => {
+                  const locked = lockSelectedFleetForDriver(e.target.value);
+                  if (locked) {
+                    addNotification(
+                      'delivery',
+                      'Armada Terkunci',
+                      `Armada ${locked.plateNumber} (${locked.initialCode || locked.vehicleType}) dikunci untuk pengiriman ini.`
+                    );
+                  }
+                }}
+                className="bg-slate-950 border border-slate-800 text-emerald-400 font-mono font-bold text-xs rounded-lg px-2 py-1 focus:outline-none focus:border-emerald-500"
+              >
+                {fleets.map(f => (
+                  <option key={f.id} value={f.id}>
+                    {f.plateNumber} {f.initialCode ? `(${f.initialCode})` : ''}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
         </div>
       </header>
@@ -1509,8 +1785,15 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                     <div className="font-black text-xs text-white truncate">
                       {portalDisplayName}
                     </div>
-                    <div className="text-[10px] text-slate-400 truncate">
-                      Armada: <span className="text-amber-400 font-bold">{assignedFleet?.plateNumber || 'P 8509 VQ'}</span> · {assignedFleet?.vehicleType || 'Pick Up Box'}
+                    <div className="text-[10px] text-slate-400 truncate flex items-center gap-1">
+                      <span>Armada:</span>
+                      <span className="text-amber-400 font-bold">{assignedFleet?.plateNumber || 'P 8509 VQ'}</span>
+                      <span>· {assignedFleet?.vehicleType || 'Pick Up Box'}</span>
+                      {activeShift && isFleetLockedAfterCheckin && (
+                        <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-bold">
+                          Terkunci
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1540,6 +1823,51 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                   </button>
                 )}
               </div>
+
+              {/* Alur Operasional Terpadu: 1. Check-In -> 2. Isi Armada & Checklist (Helper Bisa Skip) -> 3. Mulai Berangkat -> 4. Tiba di Gudang */}
+              {activeShift && !hasChecklistToday && !isUserHelperRole && (
+                <div className="p-3 rounded-xl bg-amber-500/15 border border-amber-500/40 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-[11px] font-black text-amber-300 flex items-center gap-1.5">
+                      <ClipboardCheck className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span>Tahap Selanjutnya: Isi Armada &amp; Checklist Armada</span>
+                    </div>
+                    <span className="text-[9px] px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 font-black">
+                      WAJIB DRIVER
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-300 leading-relaxed">
+                    Setelah Check-In, Driver wajib memilih armada lalu mengisi &amp; menyimpan Checklist Armada sebelum klik <strong>Mulai Berangkat</strong>. Jika posisi Anda <strong>Helper</strong> pada kiriman ini, Anda dapat melewati tahap ini.
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setIsPostCheckinFleetModalOpen(true)}
+                      className="py-2 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[11px] flex items-center justify-center gap-1.5 shadow cursor-pointer active:scale-95 transition"
+                    >
+                      <Truck className="w-3.5 h-3.5" />
+                      <span>Isi Armada &amp; Checklist</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsHelperPositionSkipped(true);
+                        try {
+                          localStorage.setItem(`akk_helper_skipped_${selectedDriverId}`, 'true');
+                        } catch {}
+                        addNotification(
+                          'delivery',
+                          'Mode Helper Aktif (Checklist Dilewati)',
+                          'Anda melewati pengisian armada & checklist karena bertugas sebagai Helper pada kiriman ini.'
+                        );
+                      }}
+                      className="py-2 px-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-cyan-300 font-bold text-[11px] border border-cyan-500/30 flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition"
+                    >
+                      <span>Lewati (Posisi Helper)</span>
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Current Shift's Performance Metrics Summary (Neu-Pressed Grid) */}
               <div className="grid grid-cols-3 gap-2 text-center">
@@ -1689,80 +2017,129 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               </div>
             )}
 
-            {/* Quick Summary Metrics Grid */}
-            <div className="grid grid-cols-4 gap-2 text-center">
-              <div 
-                onClick={() => setActiveTab('all')}
-                className={`p-2 rounded-xl border transition cursor-pointer ${activeTab === 'all' ? 'bg-amber-500/15 border-amber-500/40 text-amber-300' : 'bg-slate-900 border-slate-800 text-slate-400'}`}
-              >
-                <div className="text-base font-black text-white">{activeDeliveries.length + scheduledDeliveries.length + deliveredDeliveries.length}</div>
-                <div className="text-[10px] font-semibold uppercase mt-0.5">Total</div>
-              </div>
-              <div 
-                onClick={() => setActiveTab('active')}
-                className={`p-2 rounded-xl border transition cursor-pointer ${activeTab === 'active' ? 'bg-blue-500/15 border-blue-500/40 text-blue-300' : 'bg-slate-900 border-slate-800 text-slate-400'}`}
-              >
-                <div className="text-base font-black text-blue-400">{activeDeliveries.length}</div>
-                <div className="text-[10px] font-semibold uppercase mt-0.5">Aktif</div>
-              </div>
-              <div 
-                onClick={() => setActiveTab('scheduled')}
-                className={`p-2 rounded-xl border transition cursor-pointer ${activeTab === 'scheduled' ? 'bg-amber-500/15 border-amber-500/40 text-amber-300' : 'bg-slate-900 border-slate-800 text-slate-400'}`}
-              >
-                <div className="text-base font-black text-amber-400">{scheduledDeliveries.length}</div>
-                <div className="text-[10px] font-semibold uppercase mt-0.5">Jadwal H+1</div>
-              </div>
-              <div 
-                onClick={() => setActiveTab('delivered')}
-                className={`p-2 rounded-xl border transition cursor-pointer ${activeTab === 'delivered' ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300' : 'bg-slate-900 border-slate-800 text-slate-400'}`}
-              >
-                <div className="text-base font-black text-emerald-400">{deliveredDeliveries.length}</div>
-                <div className="text-[10px] font-semibold uppercase mt-0.5">Terkirim</div>
-              </div>
-            </div>
-
-            {/* Search Input Bar */}
+            {/* Search Input Bar (Area Kirim, Helper, Driver) */}
             <div className="relative">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <Search className="w-4 h-4 text-amber-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Cari toko, tujuan pengiriman..."
+                placeholder="Cari area kirim, helper, driver..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-800 text-slate-200 placeholder-slate-500 text-xs rounded-xl pl-9 pr-8 py-2.5 focus:outline-none focus:border-amber-500"
+                className="w-full bg-slate-900 border border-slate-800 text-slate-100 placeholder-slate-400 text-xs rounded-xl pl-10 pr-8 py-2.5 focus:outline-none focus:border-amber-500 shadow-inner"
               />
               {searchQuery && (
                 <button
                   onClick={() => setSearchQuery('')}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
               )}
             </div>
 
-            {/* Fitur Kalender / Filter Tanggal Kirim */}
-            <div className="flex items-center justify-between p-2.5 bg-slate-900 rounded-xl border border-slate-800 text-xs">
-              <div className="flex items-center gap-1.5 text-slate-300 pl-0.5">
-                <Calendar className="w-4 h-4 text-amber-400 shrink-0" />
-                <span className="font-semibold">Filter Tanggal Kirim:</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="date"
-                  value={selectedDateFilter}
-                  onChange={(e) => setSelectedDateFilter(e.target.value)}
-                  className="bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-amber-500 font-mono"
-                />
-                {selectedDateFilter && (
+            {/* Fitur Kalender / Filter Rentang Tanggal Kirim (Dari Tanggal s/d Sampai Tanggal) */}
+            <div className="p-3.5 bg-gradient-to-b from-slate-900 to-slate-950 rounded-2xl border border-slate-800/90 shadow-lg space-y-3 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                    <Calendar className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <span className="font-black text-white block leading-tight">Filter Rentang Tanggal Kirim</span>
+                    <span className="text-[10px] text-slate-400 block">
+                      {dateFilterStart || dateFilterEnd
+                        ? `Rentang Aktif: ${dateFilterStart || 'Awal'} s/d ${dateFilterEnd || 'Akhir'}`
+                        : 'Default Semua: Jadwal Bulan Berjalan (1 Bulan)'}
+                    </span>
+                  </div>
+                </div>
+
+                {(dateFilterStart || dateFilterEnd) && (
                   <button
                     type="button"
-                    onClick={() => setSelectedDateFilter('')}
-                    className="text-[10px] text-amber-400 hover:text-amber-300 underline font-semibold cursor-pointer"
+                    onClick={() => {
+                      setDateFilterStart('');
+                      setDateFilterEnd('');
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-[10px] font-bold transition cursor-pointer flex items-center gap-1 shrink-0"
                   >
-                    Reset
+                    <X className="w-3 h-3" />
+                    <span>Reset</span>
                   </button>
                 )}
+              </div>
+
+              {/* Quick Preset Chips untuk Pergantian Bulan / Rentang Cepat */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-none">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const today = new Date().toISOString().slice(0, 10);
+                    setDateFilterStart(today);
+                    setDateFilterEnd(today);
+                  }}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition whitespace-nowrap cursor-pointer ${
+                    dateFilterStart === new Date().toISOString().slice(0, 10) && dateFilterEnd === new Date().toISOString().slice(0, 10)
+                      ? 'bg-amber-500 text-slate-950 border-amber-400'
+                      : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
+                  }`}
+                >
+                  Hari Ini
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const now = new Date();
+                    const first = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
+                    const last = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
+                    setDateFilterStart(first);
+                    setDateFilterEnd(last);
+                  }}
+                  className="px-2.5 py-1 rounded-lg text-[10px] font-bold border bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800 transition whitespace-nowrap cursor-pointer"
+                >
+                  Bulan Ini
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const now = new Date();
+                    const firstPrev = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 10);
+                    const lastPrev = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().slice(0, 10);
+                    setDateFilterStart(firstPrev);
+                    setDateFilterEnd(lastPrev);
+                    setActiveTab('all');
+                  }}
+                  className="px-2.5 py-1 rounded-lg text-[10px] font-bold border bg-slate-900 hover:bg-slate-800 text-amber-300 border-amber-500/30 transition whitespace-nowrap cursor-pointer"
+                >
+                  Bulan Lalu
+                </button>
+              </div>
+
+              {/* Input Dari Tanggal & Sampai Tanggal */}
+              <div className="grid grid-cols-2 gap-2.5">
+                <div className="bg-slate-950/90 border border-slate-800 focus-within:border-amber-500 rounded-xl p-2 transition">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                    Dari Tanggal
+                  </label>
+                  <input
+                    type="date"
+                    value={dateFilterStart}
+                    onChange={(e) => setDateFilterStart(e.target.value)}
+                    className="w-full bg-transparent text-white text-[11px] font-mono focus:outline-none cursor-pointer"
+                  />
+                </div>
+                <div className="bg-slate-950/90 border border-slate-800 focus-within:border-amber-500 rounded-xl p-2 transition">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                    Sampai Tanggal
+                  </label>
+                  <input
+                    type="date"
+                    value={dateFilterEnd}
+                    min={dateFilterStart || undefined}
+                    onChange={(e) => setDateFilterEnd(e.target.value)}
+                    className="w-full bg-transparent text-white text-[11px] font-mono focus:outline-none cursor-pointer"
+                  />
+                </div>
               </div>
             </div>
 
@@ -1770,25 +2147,25 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
             <div className="flex items-center gap-1 p-1 bg-slate-900 rounded-xl border border-slate-800 text-xs">
               <button
                 onClick={() => setActiveTab('active')}
-                className={`flex-1 py-1.5 rounded-lg font-bold transition text-center ${activeTab === 'active' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                className={`flex-1 py-1.5 rounded-lg font-bold transition text-center cursor-pointer ${activeTab === 'active' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
               >
                 Aktif ({activeDeliveries.length})
               </button>
               <button
                 onClick={() => setActiveTab('scheduled')}
-                className={`flex-1 py-1.5 rounded-lg font-bold transition text-center ${activeTab === 'scheduled' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                className={`flex-1 py-1.5 rounded-lg font-bold transition text-center cursor-pointer ${activeTab === 'scheduled' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
               >
                 Jadwal ({scheduledDeliveries.length})
               </button>
               <button
                 onClick={() => setActiveTab('delivered')}
-                className={`flex-1 py-1.5 rounded-lg font-bold transition text-center ${activeTab === 'delivered' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                className={`flex-1 py-1.5 rounded-lg font-bold transition text-center cursor-pointer ${activeTab === 'delivered' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
               >
                 Selesai ({deliveredDeliveries.length})
               </button>
               <button
                 onClick={() => setActiveTab('all')}
-                className={`flex-1 py-1.5 rounded-lg font-bold transition text-center ${activeTab === 'all' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+                className={`flex-1 py-1.5 rounded-lg font-bold transition text-center cursor-pointer ${activeTab === 'all' ? 'bg-amber-500 text-slate-950 shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
               >
                 Semua
               </button>
@@ -1807,25 +2184,33 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                 <p className="text-xs text-slate-400">
                   {searchQuery 
                     ? `Tidak ada pengiriman yang cocok dengan "${searchQuery}".`
-                    : 'Belum ada rute pengiriman yang ditugaskan pada status ini.'}
+                    : (dateFilterStart || dateFilterEnd)
+                    ? 'Tidak ada jadwal pengiriman pada rentang tanggal yang dipilih.'
+                    : 'Belum ada rute pengiriman yang ditugaskan pada status/bulan ini.'}
                 </p>
                 <button
-                  onClick={() => { setActiveTab('all'); setSearchQuery(''); }}
-                  className="mt-2 text-xs text-amber-400 hover:underline font-semibold"
+                  onClick={() => {
+                    setActiveTab('all');
+                    setSearchQuery('');
+                    setDateFilterStart('');
+                    setDateFilterEnd('');
+                  }}
+                  className="mt-2 text-xs text-amber-400 hover:underline font-semibold cursor-pointer"
                 >
-                  Tampilkan Semua Penugasan
+                  Reset Filter &amp; Tampilkan Bulan Ini
                 </button>
               </div>
             ) : (
               <div className="space-y-3">
-                {filteredDeliveries.map(delivery => {
+                {paginatedDeliveries.map(delivery => {
                   const store = delivery.store;
-                  const storeLat = store?.latitude || -8.219;
-                  const storeLng = store?.longitude || 114.369;
-                  const googleMapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${storeLat},${storeLng}`;
-                  const phoneNum = store?.phone || '081234567890';
-                  const waUrl = `https://wa.me/${phoneNum.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(`Halo ${store?.contactPerson || 'PIC Toko'}, saya supir PT AKK yang mengantar pesanan ${delivery.trackingNumber}.`)}`;
                   const pendingAction = driverOfflineSyncService.getPendingActionForSchedule(delivery.id);
+                  const {
+                    driverName: driverCrewName,
+                    helper1Name,
+                    helper2Name,
+                    hasHelper2
+                  } = getDeliveryCrewComposition(delivery);
 
                   return (
                     <div
@@ -1867,114 +2252,88 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                         </div>
                       )}
 
-                      {/* Route Path (DC -> Outlet) & Expandable Route Details */}
-                      {(() => {
-                        const { roadDistanceKm, estMinutes } = calculateRouteMetrics(storeLat, storeLng);
-                        const isRouteExpanded = expandedRouteDeliveryId === delivery.id;
+                      {/* Route Path (Asal & Tujuan saja - Tanpa KM/Waktu, Tanpa Lihat Rincian Rute & Muatan, Tanpa Rute Maps & PIC) */}
+                      <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-800/80 text-xs space-y-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
+                          <span className="text-slate-400 text-[11px] truncate">
+                            Asal: <strong className="text-slate-200">{delivery.originName || 'Gudang Pusat Banyuwangi DC'}</strong>
+                          </span>
+                        </div>
 
-                        return (
-                          <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-800/80 text-xs space-y-2">
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-2 min-w-0">
-                                <div className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
-                                <span className="text-slate-400 text-[11px] truncate">
-                                  Asal: <strong className="text-slate-200">{delivery.originName || 'Gudang Pusat Sukowidi DC'}</strong>
-                                </span>
-                              </div>
-                              <span className="text-[10px] font-mono text-emerald-400 shrink-0">
-                                {roadDistanceKm} KM · ~{estMinutes} mnt
-                              </span>
-                            </div>
+                        <div className="flex items-start gap-2">
+                          <MapPin className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
+                          <span className="text-slate-300 text-[11px] leading-snug">
+                            {store?.address || `Area Pengiriman Distribusi ${delivery.areaName || ''}`}
+                          </span>
+                        </div>
+                      </div>
 
-                            <div className="flex items-start gap-2">
-                              <MapPin className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
-                              <span className="text-slate-300 text-[11px] leading-snug">
-                                {store?.address || 'Jl. Raya Distribusi Banyuwangi'}
-                              </span>
-                            </div>
-
-                            <div className="pt-1.5 border-t border-slate-800/70 flex items-center justify-between gap-2">
-                              <button
-                                type="button"
-                                onClick={() => setExpandedRouteDeliveryId(isRouteExpanded ? null : delivery.id)}
-                                className="text-[11px] font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1 transition cursor-pointer"
-                              >
-                                <Navigation className="w-3 h-3" />
-                                <span>{isRouteExpanded ? 'Tutup Rincian Rute' : 'Lihat Rincian Rute & Muatan'}</span>
-                              </button>
-
-                              <div className="flex items-center gap-1.5">
-                                <a
-                                  href={googleMapsUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="px-2.5 py-1 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-300 font-bold text-[10px] flex items-center gap-1 transition"
-                                >
-                                  <Navigation className="w-3 h-3" />
-                                  <span>Rute Maps</span>
-                                </a>
-                                <a
-                                  href={waUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="px-2.5 py-1 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 font-bold text-[10px] flex items-center gap-1 transition"
-                                >
-                                  <Phone className="w-3 h-3" />
-                                  <span>PIC</span>
-                                </a>
-                              </div>
-                            </div>
-
-                            {isRouteExpanded && (
-                              <div className="pt-2 border-t border-slate-800/80 space-y-2 text-[11px] text-slate-300 animate-in fade-in duration-200">
-                                <div className="grid grid-cols-2 gap-2">
-                                  <div className="bg-slate-900/90 p-2 rounded-lg border border-slate-800">
-                                    <span className="text-[10px] text-slate-400 block">Muatan &amp; Tonase</span>
-                                    <strong className="text-white block truncate">{delivery.cargoDescription || 'Kemasan Karton & Box'}</strong>
-                                    <span className="text-[10px] text-amber-400 font-mono">{delivery.cargoWeightTon || 1.2} Ton</span>
-                                  </div>
-                                  <div className="bg-slate-900/90 p-2 rounded-lg border border-slate-800">
-                                    <span className="text-[10px] text-slate-400 block">Penerima / Jam Buka</span>
-                                    <strong className="text-white block truncate">{store?.contactPerson || 'PIC Gudang Toko'}</strong>
-                                    <span className="text-[10px] text-emerald-400 font-mono">{store?.deliveryWindow || '08:00 - 17:00'}</span>
-                                  </div>
-                                </div>
-                                <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 bg-slate-900/70 px-2.5 py-1.5 rounded-lg border border-slate-800">
-                                  <span>GPS Tujuan: {storeLat.toFixed(5)}, {storeLng.toFixed(5)}</span>
-                                  <span>Estimasi: ~{estMinutes} Menit</span>
-                                </div>
-                              </div>
-                            )}
+                      {/* Komposisi Kru Otomatis Menyesuaikan: Driver Utama, Helper 1 & Helper 2 (Situasi/Kondisi Tertentu) */}
+                      <div className={`bg-slate-950/70 p-2.5 rounded-xl border border-slate-800/80 grid ${hasHelper2 ? 'grid-cols-3' : 'grid-cols-2'} gap-2 text-xs`}>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className="w-7 h-7 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                            <User className="w-3.5 h-3.5" />
                           </div>
-                        );
-                      })()}
+                          <div className="min-w-0">
+                            <span className="text-[10px] text-slate-400 block truncate">Driver Utama</span>
+                            <strong className="text-white text-[11px] block truncate">{driverCrewName}</strong>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 min-w-0 border-l border-slate-800 pl-2">
+                          <div className="w-7 h-7 rounded-lg bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shrink-0">
+                            <User className="w-3.5 h-3.5" />
+                          </div>
+                          <div className="min-w-0">
+                            <span className="text-[10px] text-slate-400 block truncate">
+                              {hasHelper2 ? 'Helper 1' : 'Helper 1 / Kernet'}
+                            </span>
+                            <strong className="text-cyan-300 text-[11px] block truncate">{helper1Name}</strong>
+                          </div>
+                        </div>
+
+                        {hasHelper2 && (
+                          <div className="flex items-center gap-2 min-w-0 border-l border-slate-800 pl-2">
+                            <div className="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+                              <User className="w-3.5 h-3.5" />
+                            </div>
+                            <div className="min-w-0">
+                              <span className="text-[10px] text-emerald-400/90 font-semibold block truncate">Helper 2</span>
+                              <strong className="text-emerald-300 text-[11px] block truncate">{helper2Name}</strong>
+                            </div>
+                          </div>
+                        )}
+                      </div>
 
                       {/* Tanggal Kirim & Timing Metadata */}
                       {delivery.status === 'delivered' ? (
-                        <div className="grid grid-cols-2 gap-2 text-xs">
-                          <div className="bg-slate-950/40 p-2 rounded-xl border border-slate-800/60">
-                            <span className="text-[10px] text-slate-400 block flex items-center gap-1">
-                              <Truck className="w-3.5 h-3.5 text-blue-400" />
-                              <span>Waktu Mulai Kirim</span>
-                            </span>
-                            <div className="font-bold text-white text-xs mt-0.5">
-                              {new Date(delivery.departureDate || Date.now()).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
+                        <div className="space-y-2.5">
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div className="bg-slate-950/40 p-2 rounded-xl border border-slate-800/60">
+                              <span className="text-[10px] text-slate-400 block flex items-center gap-1">
+                                <Truck className="w-3.5 h-3.5 text-blue-400" />
+                                <span>Waktu Mulai Kirim</span>
+                              </span>
+                              <div className="font-bold text-white text-xs mt-0.5">
+                                {new Date(delivery.departureDate || Date.now()).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
+                              </div>
+                              <div className="text-[10px] text-blue-400 font-semibold mt-0.5">
+                                Konfirmasi Mulai Berangkat
+                              </div>
                             </div>
-                            <div className="text-[10px] text-blue-400 font-semibold mt-0.5">
-                              Konfirmasi Mulai Berangkat
-                            </div>
-                          </div>
 
-                          <div className="bg-slate-950/40 p-2 rounded-xl border border-slate-800/60">
-                            <span className="text-[10px] text-slate-400 block flex items-center gap-1">
-                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                              <span>Waktu Selesai Kirim</span>
-                            </span>
-                            <div className="font-bold text-white text-xs mt-0.5">
-                              {new Date(delivery.actualArrival || Date.now()).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
-                            </div>
-                            <div className="text-[10px] text-emerald-400 font-semibold mt-0.5">
-                              Tiba &amp; Serah Terima
+                            <div className="bg-slate-950/40 p-2 rounded-xl border border-slate-800/60">
+                              <span className="text-[10px] text-slate-400 block flex items-center gap-1">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                                <span>Waktu Selesai Kirim</span>
+                              </span>
+                              <div className="font-bold text-white text-xs mt-0.5">
+                                {new Date(delivery.actualArrival || Date.now()).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
+                              </div>
+                              <div className="text-[10px] text-emerald-400 font-semibold mt-0.5">
+                                Tiba di Gudang &amp; Selesai
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -2093,9 +2452,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                         </div>
                       )}
 
-
-
-                      {/* Driver Status Action Workflow Buttons (Tanpa tombol Kendala, Surat Jalan Keluar, dan Checklist di daftar Aktif) */}
+                      {/* Driver Status Action Workflow Buttons:
+                          Alur: Check-In -> Isi Armada -> Isi Checklist -> Simpan -> Klik Mulai Berangkat -> Konfirmasi Tiba di Gudang */}
                       <div className="pt-2 border-t border-slate-200 dark:border-slate-800/80">
                         {delivery.status === 'scheduled' && (() => {
                           const todayIso = new Date().toISOString().slice(0, 10);
@@ -2105,14 +2463,58 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                           return (
                             <div className="space-y-2">
                               {isDueToday && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleUpdateStatus(delivery, 'in_transit')}
-                                  className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
-                                >
-                                  <Truck className="w-4 h-4" />
-                                  <span>Mulai Berangkat (Jadwal Hari Ini Aktif)</span>
-                                </button>
+                                <>
+                                  {!activeShift ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setCheckinModalMode('checkin');
+                                        setIsCheckinModalOpen(true);
+                                      }}
+                                      className="w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
+                                    >
+                                      <KeyRound className="w-4 h-4" />
+                                      <span>1. Check-In Shift untuk Memulai Pengiriman</span>
+                                    </button>
+                                  ) : !hasChecklistToday && !isUserHelperRole ? (
+                                    <div className="space-y-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => setIsPostCheckinFleetModalOpen(true)}
+                                        className="w-full py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
+                                      >
+                                        <ClipboardCheck className="w-4 h-4" />
+                                        <span>2. Pilih Armada &amp; Isi Checklist Armada</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setIsHelperPositionSkipped(true);
+                                          try {
+                                            localStorage.setItem(`akk_helper_skipped_${selectedDriverId}`, 'true');
+                                          } catch {}
+                                          addNotification(
+                                            'delivery',
+                                            'Posisi Helper (Checklist Dilewati)',
+                                            'Tahap isi armada & checklist dilewati untuk posisi Helper.'
+                                          );
+                                        }}
+                                        className="w-full py-2 px-3 rounded-xl bg-slate-950 hover:bg-slate-800 border border-cyan-500/30 text-cyan-300 font-bold text-[11px] flex items-center justify-center gap-1.5 transition cursor-pointer"
+                                      >
+                                        <span>Lewati Isi Armada &amp; Checklist (Posisi Helper)</span>
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleStartDepartureToSjKeluar(delivery)}
+                                      className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
+                                    >
+                                      <Truck className="w-4 h-4" />
+                                      <span>Mulai Berangkat (Masuk ke SJ Keluar)</span>
+                                    </button>
+                                  )}
+                                </>
                               )}
                               <button
                                 type="button"
@@ -2145,11 +2547,11 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                         {delivery.status === 'picked_up' && (
                           <div className="flex items-center gap-2">
                             <button
-                              onClick={() => handleUpdateStatus(delivery, 'in_transit')}
+                              onClick={() => handleStartDepartureToSjKeluar(delivery)}
                               className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
                             >
                               <Truck className="w-4 h-4" />
-                              <span>Mulai Berangkat (In Transit)</span>
+                              <span>Mulai Berangkat (Masuk ke SJ Keluar)</span>
                             </button>
                           </div>
                         )}
@@ -2170,7 +2572,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                               className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
                             >
                               <CheckCircle2 className="w-4 h-4" />
-                              <span>Konfirmasi Tiba di Gudang Argo</span>
+                              <span>Konfirmasi Tiba di Gudang</span>
                             </button>
                           </div>
                         )}
@@ -2199,7 +2601,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                                 className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer"
                               >
                                 <CheckCircle2 className="w-3.5 h-3.5" />
-                                <span>Konfirmasi Tiba di Gudang Argo</span>
+                                <span>Konfirmasi Tiba di Gudang</span>
                               </button>
                             </div>
                             <span className="text-[10px] text-rose-300/80 block text-center">
@@ -2242,7 +2644,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                               </div>
                             </div>
 
-                            {/* Fitur Hapus Riwayat Selesai (Khusus Super Admin) */}
+                            {/* Fitur Hapus Riwayat Selesai (HANYA TAMPIL UNTUK ROLE SUPER ADMIN) */}
                             {isSuperAdmin && (
                               <div className="flex items-center justify-between pt-1 px-1">
                                 <span className="text-[10px] text-slate-500">
@@ -2265,6 +2667,61 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                     </div>
                   );
                 })}
+
+                {/* Fitur Paging / Pagination Jadwal (Batasan Halaman & Navigasi) */}
+                {filteredDeliveries.length > 0 && (
+                  <div className="p-3 bg-slate-900 border border-slate-800 rounded-2xl flex flex-col gap-2.5 text-xs shadow-sm">
+                    <div className="flex items-center justify-between text-[11px] text-slate-400">
+                      <span>
+                        Menampilkan <strong className="text-white">{(currentPage - 1) * ITEMS_PER_PAGE + 1}–{Math.min(currentPage * ITEMS_PER_PAGE, filteredDeliveries.length)}</strong> dari <strong className="text-amber-400">{filteredDeliveries.length}</strong> jadwal
+                      </span>
+                      {activeTab === 'all' && !dateFilterStart && !dateFilterEnd && (
+                        <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 text-[10px] font-bold">
+                          Periode Bulan Ini
+                        </span>
+                      )}
+                    </div>
+
+                    {totalPages > 1 && (
+                      <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-slate-800/80">
+                        <button
+                          type="button"
+                          disabled={currentPage <= 1}
+                          onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                          className="px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 disabled:opacity-40 border border-slate-800 text-slate-200 font-bold text-[11px] transition cursor-pointer disabled:cursor-not-allowed"
+                        >
+                          Sebelumnya
+                        </button>
+
+                        <div className="flex items-center gap-1">
+                          {Array.from({ length: totalPages }, (_, idx) => idx + 1).map(page => (
+                            <button
+                              key={page}
+                              type="button"
+                              onClick={() => setCurrentPage(page)}
+                              className={`w-7 h-7 rounded-lg font-mono text-xs font-black transition cursor-pointer ${
+                                currentPage === page
+                                  ? 'bg-amber-500 text-slate-950 shadow-sm'
+                                  : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+                              }`}
+                            >
+                              {page}
+                            </button>
+                          ))}
+                        </div>
+
+                        <button
+                          type="button"
+                          disabled={currentPage >= totalPages}
+                          onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                          className="px-3 py-1.5 rounded-xl bg-slate-950 hover:bg-slate-800 disabled:opacity-40 border border-slate-800 text-slate-200 font-bold text-[11px] transition cursor-pointer disabled:cursor-not-allowed"
+                        >
+                          Berikutnya
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </>
@@ -2336,7 +2793,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-2 text-center pt-1 text-[11px] border-t border-slate-800/80">
+                  <div className="grid grid-cols-2 gap-2 text-center pt-1 text-[11px] border-t border-slate-800/80">
                     <div className="bg-slate-900/60 p-2 rounded-lg border border-slate-800/80">
                       <div className="text-slate-400 text-[10px]">Poin Lolos</div>
                       <div className="font-black text-emerald-400 font-mono mt-0.5">
@@ -2347,12 +2804,6 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                       <div className="text-slate-400 text-[10px]">Odometer</div>
                       <div className="font-black text-blue-400 font-mono mt-0.5">
                         {latestChecklist.odometerKm.toLocaleString()} KM
-                      </div>
-                    </div>
-                    <div className="bg-slate-900/60 p-2 rounded-lg border border-slate-800/80">
-                      <div className="text-slate-400 text-[10px]">BBM Solar</div>
-                      <div className="font-black text-amber-400 font-mono mt-0.5">
-                        {latestChecklist.fuelLevelPercent}%
                       </div>
                     </div>
                   </div>
@@ -2670,34 +3121,66 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                     </div>
 
                     {/* Action Bar per Waybill Card */}
-                    <div className="flex items-center gap-2 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setActiveWaybillToView(wb);
-                          setIsWaybillModalOpen(true);
-                        }}
-                        className="flex-1 py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer shadow-md shadow-blue-600/20"
-                      >
-                        <FileText className="w-3.5 h-3.5" />
-                        <span>Buka Surat Jalan (Cetak & QR)</span>
-                      </button>
-
-                      {wb.status === 'checker_verified' && (
+                    <div className="space-y-2 pt-1">
+                      <div className="flex items-center gap-2">
                         <button
                           type="button"
                           onClick={() => {
-                            const success = driverWaybillService.updateWaybillStatus(wb.id, 'gate_out');
-                            if (success) {
-                              addNotification('schedule', 'Gate-Out Dikonfirmasi', `Armada ${wb.fleet.plateNumber} tercatat keluar gerbang DC.`);
-                              loadDeliveries(true);
+                            setActiveWaybillToView(wb);
+                            setIsWaybillModalOpen(true);
+                          }}
+                          className="flex-1 py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer shadow-md shadow-blue-600/20"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          <span>Buka Surat Jalan (Cetak &amp; QR)</span>
+                        </button>
+
+                        {wb.status === 'checker_verified' && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const success = driverWaybillService.updateWaybillStatus(wb.id, 'gate_out');
+                              if (success) {
+                                addNotification('schedule', 'Gate-Out Dikonfirmasi', `Armada ${wb.fleet.plateNumber} tercatat keluar gerbang DC.`);
+                                loadDeliveries(true);
+                              }
+                            }}
+                            className="py-2 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1 transition active:scale-95 cursor-pointer shrink-0"
+                            title="Konfirmasi Keluar Gerbang DC"
+                          >
+                            <ArrowRight className="w-3.5 h-3.5" />
+                            <span>Gate-Out</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {wb.status !== 'delivered' && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const matchedSchedule = deliveries.find(d => d.id === wb.scheduleId || d.trackingNumber === wb.trackingNumber);
+                            if (matchedSchedule) {
+                              setBottomNav('deliveries');
+                              setActiveTab('active');
+                              setPodModal({
+                                isOpen: true,
+                                delivery: matchedSchedule,
+                                conditionNote: '',
+                                serviceNote: '',
+                                hasSignature: true,
+                                photoUrl: matchedSchedule.podPhotoUrl || null,
+                                photoTimestamp: matchedSchedule.podPhotoTimestamp || null,
+                                postTripFleetStatus: 'available'
+                              });
+                            } else {
+                              setBottomNav('deliveries');
+                              setActiveTab('active');
                             }
                           }}
-                          className="py-2 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1 transition active:scale-95 cursor-pointer shrink-0"
-                          title="Konfirmasi Keluar Gerbang DC"
+                          className="w-full py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer shadow-sm"
                         >
-                          <ArrowRight className="w-3.5 h-3.5" />
-                          <span>Gate-Out</span>
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>Lanjut Konfirmasi Tiba di Gudang</span>
                         </button>
                       )}
                     </div>
@@ -3272,6 +3755,30 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               </button>
             </div>
 
+            {/* Nomor Kendaraan Armada Otomatis Terkunci Sesuai Pilihan Armada Setelah Check-In */}
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
+                <span>Nomor Kendaraan Armada:</span>
+                <span className="text-[10px] text-emerald-400 font-bold">✓ Terkunci Otomatis Sesuai Check-In</span>
+              </label>
+              <div className="w-full bg-slate-950 border border-emerald-500/40 rounded-xl px-3 py-2 text-xs flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Truck className="w-4 h-4 text-amber-400" />
+                  <span className="font-mono font-bold text-amber-400 text-sm">
+                    {assignedFleet?.plateNumber || podModal.delivery?.fleet?.plateNumber || 'P 8848 U'}
+                  </span>
+                  {assignedFleet?.initialCode && (
+                    <span className="px-2 py-0.5 rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/40 text-[10px] font-black">
+                      Inisial: {assignedFleet.initialCode}
+                    </span>
+                  )}
+                </div>
+                <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold">
+                  Terkunci Otomatis
+                </span>
+              </div>
+            </div>
+
             <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs space-y-1">
               <div className="font-bold text-white">{podModal.delivery?.store?.storeName || podModal.delivery?.areaName}</div>
               <div className="text-slate-400 text-[11px]">{podModal.delivery?.store?.address}</div>
@@ -3822,6 +4329,13 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
             }
             return [saved, ...prev];
           });
+          setBottomNav('deliveries');
+          setActiveTab('active');
+          addNotification(
+            'delivery',
+            'Checklist Disimpan • Siap Mulai Berangkat',
+            `Checklist armada ${saved.plateNumber} telah tersimpan. Silakan klik tombol "Mulai Berangkat" pada jadwal aktif untuk memulai pengiriman hingga Konfirmasi Tiba di Gudang.`
+          );
         }}
       />
 
@@ -3839,8 +4353,146 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         initialMode={checkinModalMode}
         onCheckinSuccess={(shift) => {
           setActiveShift(shift);
+          // Alur Baru: Setelah Check-In langsung mengarah ke Isi Armada -> Isi Checklist Armada -> Simpan (Helper bisa skip)
+          setIsPostCheckinFleetModalOpen(true);
         }}
       />
+
+      {/* MODAL 8B: Pilih & Kunci Armada Setelah Check-In (Langsung Lanjut Isi Checklist Armada / Skip untuk Helper) */}
+      {isPostCheckinFleetModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-3xl p-5 space-y-4 shadow-2xl text-xs">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0">
+                  <Truck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-white uppercase tracking-tight">
+                    Pilih Armada &amp; Lanjut Checklist
+                  </h3>
+                  <p className="text-[11px] text-slate-300">
+                    Tahap wajib Driver setelah Check-In sebelum Mulai Berangkat
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsPostCheckinFleetModalOpen(false)}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Info Kru & Opsi Skip Khusus Helper */}
+            <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Nama Kru Check-In:</span>
+                <strong className="text-white">{portalDisplayName}</strong>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Role / Posisi:</span>
+                <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold text-[10px]">
+                  {syncedUserRoleInfo.roleLabel}
+                </span>
+              </div>
+            </div>
+
+            {/* Pilihan Armada */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-white block">
+                Pilih Nomor Kendaraan Armada yang Digunakan:
+              </label>
+              <div className="max-h-52 overflow-y-auto space-y-1.5 pr-1">
+                {fleets.map(f => {
+                  const isSelected = (selectedFleetId || assignedFleet?.id) === f.id;
+                  return (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => setSelectedFleetId(f.id)}
+                      className={`w-full p-3 rounded-xl border text-left flex items-center justify-between transition cursor-pointer ${
+                        isSelected
+                          ? 'bg-emerald-500/20 border-emerald-500 text-white shadow-sm'
+                          : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Truck className={`w-4 h-4 ${isSelected ? 'text-emerald-400' : 'text-amber-400'}`} />
+                        <div>
+                          <div className="font-mono font-black text-xs text-white">
+                            {f.plateNumber}{' '}
+                            {f.initialCode && (
+                              <span className="text-amber-400 font-bold">({f.initialCode})</span>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-slate-400">{f.vehicleType}</div>
+                        </div>
+                      </div>
+                      {isSelected && (
+                        <span className="px-2 py-0.5 rounded-md bg-emerald-500 text-slate-950 font-black text-[10px]">
+                          Dipilih
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-[10px] text-emerald-400 font-medium">
+                ✓ Nomor kendaraan armada yang dipilih akan otomatis terkunci pada fitur Lapor Kendala &amp; Akhir Kirim.
+              </p>
+            </div>
+
+            {/* Action Buttons: Driver Lanjut Isi Checklist vs Skip Khusus Helper */}
+            <div className="space-y-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => {
+                  const targetId = selectedFleetId || assignedFleet?.id || fleets[0]?.id || '';
+                  const lockedFleet = lockSelectedFleetForDriver(targetId);
+                  setIsPostCheckinFleetModalOpen(false);
+                  const fresh = driverChecklistService.createNewChecklistTemplate(
+                    selectedDriverId,
+                    currentDriver?.name || portalDisplayName || 'Driver',
+                    lockedFleet?.id || 'fl-01',
+                    lockedFleet?.plateNumber || 'P 8848 U',
+                    lockedFleet?.vehicleType || 'Engkel Long Box'
+                  );
+                  setActiveChecklistToEdit(fresh);
+                  setChecklistInspectionType('pre_trip');
+                  setIsChecklistModalOpen(true);
+                }}
+                className="w-full py-3 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 cursor-pointer active:scale-95 transition"
+              >
+                <ClipboardCheck className="w-4 h-4" />
+                <span>Simpan Armada &amp; Lanjut Isi Checklist Armada</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsHelperPositionSkipped(true);
+                  try {
+                    localStorage.setItem(`akk_helper_skipped_${selectedDriverId}`, 'true');
+                  } catch {}
+                  setIsPostCheckinFleetModalOpen(false);
+                  setBottomNav('deliveries');
+                  setActiveTab('active');
+                  addNotification(
+                    'delivery',
+                    'Posisi Helper (Isi Armada & Checklist Diskip)',
+                    'Anda melewati pengisian armada & checklist karena berposisi sebagai Helper (bukan Driver).'
+                  );
+                }}
+                className="w-full py-2.5 px-4 rounded-xl bg-slate-950 hover:bg-slate-800 border border-cyan-500/40 text-cyan-300 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer active:scale-95 transition"
+              >
+                <span>Skip / Lewati (Khusus Posisi Helper - Bukan Driver)</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL 9: Unduh APK Android Driver Mobile */}
       <AndroidApkDownloadModal
@@ -3934,24 +4586,17 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         </div>
       )}
 
-      {/* MODAL 11: Berbagi Foto Gmaps & Lapor Kendala / Akhir Kiriman */}
+      {/* MODAL 11: Berbagi Foto Gmaps & Lapor Kendala / Istirahat */}
       <DriverGmapsShareModal
         isOpen={isGmapsShareModalOpen}
         onClose={() => setIsGmapsShareModalOpen(false)}
         deliveries={deliveries}
+        driverId={selectedDriverId}
         driverName={currentDriver?.name || activeShift?.driverName}
         plateNumber={assignedFleet?.plateNumber || activeShift?.plateNumber || 'P 8125 VC'}
         onReportSubmitted={async (report) => {
           if (report.delivery) {
-            if (report.category === 'akhir_kiriman') {
-              const podNote = `Akhir Kiriman: ${report.notes || 'Selesai serah terima di area tujuan'}`;
-              await handleUpdateStatus(report.delivery, 'delivered', podNote, {
-                podPhotoUrl: report.photoUrl || undefined,
-                podPhotoTimestamp: new Date().toISOString(),
-                podReceiverName: report.delivery.store?.contactPerson || 'PIC Toko',
-                podConditionNote: report.notes || 'Selesai Baik'
-              });
-            } else if (report.category === 'kendala_jalan') {
+            if (report.category === 'kendala_jalan') {
               const delayNote = `KENDALA GMAPS: ${report.notes || 'Kendala rute perjalanan'} (GPS: ${report.driverLat.toFixed(4)}, ${report.driverLng.toFixed(4)})`;
               await handleUpdateStatus(report.delivery, 'delayed', delayNote);
             }
@@ -3959,15 +4604,15 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               logisticsStore.attachImageToSchedule(
                 report.delivery.id,
                 report.photoUrl,
-                report.category === 'akhir_kiriman' ? 'proof_of_delivery' : 'other',
+                'other',
                 `Foto Gmaps [${report.category}]: ${report.notes || 'Dokumentasi'}`
               );
             }
           }
           addNotification(
             'delivery',
-            'Laporan & Foto Gmaps Terkirim',
-            `Laporan kiriman dan foto Google Maps berhasil dikirim ke sistem operasional DC.`
+            'Laporan Kendala / Istirahat Terkirim',
+            `Laporan kru (${assignedFleet?.plateNumber || report.plateNumber}) berhasil dikirim ke sistem operasional DC.`
           );
         }}
       />

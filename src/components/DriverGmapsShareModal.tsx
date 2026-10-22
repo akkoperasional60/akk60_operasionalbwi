@@ -569,10 +569,10 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
               </div>
               <div>
                 <h3 className="text-sm font-black text-white">
-                  Lapor Kendala, Istirahat &amp; Akhir Kirim
+                  Lapor Kendala &amp; Istirahat Kru
                 </h3>
                 <p className="text-[11px] text-slate-300 font-medium">
-                  Dokumentasi kendala rute, waktu istirahat kru, dan konfirmasi serah terima
+                  Dokumentasi kendala rute perjalanan dan waktu istirahat kru
                 </p>
               </div>
             </div>
@@ -588,60 +588,47 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
           {/* Scrollable Body */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
             
-            {/* Category Selector Tabs */}
+            {/* Category Selector Tabs (Tanpa Akhir Kiriman) */}
             <div className="space-y-1.5">
               <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                 Pilih Jenis Laporan:
               </label>
-              <div className="grid grid-cols-3 gap-1.5">
+              <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
                   onClick={() => setCategory('kendala_jalan')}
-                  className={`py-2 px-1.5 rounded-xl border text-[11px] font-bold flex flex-col items-center gap-1 transition cursor-pointer ${
+                  className={`py-2.5 px-2 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer ${
                     category === 'kendala_jalan'
                       ? 'bg-rose-500/20 border-rose-500 text-rose-400 shadow-sm'
                       : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  <AlertTriangle className="w-4 h-4 text-rose-400" />
+                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
                   <span>Kendala Jalan</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => setCategory('akhir_kiriman')}
-                  className={`py-2 px-1.5 rounded-xl border text-[11px] font-bold flex flex-col items-center gap-1 transition cursor-pointer ${
-                    category === 'akhir_kiriman'
-                      ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400 shadow-sm'
-                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  <span>Akhir Kiriman</span>
-                </button>
-
-                <button
-                  type="button"
                   onClick={() => setCategory('istirahat')}
-                  className={`py-2 px-1.5 rounded-xl border text-[11px] font-bold flex flex-col items-center gap-1 transition cursor-pointer ${
+                  className={`py-2.5 px-2 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer ${
                     category === 'istirahat' || category === 'update_lokasi'
                       ? 'bg-amber-500/20 border-amber-500 text-amber-400 shadow-sm'
                       : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  <Coffee className="w-4 h-4 text-amber-400" />
+                  <Coffee className="w-4 h-4 text-amber-400 shrink-0" />
                   <span>Istirahat</span>
                 </button>
               </div>
             </div>
 
-            {/* Nomor Kendaraan Armada (Otomatis Terisi Sesuai Data Checklist) */}
+            {/* Nomor Kendaraan Armada (Otomatis Terkunci Sesuai Pilihan Armada Setelah Check-In) */}
             <div className="space-y-1">
               <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
                 <span>Nomor Kendaraan Armada:</span>
-                <span className="text-[10px] text-emerald-400 font-bold">✓ Otomatis terisi data checklist</span>
+                <span className="text-[10px] text-emerald-400 font-bold">✓ Terkunci Otomatis Sesuai Check-In</span>
               </label>
-              <div className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs flex items-center justify-between flex-wrap gap-2">
+              <div className="w-full bg-slate-950 border border-emerald-500/40 rounded-xl px-3 py-2.5 text-xs flex items-center justify-between flex-wrap gap-2">
                 <div className="flex items-center gap-2">
                   <Truck className="w-4 h-4 text-amber-400" />
                   <span className="font-mono font-bold text-amber-400 text-sm">{autoPlateNumber}</span>
@@ -651,7 +638,9 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                     </span>
                   )}
                 </div>
-                <span className="text-[10px] text-slate-400 font-medium">Terverifikasi Checklist</span>
+                <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold">
+                  Terkunci Otomatis
+                </span>
               </div>
             </div>
 
