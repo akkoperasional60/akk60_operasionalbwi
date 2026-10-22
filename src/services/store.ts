@@ -676,6 +676,23 @@ class LogisticsStore {
       }
     }
 
+    // Deduplicate crews by ID to prevent duplicate React keys (e.g. crw-usr-001)
+    if (Array.isArray(this.crews) && this.crews.length > 0) {
+      const uniqueCrewsMap = new Map<string, Crew>();
+      let hadDuplicateCrews = false;
+      for (const c of this.crews) {
+        if (!c || !c.id) continue;
+        if (uniqueCrewsMap.has(c.id)) {
+          hadDuplicateCrews = true;
+        }
+        uniqueCrewsMap.set(c.id, c);
+      }
+      if (hadDuplicateCrews) {
+        this.crews = Array.from(uniqueCrewsMap.values());
+        this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
+      }
+    }
+
     let updatedFleets = false;
 
     // Purge any fleet whose plate number ends with 'AKK'
@@ -1603,11 +1620,20 @@ class LogisticsStore {
   }
 
   public getCrews(): Crew[] {
-    return [...this.crews];
+    const seen = new Set<string>();
+    return this.crews.filter(c => {
+      if (!c || !c.id || seen.has(c.id)) return false;
+      seen.add(c.id);
+      return true;
+    });
   }
 
   public setCrews(crews: Crew[]): void {
-    this.crews = crews;
+    const uniqueMap = new Map<string, Crew>();
+    crews.forEach(c => {
+      if (c && c.id) uniqueMap.set(c.id, c);
+    });
+    this.crews = Array.from(uniqueMap.values());
     this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
     this.notify();
   }
@@ -2043,6 +2069,68 @@ class LogisticsStore {
     this.notify();
   }
 
+  public deactivateUser(userId: string, reason?: string): boolean {
+    this.verifyDriverAccess('user_management');
+    const userIndex = this.users.findIndex(u => u.id === userId);
+    if (userIndex === -1) return false;
+
+    const user = this.users[userIndex];
+    const adminName = this.currentUser.fullName || 'Super Admin';
+    this.users[userIndex] = {
+      ...user,
+      status: 'inactive',
+      notes: reason || `Akun dinonaktifkan oleh ${adminName} (Data histori tetap tersimpan)`
+    };
+
+    if (this.currentUser.id === userId) {
+      this.currentUser = {
+        ...this.currentUser,
+        status: 'inactive'
+      };
+      this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
+    }
+
+    this.saveToStorage(STORAGE_KEYS.USERS, this.users);
+    this.logActivity('Nonaktifkan User', user.fullName, `Akun ${user.fullName} dinonaktifkan. Hak akses ditutup, histori data tetap tersimpan.`);
+    this.notify();
+    return true;
+  }
+
+  public activateUser(userId: string, notes?: string): boolean {
+    this.verifyDriverAccess('user_management');
+    const userIndex = this.users.findIndex(u => u.id === userId);
+    if (userIndex === -1) return false;
+
+    const user = this.users[userIndex];
+    const approverName = this.currentUser.fullName || 'Super Admin';
+    this.users[userIndex] = {
+      ...user,
+      status: 'approved',
+      approvedAt: new Date().toISOString(),
+      approvedBy: approverName,
+      notes: notes || `Akun diaktifkan kembali oleh ${approverName}`
+    };
+
+    if (this.currentUser.id === userId) {
+      this.currentUser = {
+        ...this.currentUser,
+        status: 'approved',
+        approvedAt: new Date().toISOString(),
+        approvedBy: approverName
+      };
+      this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
+    }
+
+    this.saveToStorage(STORAGE_KEYS.USERS, this.users);
+    this.logActivity('Aktifkan User', user.fullName, `Akun ${user.fullName} diaktifkan kembali dan hak akses dipulihkan.`);
+    this.notify();
+    return true;
+  }
+
+  public getActiveUsers(): UserProfile[] {
+    return this.users.filter(u => u.status === 'approved');
+  }
+
   public updateUserRole(userId: string, role: UserRole) {
     this.updateUserProfile(userId, { role });
   }
@@ -2127,21 +2215,23 @@ class LogisticsStore {
   public registerUser(data: {
     fullName: string;
     email: string;
-    role: UserRole;
+    role?: UserRole;
     department: string;
     phone?: string;
     notes?: string;
+    password?: string;
   }): UserProfile {
     const newUser: UserProfile = {
       id: 'usr-' + Math.random().toString(36).substring(2, 8),
       fullName: data.fullName,
       email: data.email,
-      role: data.role,
-      department: data.department,
+      role: data.role || 'unassigned',
+      department: data.department || 'Logistik',
       phone: data.phone || '',
+      password: data.password || 'password123',
       status: 'pending',
       createdAt: new Date().toISOString(),
-      notes: data.notes || 'Pendaftaran baru menunggu approval'
+      notes: data.notes || 'Pendaftaran baru - Role perlu diisi oleh Admin'
     };
 
     this.users = [newUser, ...this.users];
@@ -2257,6 +2347,7 @@ class LogisticsStore {
   public loginUser(identifier: string, password?: string): UserProfile | null {
     const existing = this.findUserByIdentifier(identifier);
     if (!existing) return null;
+    if (existing.status === 'inactive') return null;
 
     const cleanPass = (password || '').trim();
 
@@ -2408,9 +2499,11 @@ class LogisticsStore {
     const user = this.getCurrentUser();
     const cleanUserName = (user?.fullName || '').trim();
     const lowerName = cleanUserName.toLowerCase();
+    const expectedCrewId = `crw-${user?.id || 'usr'}`;
 
-    // 1. Cari kru yang cocok berdasarkan nama (case-insensitive)
+    // 1. Cari kru yang cocok berdasarkan ID atau nama (case-insensitive)
     let matchedCrew = this.crews.find(c => {
+      if (c.id === expectedCrewId) return true;
       const cName = (c.name || '').trim().toLowerCase();
       return (
         cName === lowerName ||
@@ -2436,12 +2529,11 @@ class LogisticsStore {
     } else {
       // Jika pengguna adalah driver atau kru supir, atau profil baru yang login
       const defaultFleet = this.fleets.find(f => f.plateNumber === 'P 8509 VQ') || this.fleets[0];
-      const newCrewId = `crw-${user.id || 'usr'}`;
       matchedCrew = {
-        id: newCrewId,
+        id: expectedCrewId,
         name: cleanUserName || 'Driver Operasional',
-        phone: user.phone || '+62 812-3344-5566',
-        role: user.role === 'crew_helper' ? 'Kernet / Helper' : 'Driver Utama',
+        phone: user?.phone || '+62 812-3344-5566',
+        role: user?.role === 'crew_helper' ? 'Kernet / Helper' : 'Driver Utama',
         licenseNumber: '9204-1823-00010',
         licenseType: 'SIM B2 Umum',
         status: 'available',
@@ -2451,7 +2543,12 @@ class LogisticsStore {
         certifications: ['SIM B2 Umum Terverifikasi', 'Defensive Driving Senior'],
         routeExperience: ['Lintas Jawa - Bali', 'Banyuwangi Hub']
       };
-      this.crews.push(matchedCrew);
+      const existingIdx = this.crews.findIndex(c => c.id === expectedCrewId);
+      if (existingIdx !== -1) {
+        this.crews[existingIdx] = matchedCrew;
+      } else {
+        this.crews.push(matchedCrew);
+      }
       this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
     }
 

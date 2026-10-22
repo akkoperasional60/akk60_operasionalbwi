@@ -116,8 +116,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     fullName: '',
     email: '',
     phone: '',
-    role: 'spv_logistik' as UserRole,
-    department: 'Gudang Distribusi Packaging Banyuwangi',
+    role: 'unassigned' as UserRole,
+    department: 'Logistik',
     password: '',
     confirmPassword: ''
   });
@@ -297,6 +297,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
 
     // 4. Proses Otentikasi
+    const targetAccount = logisticsStore.findUserByIdentifier(trimmedInput);
+    if (targetAccount && targetAccount.status === 'inactive') {
+      setErrorMsg('Akun Anda sedang berstatus Nonaktif. Hak akses sistem ditutup sementara. Silakan hubungi Super Admin untuk mengaktifkan kembali akun Anda.');
+      return;
+    }
+
     const user = logisticsStore.loginUser(trimmedInput, loginPassword);
 
     if (!user) {
@@ -355,9 +361,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       fullName: registerData.fullName,
       email: registerData.email,
       phone: registerData.phone,
-      role: registerData.role,
-      department: registerData.department,
-      notes: 'Pendaftaran mandiri melalui portal AKK - Menunggu verifikasi'
+      role: 'unassigned',
+      department: registerData.department || 'Logistik',
+      password: registerData.password || 'password123',
+      notes: 'Pendaftaran mandiri melalui portal AKK - Role perlu diisi oleh Super Admin'
     });
 
     setSuccessMsg(`Pendaftaran berhasil! Akun "${newUser.fullName}" terdaftar dan menunggu persetujuan (Pending Approval) Super Admin.`);

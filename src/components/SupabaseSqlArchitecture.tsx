@@ -34,6 +34,7 @@ import { useToast } from '../context/ToastContext';
 import { LiveSyncHealthCard } from './LiveSyncHealthCard';
 import { SupabaseConnectivityMonitor } from './SupabaseConnectivityMonitor';
 import { DataBridgeMonitor } from './DataBridgeMonitor';
+import { RBAC_ROLE_MATRIX } from '../utils/rbac';
 
 export interface StoreDiffItem {
   id: string; // key
@@ -271,6 +272,165 @@ export const SupabaseSqlArchitecture: React.FC = () => {
     }
   };
 
+  const [activeRbacCodeTab, setActiveRbacCodeTab] = useState<'rls_sql' | 'frontend_guard' | 'nextjs_middleware'>('rls_sql');
+
+  const rlsRolePoliciesSql = `-- ====================================================================
+-- SUPABASE ROW LEVEL SECURITY (RLS) POLICIES BY ROLE
+-- Roles: 'super_admin' (Manager), 'dispatcher' (SPV Logistik), 'driver'
+-- ====================================================================
+
+-- Helper function (SECURITY DEFINER) to fetch current authenticated user's role
+create or replace function public.get_my_role()
+returns text
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select role::text from public.profiles where id = auth.uid() and is_active = true limit 1;
+$$;
+
+-- 1. SUPER ADMIN / MANAGER POLICIES (Full Authority across all tables)
+create policy "Super Admin full access on profiles"
+  on public.profiles for all to authenticated
+  using (public.get_my_role() = 'super_admin')
+  with check (public.get_my_role() = 'super_admin');
+
+create policy "Super Admin full access on schedules"
+  on public.schedules for all to authenticated
+  using (public.get_my_role() = 'super_admin')
+  with check (public.get_my_role() = 'super_admin');
+
+-- 2. DISPATCHER / SPV LOGISTIK POLICIES (Manage Schedules, Fleets, Crews, Stores)
+create policy "Dispatcher manage all delivery schedules"
+  on public.schedules for all to authenticated
+  using (public.get_my_role() in ('dispatcher', 'spv_logistik'))
+  with check (public.get_my_role() in ('dispatcher', 'spv_logistik'));
+
+create policy "Dispatcher manage fleets and stores"
+  on public.fleets for all to authenticated
+  using (public.get_my_role() in ('super_admin', 'dispatcher', 'spv_logistik'))
+  with check (public.get_my_role() in ('super_admin', 'dispatcher', 'spv_logistik'));
+
+-- 3. DRIVER POLICIES (Strict Row-Level Isolation: Own Assigned Deliveries Only)
+create policy "Driver can view only their assigned deliveries"
+  on public.schedules for select to authenticated
+  using (
+    public.get_my_role() = 'driver'
+    and (
+      driver_user_id = auth.uid()
+      or crew_id in (select id from public.crews where user_id = auth.uid())
+    )
+  );
+
+create policy "Driver can update status & POD on their assigned deliveries"
+  on public.schedules for update to authenticated
+  using (
+    public.get_my_role() = 'driver'
+    and (
+      driver_user_id = auth.uid()
+      or crew_id in (select id from public.crews where user_id = auth.uid())
+    )
+  )
+  with check (
+    status in ('in_transit', 'delivered', 'delayed')
+  );
+
+create policy "Driver can insert live GPS telemetry for assigned deliveries"
+  on public.tracking_logs for insert to authenticated
+  with check (
+    public.get_my_role() = 'driver'
+    and exists (
+      select 1 from public.schedules s
+      where s.id = tracking_logs.schedule_id
+        and (s.driver_user_id = auth.uid() or s.crew_id in (select id from public.crews where user_id = auth.uid()))
+    )
+  );`;
+
+  const frontendRbacExampleCode = `// Frontend Role-Checking Hook & Declarative Guard (React / Next.js + Supabase Auth)
+import { useRoleAccess, RoleGuard } from '@/components/RoleGuard';
+import { getSupabaseClient } from '@/services/supabaseService';
+
+export function DispatchControlPanel() {
+  const { user, role, isSuperAdmin, isDispatcher, isDriver, hasRole } = useRoleAccess();
+
+  // Direct programmatic check in event handlers
+  const handleAssignDriver = async (scheduleId: string, driverId: string) => {
+    if (!hasRole(['super_admin', 'dispatcher'])) {
+      throw new Error('Unauthorized: Only Super Admin or Dispatcher can assign drivers.');
+    }
+    const supabase = getSupabaseClient();
+    await supabase
+      ?.from('schedules')
+      .update({ crew_id: driverId, status: 'scheduled' })
+      .eq('id', scheduleId);
+  };
+
+  return (
+    <RoleGuard allowedRoles={['super_admin', 'dispatcher', 'spv_logistik']}>
+      <div className="p-4 rounded-xl bg-slate-900 border border-slate-800">
+        <h2>Dispatch & Schedule Control ({role})</h2>
+        {/* Protected Dispatcher & Manager UI */}
+      </div>
+    </RoleGuard>
+  );
+}`;
+
+  const nextjsMiddlewareExampleCode = `// middleware.ts — Next.js App Router Edge Middleware with Supabase Auth RBAC
+import { NextResponse, type NextRequest } from 'next/server';
+import { createServerClient } from '@supabase/ssr';
+
+const ROLE_ROUTE_RULES: Record<string, string[]> = {
+  '/admin': ['super_admin'],
+  '/users': ['super_admin'],
+  '/dispatch': ['super_admin', 'dispatcher', 'spv_logistik'],
+  '/schedules': ['super_admin', 'dispatcher', 'spv_logistik'],
+  '/driver': ['super_admin', 'dispatcher', 'spv_logistik', 'driver']
+};
+
+export async function middleware(request: NextRequest) {
+  const response = NextResponse.next({ request });
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll: () => request.cookies.getAll(),
+        setAll: (cookiesToSet) => {
+          cookiesToSet.forEach(({ name, value, options }) =>
+            response.cookies.set(name, value, options)
+          );
+        }
+      }
+    }
+  );
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.redirect(new URL('/login', request.url));
+  }
+
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role, is_active')
+    .eq('id', user.id)
+    .single();
+
+  if (!profile || !profile.is_active) {
+    return NextResponse.redirect(new URL('/unauthorized', request.url));
+  }
+
+  const pathname = request.nextUrl.pathname;
+  for (const [routePrefix, allowedRoles] of Object.entries(ROLE_ROUTE_RULES)) {
+    if (pathname.startsWith(routePrefix) && !allowedRoles.includes(profile.role)) {
+      const fallbackUrl = profile.role === 'driver' ? '/driver' : '/dispatch';
+      return NextResponse.redirect(new URL(fallbackUrl, request.url));
+    }
+  }
+
+  return response;
+}`;
+
   const fullSqlSchema = `-- ====================================================================
 -- SUPABASE POSTGRESQL ENTERPRISE LOGISTICS & B2B SUPPLY CHAIN SCHEMA
 -- Includes Row Level Security (RLS), Indexes, and Foreign Key Cascades
@@ -279,21 +439,32 @@ export const SupabaseSqlArchitecture: React.FC = () => {
 -- 1. Enable Required Extensions
 create extension if not exists "uuid-ossp";
 
--- 2. User Roles Enum for RBAC
-create type user_role as enum ('super_admin', 'spv_logistik', 'driver');
+-- 2. User Roles Enum for RBAC (Super Admin/Manager, Dispatcher/SPV Logistik, Driver)
+create type user_role as enum ('super_admin', 'dispatcher', 'spv_logistik', 'driver');
 
 -- 3. PROFILES (Extends Supabase auth.users)
 create table public.profiles (
   id uuid references auth.users on delete cascade primary key,
   email text unique not null,
   full_name text not null,
-  role user_role default 'spv_logistik'::user_role,
-  department text default 'Logistics Operations',
+  role user_role default 'driver'::user_role,
+  is_active boolean default true not null,
+  department text default 'Logistik',
   phone text,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
 alter table public.profiles enable row level security;
+
+create or replace function public.get_my_role()
+returns text
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select role::text from public.profiles where id = auth.uid() and is_active = true limit 1;
+$$;
 
 create policy "Public profiles are viewable by authenticated users."
   on public.profiles for select
@@ -308,12 +479,8 @@ create policy "Users can update their own profile."
 create policy "Super admins can manage all profiles."
   on public.profiles for all
   to authenticated
-  using (
-    exists (
-      select 1 from public.profiles
-      where profiles.id = auth.uid() and profiles.role = 'super_admin'
-    )
-  );
+  using (public.get_my_role() = 'super_admin')
+  with check (public.get_my_role() = 'super_admin');
 
 -- 4. FLEETS (Armada Kendaraan)
 create table public.fleets (
@@ -338,19 +505,16 @@ create policy "Fleets readable by all authenticated users"
   to authenticated
   using (true);
 
-create policy "Fleets modifiable by admins and spv_logistiks"
+create policy "Fleets modifiable by super_admin and dispatchers"
   on public.fleets for all
   to authenticated
-  using (
-    exists (
-      select 1 from public.profiles
-      where profiles.id = auth.uid() and profiles.role in ('super_admin', 'spv_logistik')
-    )
-  );
+  using (public.get_my_role() in ('super_admin', 'dispatcher', 'spv_logistik'))
+  with check (public.get_my_role() in ('super_admin', 'dispatcher', 'spv_logistik'));
 
 -- 5. CREWS (Supir dan Kernet)
 create table public.crews (
   id uuid default uuid_generate_v4() primary key,
+  user_id uuid references public.profiles(id) on delete set null,
   name text not null,
   phone text not null,
   role text not null check (role in ('Driver Utama', 'Driver Cadangan', 'Kernet / Helper')),
@@ -369,15 +533,11 @@ create policy "Crews viewable by authenticated users"
   to authenticated
   using (true);
 
-create policy "Crews modifiable by admins and spv_logistiks"
+create policy "Crews modifiable by super_admin and dispatchers"
   on public.crews for all
   to authenticated
-  using (
-    exists (
-      select 1 from public.profiles
-      where profiles.id = auth.uid() and profiles.role in ('super_admin', 'spv_logistik')
-    )
-  );
+  using (public.get_my_role() in ('super_admin', 'dispatcher', 'spv_logistik'))
+  with check (public.get_my_role() in ('super_admin', 'dispatcher', 'spv_logistik'));
 
 -- 6. STORES (Toko Retail & Koordinat Pelanggan)
 create table public.stores (
@@ -404,15 +564,11 @@ create policy "Stores viewable by all authenticated users"
   to authenticated
   using (true);
 
-create policy "Stores modifiable by spv_logistiks and admins"
+create policy "Stores modifiable by dispatchers and super_admins"
   on public.stores for all
   to authenticated
-  using (
-    exists (
-      select 1 from public.profiles
-      where profiles.id = auth.uid() and profiles.role in ('super_admin', 'spv_logistik')
-    )
-  );
+  using (public.get_my_role() in ('super_admin', 'dispatcher', 'spv_logistik'))
+  with check (public.get_my_role() in ('super_admin', 'dispatcher', 'spv_logistik'));
 
 -- 7. SCHEDULES (Jadwal Pengiriman & Penugasan Logistik)
 create table public.schedules (
@@ -424,12 +580,14 @@ create table public.schedules (
   store_id uuid references public.stores(id) on delete cascade not null,
   fleet_id uuid references public.fleets(id) on delete set null,
   crew_id uuid references public.crews(id) on delete set null,
+  driver_user_id uuid references public.profiles(id) on delete set null,
   status text default 'scheduled' check (status in ('scheduled', 'in_transit', 'delivered', 'delayed')),
   departure_date timestamp with time zone not null,
   estimated_arrival timestamp with time zone not null,
   actual_arrival timestamp with time zone,
   cargo_description text not null,
   cargo_weight_ton numeric(5,2) not null,
+  pod_photo_url text,
   is_inter_island boolean default false,
   ferry_booking_code text,
   transit_port text,
@@ -439,26 +597,44 @@ create table public.schedules (
 
 alter table public.schedules enable row level security;
 
-create policy "Schedules viewable by all authenticated users"
-  on public.schedules for select
-  to authenticated
-  using (true);
-
-create policy "Schedules modifiable by spv_logistiks and admins"
+-- Super Admin & Dispatcher can view and manage ALL schedules
+create policy "Super Admin and Dispatcher full schedule access"
   on public.schedules for all
   to authenticated
+  using (public.get_my_role() in ('super_admin', 'dispatcher', 'spv_logistik'))
+  with check (public.get_my_role() in ('super_admin', 'dispatcher', 'spv_logistik'));
+
+-- Driver can ONLY view schedules assigned to them
+create policy "Drivers can view only their assigned schedules"
+  on public.schedules for select
+  to authenticated
   using (
-    exists (
-      select 1 from public.profiles
-      where profiles.id = auth.uid() and profiles.role in ('super_admin', 'spv_logistik')
+    public.get_my_role() = 'driver'
+    and (
+      driver_user_id = auth.uid()
+      or crew_id in (select id from public.crews where user_id = auth.uid())
     )
   );
 
--- 8. TRACKING_LOGS (Data Historis Import Excel GPS & Tracksolid)
+-- Driver can ONLY update status & POD fields on schedules assigned to them
+create policy "Drivers can update status of their assigned schedules"
+  on public.schedules for update
+  to authenticated
+  using (
+    public.get_my_role() = 'driver'
+    and (
+      driver_user_id = auth.uid()
+      or crew_id in (select id from public.crews where user_id = auth.uid())
+    )
+  )
+  with check (status in ('in_transit', 'delivered', 'delayed'));
+
+-- 8. TRACKING_LOGS (Data Historis GPS Perangkat Driver & Tracksolid)
 create table public.tracking_logs (
   id uuid default uuid_generate_v4() primary key,
   schedule_id uuid references public.schedules(id) on delete cascade not null,
-  timestamp timestamp with time zone not null,
+  driver_user_id uuid references public.profiles(id) on delete set null,
+  timestamp timestamp with time zone not null default timezone('utc'::text, now()),
   latitude numeric(10, 8) not null,
   longitude numeric(11, 8) not null,
   speed numeric(5, 2) default 0, -- in km/h
@@ -472,10 +648,21 @@ create index idx_tracking_logs_timestamp on public.tracking_logs(timestamp);
 
 alter table public.tracking_logs enable row level security;
 
-create policy "Tracking logs accessible by authenticated users"
-  on public.tracking_logs for all
+create policy "Tracking logs viewable by authenticated users"
+  on public.tracking_logs for select
   to authenticated
-  using (true);
+  using (
+    public.get_my_role() in ('super_admin', 'dispatcher', 'spv_logistik')
+    or driver_user_id = auth.uid()
+  );
+
+create policy "Drivers and Dispatchers can insert GPS tracking logs"
+  on public.tracking_logs for insert
+  to authenticated
+  with check (
+    public.get_my_role() in ('super_admin', 'dispatcher', 'spv_logistik')
+    or (public.get_my_role() = 'driver' and driver_user_id = auth.uid())
+  );
 `;
 
   const copyToClipboard = (text: string, section: string) => {

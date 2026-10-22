@@ -28,11 +28,21 @@ import { AnalyticsReportingModule } from './components/AnalyticsReportingModule'
 import { E2ETesterModule } from './components/E2ETesterModule';
 import { NetworkStatusBanner } from './components/NetworkStatusBanner';
 import { RealtimeShipmentListener } from './components/RealtimeShipmentListener';
-import { RetailStore, UserProfile } from './types';
+import { RetailStore } from './types';
 import { logisticsStore } from './services/store';
 import { ShieldCheck, Clock, AlertTriangle, LogIn, ChevronLeft, ChevronRight, Bell, Smartphone, Lock } from 'lucide-react';
 import { useToast } from './context/ToastContext';
 import { canAccess } from './utils/rbac';
+import { useRoleAccess } from './hooks/useRoleAccess';
+
+const FLEET_MANAGEMENT_TABS: NavTab[] = [
+  'schedules',
+  'fleets',
+  'spareparts',
+  'fuel_efficiency',
+  'tracksolid',
+  'fleet_forms'
+];
 
 const LiveClockBadge: React.FC = () => {
   const [time, setTime] = useState(() =>
@@ -50,14 +60,16 @@ const LiveClockBadge: React.FC = () => {
   }, []);
 
   return (
-    <div className="hidden xl:flex items-center gap-1.5 px-2 text-slate-500 dark:text-slate-400 font-mono text-xs tabular-nums">
-      <Clock className="w-3.5 h-3.5 text-slate-400" />
-      <span>{time}</span>
+    <div className="hidden xl:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 font-mono text-xs tabular-nums">
+      <Clock className="w-3.5 h-3.5 text-amber-400" />
+      <span className="font-semibold">{time}</span>
     </div>
   );
 };
 
 export default function App() {
+  const { user: currentUser, canManageFleet, isDriver, isAdmin } = useRoleAccess();
+
   const [currentTab, setCurrentTab] = useState<NavTab>(() => {
     try {
       const searchParams = new URLSearchParams(window.location.search);
@@ -76,7 +88,6 @@ export default function App() {
   const [preselectedStore, setPreselectedStore] = useState<RetailStore | null>(null);
   const [isAuthOpen, setIsAuthOpen] = useState(true);
   const [authDefaultTab, setAuthDefaultTab] = useState<'login' | 'register'>('login');
-  const [currentUser, setCurrentUser] = useState<UserProfile>(logisticsStore.getCurrentUser());
   const [isSidebarMinimized, setIsSidebarMinimized] = useState<boolean>(() => {
     try {
       return localStorage.getItem('akk_sidebar_minimized') === 'true';
@@ -106,39 +117,27 @@ export default function App() {
     try {
       const searchParams = new URLSearchParams(window.location.search);
       if (searchParams.get('tab') === 'driver_portal' || (typeof navigator !== 'undefined' && navigator.userAgent && navigator.userAgent.includes('AKKDriverMobile'))) {
-        if (currentUser.role !== 'driver') {
+        if (!isDriver()) {
           logisticsStore.setCurrentRole('driver');
         }
       }
     } catch {}
-  }, []);
+  }, [isDriver]);
 
   useEffect(() => {
-    return logisticsStore.subscribe(() => {
-      const user = logisticsStore.getCurrentUser();
-      setCurrentUser(user);
-      if (currentTab === 'users' || !canAccess(user, currentTab)) {
-        if (user.role === 'driver' || user.role === 'crew_helper') {
-          setCurrentTab('driver_portal');
-        } else if (user.role === 'super_admin') {
-          setCurrentTab('dashboard');
-        } else {
-          setCurrentTab('operational_dashboard');
-        }
-      }
-    });
-  }, [currentTab]);
+    const isFleetTabBlocked = FLEET_MANAGEMENT_TABS.includes(currentTab) && !canManageFleet(currentUser);
+    const isAdminTabBlocked = currentTab === 'users' && !isAdmin(currentUser) && !canAccess(currentUser, 'users');
 
-  useEffect(() => {
-    const user = logisticsStore.getCurrentUser();
-    if (currentTab === 'users' || !canAccess(user, currentTab)) {
-      if (user.role === 'driver' || user.role === 'crew_helper') {
+    if (isFleetTabBlocked || isAdminTabBlocked || !canAccess(currentUser, currentTab)) {
+      if (isDriver(currentUser)) {
         setCurrentTab('driver_portal');
-      } else if (user.role !== 'super_admin') {
+      } else if (isAdmin(currentUser)) {
+        setCurrentTab('dashboard');
+      } else {
         setCurrentTab('operational_dashboard');
       }
     }
-  }, []);
+  }, [currentUser, currentTab, canManageFleet, isDriver, isAdmin]);
 
   const getTabTitle = (tab: NavTab): string => {
     switch (tab) {
@@ -215,43 +214,42 @@ export default function App() {
 
       {/* Main Content Area with offset for Sidebar */}
       <div className={`flex-1 flex flex-col min-h-screen w-full transition-all duration-300 ${isSidebarMinimized ? 'lg:pl-20' : 'lg:pl-72'}`}>
-        {/* Desktop Top Header Bar with Clean Modern Styling */}
-        <header className="hidden lg:flex sticky top-0 z-20 h-14 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 px-6 lg:px-8 items-center justify-between shadow-xs">
-          <div className="flex items-center gap-3">
-            {/* Quick Toggle Button for Sidebar Minimization */}
-            <button
-              onClick={toggleSidebar}
-              className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-800 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
-              title={isSidebarMinimized ? "Perlebar Sidebar" : "Minimalkan Sidebar"}
-              aria-label="Toggle Sidebar Size"
-            >
-              {isSidebarMinimized ? <ChevronRight className="w-4 h-4 text-blue-600 dark:text-blue-400" /> : <ChevronLeft className="w-4 h-4" />}
-            </button>
-
-            <div>
-              <div className="text-[10px] uppercase font-semibold tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+        {/* Desktop Top Header Bar with High-Contrast Readability */}
+        <header className="hidden lg:flex sticky top-0 z-20 h-16 bg-slate-900 border-b border-slate-800 px-6 lg:px-8 items-center justify-between shadow-xs">
+          <div className="flex items-center gap-3.5 min-w-0">
+            <div className="w-1 h-8 rounded-full bg-amber-500 shrink-0" />
+            <div className="min-w-0">
+              <div className="text-[10px] uppercase font-bold tracking-wider text-amber-400 flex items-center gap-1.5">
                 <span>PT Anugrah Kemasan Kreatif</span>
-                <span className="text-slate-300 dark:text-slate-600">&bull;</span>
-                <span className="text-slate-600 dark:text-slate-300 font-medium">Banyuwangi Hub</span>
+                <span className="text-slate-500">&bull;</span>
+                <span className="text-slate-400 font-semibold">Banyuwangi Hub</span>
               </div>
-              <h1 className="text-sm font-bold text-slate-900 dark:text-white tracking-tight">
+              <h1 className="text-sm sm:text-base font-extrabold text-white tracking-tight truncate">
                 {getTabTitle(currentTab)}
               </h1>
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 shrink-0">
             {/* Quick Driver Mobile Mode Switcher */}
             <button
-              onClick={() => setCurrentTab(currentTab === 'driver_portal' ? 'dashboard' : 'driver_portal')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer border ${
+              onClick={() =>
+                setCurrentTab(
+                  currentTab === 'driver_portal'
+                    ? isAdmin()
+                      ? 'dashboard'
+                      : 'operational_dashboard'
+                    : 'driver_portal'
+                )
+              }
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer border ${
                 currentTab === 'driver_portal'
                   ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                  : 'bg-slate-50 dark:bg-slate-800/80 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
+                  : 'bg-slate-950 text-slate-200 border-slate-800 hover:bg-slate-800'
               }`}
               title="Buka Tampilan Khusus Mobile Supir (Driver Portal)"
             >
-              <Smartphone className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+              <Smartphone className={`w-3.5 h-3.5 ${currentTab === 'driver_portal' ? 'text-white' : 'text-blue-400'}`} />
               <span>{currentTab === 'driver_portal' ? 'Portal Admin' : 'Mode Driver Mobile'}</span>
             </button>
 
@@ -264,10 +262,10 @@ export default function App() {
             {/* Notification Bell Button */}
             <button
               onClick={() => setIsDrawerOpen(true)}
-              className="relative p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer flex items-center justify-center"
+              className="relative p-2 rounded-lg border border-slate-800 bg-slate-950 text-slate-200 hover:bg-slate-800 transition cursor-pointer flex items-center justify-center"
               title="Pusat Notifikasi Admin"
             >
-              <Bell className="w-4 h-4" />
+              <Bell className="w-4 h-4 text-amber-400" />
               {unreadCount > 0 && (
                 <span className="absolute -top-1 -right-1 flex h-4 min-w-4 px-1 items-center justify-center rounded-full bg-blue-600 text-[9px] font-bold text-white shadow-xs">
                   {unreadCount}
@@ -278,14 +276,14 @@ export default function App() {
             {/* Quick Profile Pill */}
             <button
               onClick={() => handleOpenAuth('login')}
-              className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/80 text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition cursor-pointer"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-800 bg-slate-950 text-xs text-white hover:bg-slate-800 transition cursor-pointer"
               title="Ganti Akun atau Kelola Sesi"
             >
-              <div className="w-5 h-5 rounded-full bg-blue-600 text-white font-bold text-[10px] flex items-center justify-center">
+              <div className="w-5 h-5 rounded-full bg-blue-600 text-white font-bold text-[10px] flex items-center justify-center shrink-0">
                 {currentUser.fullName ? currentUser.fullName.charAt(0).toUpperCase() : 'U'}
               </div>
-              <span className="font-medium max-w-[110px] truncate text-slate-800 dark:text-slate-100">
-                {currentUser.role === 'super_admin' ? 'Super Admin' : currentUser.fullName}
+              <span className="font-bold max-w-[120px] truncate text-white">
+                {isAdmin() ? 'Super Admin' : currentUser.fullName}
               </span>
             </button>
           </div>
@@ -323,7 +321,7 @@ export default function App() {
           currentUser.status === 'pending' ? 'pt-4' : 'pt-18 lg:pt-6'
         }`}>
           {currentTab === 'dashboard' && (
-            canAccess(currentUser, 'dashboard') ? (
+            isAdmin() || canAccess(currentUser, 'dashboard') ? (
               <ExecutiveDashboard onNavigate={(tab) => setCurrentTab(tab as NavTab)} />
             ) : (
               <div className="max-w-2xl mx-auto mt-16 p-8 rounded-2xl bg-slate-900 border border-amber-500/30 text-center space-y-6 shadow-2xl">
@@ -339,17 +337,19 @@ export default function App() {
                 </div>
                 <div className="pt-4 flex justify-center gap-3">
                   <button
-                    onClick={() => setCurrentTab('operational_dashboard')}
+                    onClick={() => setCurrentTab(isDriver() ? 'driver_portal' : 'operational_dashboard')}
                     className="px-5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-semibold text-xs transition cursor-pointer shadow-[0_0_12px_rgba(6,182,212,0.4)]"
                   >
-                    Ke Dashboard Operasional &rarr;
+                    {isDriver() ? 'Ke Portal Driver Mobile \u2192' : 'Ke Dashboard Operasional \u2192'}
                   </button>
-                  <button
-                    onClick={() => setCurrentTab('users')}
-                    className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs transition cursor-pointer border border-slate-700"
-                  >
-                    Buka Manajemen Hak Akses
-                  </button>
+                  {isAdmin() && (
+                    <button
+                      onClick={() => setCurrentTab('users')}
+                      className="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs transition cursor-pointer border border-slate-700"
+                    >
+                      Buka Manajemen Hak Akses
+                    </button>
+                  )}
                 </div>
               </div>
             )
@@ -367,14 +367,14 @@ export default function App() {
             <AnalyticsReportingModule />
           )}
 
-          {currentTab === 'schedules' && (
+          {currentTab === 'schedules' && canManageFleet() && (
             <ScheduleManagement
               preselectedStore={preselectedStore}
               onClearPreselectedStore={() => setPreselectedStore(null)}
             />
           )}
 
-          {currentTab === 'fleets' && (
+          {currentTab === 'fleets' && canManageFleet() && (
             <FleetCrewManagement
               onNavigateToSpareParts={() => setCurrentTab('spareparts')}
               onNavigateToFuelEfficiency={() => setCurrentTab('fuel_efficiency')}
@@ -382,11 +382,11 @@ export default function App() {
             />
           )}
 
-          {currentTab === 'spareparts' && (
+          {currentTab === 'spareparts' && canManageFleet() && (
             <SparePartManagement onNavigateToFleets={() => setCurrentTab('fleets')} />
           )}
 
-          {currentTab === 'fuel_efficiency' && (
+          {currentTab === 'fuel_efficiency' && canManageFleet() && (
             <FuelEfficiencyManagement onNavigateToFleets={() => setCurrentTab('fleets')} />
           )}
 
@@ -394,7 +394,7 @@ export default function App() {
             <CrewDeliveryHistoryView />
           )}
 
-          {currentTab === 'users' && (
+          {currentTab === 'users' && (isAdmin() || canAccess(currentUser, 'users')) && (
             <UserManagement
               onNavigateToE2E={() => setCurrentTab('e2e_testing')}
             />
@@ -408,11 +408,11 @@ export default function App() {
             <CustomerMapping onScheduleForStore={handleScheduleForStore} />
           )}
 
-          {currentTab === 'tracksolid' && (
+          {currentTab === 'tracksolid' && canManageFleet() && (
             <TracksolidGateway />
           )}
 
-          {currentTab === 'fleet_forms' && (
+          {currentTab === 'fleet_forms' && canManageFleet() && (
             <FleetFormCenter />
           )}
 

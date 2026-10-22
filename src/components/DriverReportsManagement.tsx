@@ -62,9 +62,10 @@ export const DriverReportsManagement: React.FC = () => {
 
   const [reports, setReports] = useState<DriverHelperReport[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState<'all' | 'kendala_jalan' | 'akhir_kiriman' | 'update_lokasi'>('all');
+  const [categoryFilter, setCategoryFilter] = useState<'all' | 'kendala_jalan' | 'akhir_kiriman' | 'istirahat' | 'presensi_shift' | 'pin_keamanan' | 'update_lokasi'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'verified' | 'follow_up' | 'resolved'>('all');
   const [selectedPhotoModal, setSelectedPhotoModal] = useState<DriverHelperReport | null>(null);
+  const [revealedPinIds, setRevealedPinIds] = useState<Record<string, boolean>>({});
 
   // Calendar Date Filter State: Pertanggal, Minggu Ini, Bulan Ini, atau Semua
   const [dateFilterMode, setDateFilterMode] = useState<DateFilterMode>('single_date');
@@ -294,8 +295,18 @@ export const DriverReportsManagement: React.FC = () => {
       r.id,
       r.date || new Date(r.timestamp).toISOString().slice(0, 10),
       new Date(r.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
-      r.category === 'kendala_jalan' ? 'Kendala Jalan' : r.category === 'akhir_kiriman' ? 'Akhir Kiriman' : 'Update Lokasi',
-      `"${r.driverName}"`,
+      r.category === 'kendala_jalan'
+        ? 'Kendala Jalan'
+        : r.category === 'akhir_kiriman'
+        ? 'Akhir Kiriman'
+        : r.category === 'presensi_shift'
+        ? 'Presensi Shift (Check-In & Check-Out)'
+        : r.category === 'pin_keamanan'
+        ? 'PIN Keamanan (2x Verifikasi)'
+        : r.category === 'istirahat'
+        ? 'Istirahat Kru'
+        : 'Update Lokasi',
+      `"${r.driverName} (${r.userRole || 'Driver'})"`,
       `"${r.helperName || '-'}"`,
       r.plateNumber,
       `"${r.areaName}"`,
@@ -730,8 +741,11 @@ export const DriverReportsManagement: React.FC = () => {
                 className="bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-amber-500 cursor-pointer"
               >
                 <option value="all">Semua Kategori Laporan</option>
+                <option value="presensi_shift">🕒 Check-In &amp; Check-Out Shift (Gabungan)</option>
+                <option value="pin_keamanan">🔐 Data PIN Keamanan (2x Verifikasi)</option>
                 <option value="kendala_jalan">⚠️ Kendala di Jalan</option>
-                <option value="akhir_kiriman">📦 Akhir Kiriman (POD)</option>
+                <option value="akhir_kiriman">📦 Akhir Kiriman (POD &amp; Argo)</option>
+                <option value="istirahat">☕ Istirahat Kru</option>
                 <option value="update_lokasi">📍 Update Titik GMaps</option>
               </select>
 
@@ -821,9 +835,16 @@ export const DriverReportsManagement: React.FC = () => {
 
                           {/* 2. Kru Supir & Armada */}
                           <td className="p-3.5 align-top">
-                            <div className="font-bold text-white flex items-center gap-1.5">
+                            <div className="font-bold text-white flex items-center gap-1.5 flex-wrap">
                               <User className="w-3.5 h-3.5 text-blue-400 shrink-0" />
                               <span>{item.driverName}</span>
+                              <span className={`text-[9px] px-1.5 py-0.2 rounded font-mono font-bold border ${
+                                (item.userRole || '').toLowerCase().includes('helper')
+                                  ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
+                                  : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                              }`}>
+                                {item.userRole || 'Driver'}
+                              </span>
                             </div>
                             {item.helperName && (
                               <div className="text-[10px] text-slate-400 mt-0.5">
@@ -839,7 +860,7 @@ export const DriverReportsManagement: React.FC = () => {
                           </td>
 
                           {/* 3. Jenis Laporan */}
-                          <td className="p-3.5 align-top">
+                          <td className="p-3.5 align-top space-y-1">
                             {item.category === 'kendala_jalan' && (
                               <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold bg-rose-500/15 text-rose-300 border border-rose-500/30">
                                 <AlertTriangle className="w-3 h-3 text-rose-400" />
@@ -852,11 +873,51 @@ export const DriverReportsManagement: React.FC = () => {
                                 <span>Akhir Kiriman</span>
                               </span>
                             )}
+                            {item.category === 'presensi_shift' && (
+                              <div className="space-y-1">
+                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+                                  <Clock className="w-3 h-3 text-cyan-400" />
+                                  <span>Check-In &amp; Check-Out</span>
+                                </span>
+                                <div className="text-[10px] font-mono space-y-0.5 bg-slate-950 p-1.5 rounded-lg border border-slate-800">
+                                  <div className="text-emerald-400 font-bold">In: {item.checkinTimeFormatted || '-'}</div>
+                                  <div className={item.checkoutTimeFormatted ? 'text-amber-400 font-bold' : 'text-slate-500'}>
+                                    Out: {item.checkoutTimeFormatted || 'Masih Dinas'}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                            {item.category === 'pin_keamanan' && (
+                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                                <Lock className="w-3 h-3 text-amber-400" />
+                                <span>PIN Keamanan (2x)</span>
+                              </span>
+                            )}
+                            {item.category === 'istirahat' && (
+                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                                <Clock className="w-3 h-3 text-amber-400" />
+                                <span>Istirahat Kru</span>
+                              </span>
+                            )}
                             {item.category === 'update_lokasi' && (
                               <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold bg-blue-500/15 text-blue-300 border border-blue-500/30">
                                 <Navigation className="w-3 h-3 text-blue-400" />
                                 <span>Update Lokasi</span>
                               </span>
+                            )}
+                            {item.securityPin && (
+                              <div className="flex items-center gap-1.5 pt-0.5">
+                                <span className="text-[10px] font-mono bg-slate-950 px-2 py-0.5 rounded border border-amber-500/30 text-amber-300 font-bold">
+                                  PIN: {revealedPinIds[item.id] ? item.securityPin : '••••'}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setRevealedPinIds(prev => ({ ...prev, [item.id]: !prev[item.id] }))}
+                                  className="text-[9px] text-cyan-400 hover:underline font-bold cursor-pointer"
+                                >
+                                  {revealedPinIds[item.id] ? 'Tutup' : 'Lihat'}
+                                </button>
+                              </div>
                             )}
                           </td>
 

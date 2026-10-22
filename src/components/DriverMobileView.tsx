@@ -126,7 +126,6 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   const [crews, setCrews] = useState<Crew[]>(logisticsStore.getCrews());
   const [fleets, setFleets] = useState<Fleet[]>(logisticsStore.getFleets());
 
-  // Supir yang tersinkronisasi otomatis dengan akun login
   const syncedCrew = useMemo(() => {
     return logisticsStore.getActiveDriverCrew();
   }, [currentUser, crews]);
@@ -134,6 +133,40 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   const [loggedInDriver, setLoggedInDriver] = useState<Crew | null>(() => {
     return syncedCrew || null;
   });
+
+  // Sinkronisasi Role dengan User Manajemen (Driver / Helper / Role lainnya)
+  const syncedUserRoleInfo = useMemo(() => {
+    const allUsers = logisticsStore.getUsers();
+    const matchedUser = allUsers.find(
+      u =>
+        (currentUser?.id && u.id === currentUser.id) ||
+        (currentUser?.email && u.email.toLowerCase() === currentUser.email.toLowerCase()) ||
+        (portalDisplayName && u.fullName.toLowerCase() === portalDisplayName.toLowerCase())
+    );
+    const rawRole = matchedUser?.role || currentUser?.role || loggedInDriver?.role || 'driver';
+    const roleLower = String(rawRole).toLowerCase();
+    let roleLabel = 'Driver';
+    if (roleLower === 'helper' || roleLower.includes('helper') || roleLower === 'crew_helper') {
+      roleLabel = 'Helper';
+    } else if (roleLower === 'driver') {
+      roleLabel = 'Driver';
+    } else if (roleLower === 'spv_logistik') {
+      roleLabel = 'SPV Logistik';
+    } else if (roleLower === 'super_admin') {
+      roleLabel = 'Super Admin';
+    } else if (roleLower === 'security') {
+      roleLabel = 'Security';
+    } else if (roleLower === 'operasional') {
+      roleLabel = 'Operasional';
+    } else if (roleLower === 'unassigned') {
+      roleLabel = 'Perlu Diisi (User Baru)';
+    }
+    return {
+      rawRole,
+      roleLabel,
+      department: matchedUser?.department || currentUser?.department || 'Logistik'
+    };
+  }, [currentUser, portalDisplayName, loggedInDriver]);
 
   const [isDriverLoggedIn, setIsDriverLoggedIn] = useState<boolean>(() => {
     const user = propUser || logisticsStore.getCurrentUser();
@@ -276,6 +309,118 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     checkCameraSupport();
   }, []);
 
+  // 📍 Native Device GPS Geolocation Integration (navigator.geolocation)
+  const [deviceGps, setDeviceGps] = useState<{
+    lat: number;
+    lng: number;
+    accuracy: number;
+    speedKmh: number;
+    lastUpdated: string;
+    isSyncing: boolean;
+    source: 'native' | 'dc_fallback';
+  }>({
+    lat: -8.1906,
+    lng: 114.3708,
+    accuracy: 12,
+    speedKmh: 0,
+    lastUpdated: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB',
+    isSyncing: false,
+    source: 'dc_fallback'
+  });
+
+  const [expandedRouteDeliveryId, setExpandedRouteDeliveryId] = useState<string | null>(null);
+
+  const syncDeviceGps = (showToast = false) => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      if (showToast) {
+        addNotification('delivery', 'GPS Fallback DC Aktif', 'Perangkat menggunakan titik referensi Gudang Pusat Banyuwangi DC.');
+      }
+      return;
+    }
+
+    setDeviceGps(prev => ({ ...prev, isSyncing: true }));
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const nowTime = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' WIB';
+        const speedMs = pos.coords.speed || 0;
+        setDeviceGps({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracy: Math.round(pos.coords.accuracy || 10),
+          speedKmh: Math.max(0, Math.round(speedMs * 3.6)),
+          lastUpdated: nowTime,
+          isSyncing: false,
+          source: 'native'
+        });
+        if (showToast) {
+          addNotification(
+            'delivery',
+            'GPS Perangkat Tersinkronisasi',
+            `Koordinat terkunci: ${pos.coords.latitude.toFixed(5)}, ${pos.coords.longitude.toFixed(5)} (±${Math.round(pos.coords.accuracy || 10)}m)`
+          );
+        }
+      },
+      () => {
+        const nowTime = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
+        setDeviceGps(prev => ({
+          ...prev,
+          lastUpdated: nowTime,
+          isSyncing: false,
+          source: 'dc_fallback'
+        }));
+        if (showToast) {
+          addNotification(
+            'delivery',
+            'Titik GPS Referensi DC',
+            'Menggunakan koordinat Gudang Pusat Sukowidi DC (-8.1906, 114.3708).'
+          );
+        }
+      },
+      { enableHighAccuracy: true, timeout: 6000, maximumAge: 15000 }
+    );
+  };
+
+  useEffect(() => {
+    syncDeviceGps(false);
+    if (typeof navigator !== 'undefined' && navigator.geolocation) {
+      const watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          const nowTime = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
+          const speedMs = pos.coords.speed || 0;
+          setDeviceGps({
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            accuracy: Math.round(pos.coords.accuracy || 10),
+            speedKmh: Math.max(0, Math.round(speedMs * 3.6)),
+            lastUpdated: nowTime,
+            isSyncing: false,
+            source: 'native'
+          });
+        },
+        () => {},
+        { enableHighAccuracy: true, maximumAge: 20000 }
+      );
+      return () => navigator.geolocation.clearWatch(watchId);
+    }
+  }, []);
+
+  const calculateRouteMetrics = (destLat: number, destLng: number) => {
+    const R = 6371; // Earth radius in km
+    const dLat = ((destLat - deviceGps.lat) * Math.PI) / 180;
+    const dLng = ((destLng - deviceGps.lng) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((deviceGps.lat * Math.PI) / 180) *
+        Math.cos((destLat * Math.PI) / 180) *
+        Math.sin(dLng / 2) *
+        Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const straightKm = R * c;
+    const roadDistanceKm = Math.max(1.2, Number((straightKm * 1.28).toFixed(1)));
+    const estMinutes = Math.max(5, Math.round((roadDistanceKm / 38) * 60));
+    return { roadDistanceKm, estMinutes };
+  };
+
   // 🚗 Checklist Kendaraan & 📑 Surat Jalan Keluar Integration States
   const [checklists, setChecklists] = useState<DriverVehicleChecklist[]>(() =>
     driverChecklistService.getChecklists()
@@ -289,14 +434,13 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   const [waybillStatusFilter, setWaybillStatusFilter] = useState<'all' | 'gate_out' | 'in_transit' | 'delivered'>('all');
   const [checklistTabCategory, setChecklistTabCategory] = useState<ChecklistItemCategory | 'all'>('all');
 
-  // 🕒 Driver Check-in Shift Management (Biometric & PIN Verification)
+  // 🕒 Driver Check-in Shift Management (PIN 2x Verification)
   const [activeShift, setActiveShift] = useState<DriverShiftCheckin | null>(() =>
     driverShiftService.getActiveShift(selectedDriverId)
   );
   const [isCheckinModalOpen, setIsCheckinModalOpen] = useState<boolean>(false);
+  const [checkinModalMode, setCheckinModalMode] = useState<'checkin' | 'change_pin'>('checkin');
   const [isCheckoutModalOpen, setIsCheckoutModalOpen] = useState<boolean>(false);
-  const [checkoutOdometer, setCheckoutOdometer] = useState<number>(0);
-  const [checkoutNotes, setCheckoutNotes] = useState<string>('');
   const [isApkModalOpen, setIsApkModalOpen] = useState<boolean>(false);
   const [isGmapsShareModalOpen, setIsGmapsShareModalOpen] = useState<boolean>(false);
 
@@ -433,6 +577,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     isOpen: boolean;
     delivery: Schedule | null;
     conditionNote: string;
+    serviceNote: string;
     hasSignature: boolean;
     photoUrl: string | null;
     photoTimestamp: string | null;
@@ -440,7 +585,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   }>({
     isOpen: false,
     delivery: null,
-    conditionNote: 'Aman, tiba di gudang argo',
+    conditionNote: '',
+    serviceNote: '',
     hasSignature: true,
     photoUrl: null,
     photoTimestamp: null,
@@ -595,26 +741,42 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   // Cek peran user saat ini untuk hak akses khusus Super Admin
   const isSuperAdmin = currentUser?.role === 'super_admin';
 
-  // 📦 Pemisahan tugas pengiriman dengan progresi jadwal otomatis:
-  // - Pengiriman yang sudah selesai selalu berada di Selesai (deliveredDeliveries)
-  // - Pengiriman yang sedang jalan / siap kirim berada di Aktif (inProgress)
-  // - Pada tab Jadwal, menampilkan muatan untuk hari esoknya (H+1).
-  // - Ketika hari berganti (simulatedDay === 'next_day'), jadwal H+1 otomatis pindah ke Aktif (Siap Kirim)
-  //   dan jadwal di bawahnya bergerak naik ke atas menyesuaikan hari berikutnya!
+  // 📦 Pemisahan tugas pengiriman dengan progresi jadwal otomatis sesuai tanggal hari ini:
+  // - Jika tanggal keberangkatan (departureDate) <= hari ini (todayIso) dan belum 'delivered',
+  //   otomatis masuk ke daftar Aktif!
+  // - Jika tanggal keberangkatan > hari ini (misal besok tgl 23 saat hari ini tgl 22),
+  //   berada di daftar Jadwal, dan otomatis berpindah ke Aktif saat tanggal hari ini tiba di tanggal tersebut.
   const { activeDeliveries, scheduledDeliveries, deliveredDeliveries } = useMemo(() => {
+    const todayIso = new Date().toISOString().slice(0, 10);
     const delivered = deliveries.filter(d => d.status === 'delivered');
-    const inProgress = deliveries.filter(d => ['picked_up', 'in_transit', 'delayed'].includes(d.status));
-    const allScheduled = deliveries.filter(d => d.status === 'scheduled');
 
-    // Urutkan jadwal muat berdasarkan tanggal & waktu (antrean awal di posisi paling atas)
-    const sortedScheduled = [...allScheduled].sort((a, b) => {
+    const activeList = deliveries.filter(d => {
+      if (d.status === 'delivered') return false;
+      if (['picked_up', 'in_transit', 'delayed'].includes(d.status)) return true;
+      const depDate = (d.departureDate || '').slice(0, 10);
+      return Boolean(depDate && depDate <= todayIso);
+    });
+
+    const futureScheduled = deliveries.filter(d => {
+      if (d.status !== 'scheduled') return false;
+      const depDate = (d.departureDate || '').slice(0, 10);
+      return !depDate || depDate > todayIso;
+    });
+
+    const sortedActive = [...activeList].sort((a, b) => {
+      const timeA = new Date(a.departureDate || a.createdAt || 0).getTime();
+      const timeB = new Date(b.departureDate || b.createdAt || 0).getTime();
+      return timeA - timeB;
+    });
+
+    const sortedScheduled = [...futureScheduled].sort((a, b) => {
       const timeA = new Date(a.departureDate || a.createdAt || 0).getTime();
       const timeB = new Date(b.departureDate || b.createdAt || 0).getTime();
       return timeA - timeB;
     });
 
     return {
-      activeDeliveries: inProgress,
+      activeDeliveries: sortedActive,
       scheduledDeliveries: sortedScheduled,
       deliveredDeliveries: delivered
     };
@@ -874,19 +1036,49 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   // Submit Konfirmasi Tiba di Gudang Argo (POD)
   const submitPod = async () => {
     if (!podModal.delivery) return;
-    const podNote = `Tiba di Gudang Argo: ${podModal.conditionNote || 'Aman'}`;
+    const choice = podModal.postTripFleetStatus || 'available';
+    if (choice === 'maintenance' && !podModal.serviceNote.trim()) {
+      addNotification(
+        'sla_warning',
+        'Keterangan Servis Wajib Diisi',
+        'Mohon isi bagian apa yang perlu diservis/diperbaiki pada armada.'
+      );
+      return;
+    }
+
+    const statusText = choice === 'available'
+      ? 'Aman Tidak Perlu Servis'
+      : `Perlu Perawatan (Servis: ${podModal.serviceNote.trim()})`;
+    const podNote = `Tiba di Gudang Argo${podModal.conditionNote.trim() ? `: ${podModal.conditionNote.trim()}` : ''} • Status Armada Sampai di Argo: ${statusText}`;
+
     const podData = {
       podPhotoUrl: podModal.photoUrl || undefined,
       podPhotoTimestamp: podModal.photoTimestamp || new Date().toISOString(),
       podReceiverName: 'Gudang Argo DC',
-      podConditionNote: podModal.conditionNote || 'Aman'
+      podConditionNote: `${podModal.conditionNote.trim() || 'Tiba di Gudang Argo'} [${statusText}]`
     };
-    const choice = podModal.postTripFleetStatus || 'available';
+
     await handleUpdateStatus(podModal.delivery, 'delivered', podNote, podData, choice);
+
+    // Rekam ke Laporan Kiriman Kru agar SPV Logistik tahu status armada sampai di Argo & servis jika ada
+    driverReportService.addReport({
+      driverId: selectedDriverId,
+      driverName: currentDriver?.name || portalDisplayName,
+      userRole: syncedUserRoleInfo.roleLabel,
+      helperName: podModal.delivery?.crewHelper?.name,
+      plateNumber: assignedFleet?.plateNumber || podModal.delivery?.fleet?.plateNumber || 'P 8125 VC',
+      category: 'akhir_kiriman',
+      areaName: podModal.delivery.areaName || podModal.delivery.store?.storeName || 'Gudang Argo',
+      deliveryId: podModal.delivery.id,
+      notes: podNote,
+      photoUrl: podModal.photoUrl
+    });
+
     setPodModal({
       isOpen: false,
       delivery: null,
-      conditionNote: 'Aman, tiba di gudang argo',
+      conditionNote: '',
+      serviceNote: '',
       hasSignature: true,
       photoUrl: null,
       photoTimestamp: null,
@@ -894,8 +1086,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     });
     addNotification(
       'delivery',
-      'Status Armada Diperbarui Otomatis',
-      `Armada ${podModal.delivery.fleet?.plateNumber || ''} kini otomatis berstatus: "${choice === 'available' ? 'Siap (Available)' : 'Perlu Perawatan (Maintenance)'}"`
+      'Konfirmasi Tiba di Gudang Argo Berhasil',
+      `Armada ${podModal.delivery.fleet?.plateNumber || ''} tercatat sampai di Argo dengan status: "${statusText}"`
     );
   };
 
@@ -1189,15 +1381,19 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           </div>
         </div>
 
-        {/* Driver Account Display & Assigned Truck Bar */}
+        {/* Driver/Helper Account Display Integrated with User Management & Assigned Truck Bar */}
         <div className="mt-3 pt-2.5 border-t border-slate-800/80 flex items-center justify-between gap-2 text-xs">
           <div className="flex items-center gap-1.5 text-slate-300 min-w-0">
-            <span className="text-[10px] text-slate-400 font-semibold uppercase">Supir:</span>
+            <span className="text-[10px] text-slate-400 font-semibold uppercase">{syncedUserRoleInfo.roleLabel}:</span>
             <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg px-2.5 py-1 font-bold truncate">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0"></span>
               <span className="truncate">{portalDisplayName}</span>
-              <span className="text-[9px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20 shrink-0 font-mono">
-                Akun Terverifikasi
+              <span className={`text-[9px] px-1.5 py-0.5 rounded border shrink-0 font-mono font-bold ${
+                syncedUserRoleInfo.roleLabel === 'Helper'
+                  ? 'text-cyan-400 bg-cyan-500/10 border-cyan-500/30'
+                  : 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'
+              }`}>
+                Role: {syncedUserRoleInfo.roleLabel}
               </span>
             </div>
           </div>
@@ -1322,17 +1518,19 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                 {!activeShift ? (
                   <button
                     type="button"
-                    onClick={() => setIsCheckinModalOpen(true)}
+                    onClick={() => {
+                      setCheckinModalMode('checkin');
+                      setIsCheckinModalOpen(true);
+                    }}
                     className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shrink-0 flex items-center gap-1.5 shadow-md shadow-amber-500/25 transition active:scale-95 cursor-pointer"
                   >
-                    <Fingerprint className="w-3.5 h-3.5" />
+                    <KeyRound className="w-3.5 h-3.5" />
                     <span>Check-In</span>
                   </button>
                 ) : (
                   <button
                     type="button"
                     onClick={() => {
-                      setCheckoutOdometer((activeShift.odometerStartKm || 124500) + 65);
                       setIsCheckoutModalOpen(true);
                     }}
                     className="px-2.5 py-1.5 rounded-xl neu-button text-emerald-400 text-[10px] font-bold flex items-center gap-1 transition cursor-pointer active:scale-95"
@@ -1368,13 +1566,27 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                 </div>
               </div>
 
-              {/* Shift Odometer & Sync Status Bar */}
-              <div className="flex items-center justify-between text-[11px] px-1 text-slate-400 font-mono">
-                <span>Odo Mulai: {activeShift?.odometerStartKm ? `${activeShift.odometerStartKm.toLocaleString()} KM` : '124,500 KM'}</span>
-                <span className="flex items-center gap-1 text-emerald-400 font-bold">
-                  <Wifi className="w-3 h-3 animate-pulse" />
-                  <span>Online Supabase Realtime</span>
-                </span>
+              {/* Native Device GPS Geolocation Status & Sync Bar */}
+              <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between gap-2 text-[11px]">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Compass className={`w-3.5 h-3.5 shrink-0 ${deviceGps.source === 'native' ? 'text-emerald-400' : 'text-amber-400'}`} />
+                  <div className="truncate text-slate-300">
+                    <span className="font-semibold text-white">GPS Perangkat:</span>{' '}
+                    <span className="font-mono text-emerald-400">
+                      {deviceGps.lat.toFixed(4)}, {deviceGps.lng.toFixed(4)}
+                    </span>
+                    <span className="text-slate-500"> · ±{deviceGps.accuracy}m</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => syncDeviceGps(true)}
+                  disabled={deviceGps.isSyncing}
+                  className="px-2.5 py-1 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 text-amber-400 font-bold text-[10px] flex items-center gap-1 shrink-0 transition cursor-pointer"
+                >
+                  <RefreshCw className={`w-3 h-3 ${deviceGps.isSyncing ? 'animate-spin' : ''}`} />
+                  <span>{deviceGps.isSyncing ? 'Sync...' : 'Sync GPS'}</span>
+                </button>
               </div>
             </div>
 
@@ -1655,21 +1867,87 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                         </div>
                       )}
 
-                      {/* Route Path (DC -> Outlet) */}
-                      <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-800/80 text-xs space-y-1.5">
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
-                          <span className="text-slate-400 text-[11px] truncate">
-                            Asal: <strong className="text-slate-200">{delivery.originName || 'Gudang Pusat Sukowidi DC'}</strong>
-                          </span>
-                        </div>
-                        <div className="flex items-start gap-2">
-                          <MapPin className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
-                          <span className="text-slate-300 text-[11px] leading-snug">
-                            {store?.address || 'Jl. Raya Distribusi Banyuwangi'}
-                          </span>
-                        </div>
-                      </div>
+                      {/* Route Path (DC -> Outlet) & Expandable Route Details */}
+                      {(() => {
+                        const { roadDistanceKm, estMinutes } = calculateRouteMetrics(storeLat, storeLng);
+                        const isRouteExpanded = expandedRouteDeliveryId === delivery.id;
+
+                        return (
+                          <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-800/80 text-xs space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <div className="w-2 h-2 rounded-full bg-blue-500 shrink-0" />
+                                <span className="text-slate-400 text-[11px] truncate">
+                                  Asal: <strong className="text-slate-200">{delivery.originName || 'Gudang Pusat Sukowidi DC'}</strong>
+                                </span>
+                              </div>
+                              <span className="text-[10px] font-mono text-emerald-400 shrink-0">
+                                {roadDistanceKm} KM · ~{estMinutes} mnt
+                              </span>
+                            </div>
+
+                            <div className="flex items-start gap-2">
+                              <MapPin className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
+                              <span className="text-slate-300 text-[11px] leading-snug">
+                                {store?.address || 'Jl. Raya Distribusi Banyuwangi'}
+                              </span>
+                            </div>
+
+                            <div className="pt-1.5 border-t border-slate-800/70 flex items-center justify-between gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setExpandedRouteDeliveryId(isRouteExpanded ? null : delivery.id)}
+                                className="text-[11px] font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1 transition cursor-pointer"
+                              >
+                                <Navigation className="w-3 h-3" />
+                                <span>{isRouteExpanded ? 'Tutup Rincian Rute' : 'Lihat Rincian Rute & Muatan'}</span>
+                              </button>
+
+                              <div className="flex items-center gap-1.5">
+                                <a
+                                  href={googleMapsUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="px-2.5 py-1 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-300 font-bold text-[10px] flex items-center gap-1 transition"
+                                >
+                                  <Navigation className="w-3 h-3" />
+                                  <span>Rute Maps</span>
+                                </a>
+                                <a
+                                  href={waUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="px-2.5 py-1 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 font-bold text-[10px] flex items-center gap-1 transition"
+                                >
+                                  <Phone className="w-3 h-3" />
+                                  <span>PIC</span>
+                                </a>
+                              </div>
+                            </div>
+
+                            {isRouteExpanded && (
+                              <div className="pt-2 border-t border-slate-800/80 space-y-2 text-[11px] text-slate-300 animate-in fade-in duration-200">
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div className="bg-slate-900/90 p-2 rounded-lg border border-slate-800">
+                                    <span className="text-[10px] text-slate-400 block">Muatan &amp; Tonase</span>
+                                    <strong className="text-white block truncate">{delivery.cargoDescription || 'Kemasan Karton & Box'}</strong>
+                                    <span className="text-[10px] text-amber-400 font-mono">{delivery.cargoWeightTon || 1.2} Ton</span>
+                                  </div>
+                                  <div className="bg-slate-900/90 p-2 rounded-lg border border-slate-800">
+                                    <span className="text-[10px] text-slate-400 block">Penerima / Jam Buka</span>
+                                    <strong className="text-white block truncate">{store?.contactPerson || 'PIC Gudang Toko'}</strong>
+                                    <span className="text-[10px] text-emerald-400 font-mono">{store?.deliveryWindow || '08:00 - 17:00'}</span>
+                                  </div>
+                                </div>
+                                <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 bg-slate-900/70 px-2.5 py-1.5 rounded-lg border border-slate-800">
+                                  <span>GPS Tujuan: {storeLat.toFixed(5)}, {storeLng.toFixed(5)}</span>
+                                  <span>Estimasi: ~{estMinutes} Menit</span>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       {/* Tanggal Kirim & Timing Metadata */}
                       {delivery.status === 'delivered' ? (
@@ -1817,51 +2095,61 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
 
 
-                      {/* Driver Status Action Workflow Buttons */}
+                      {/* Driver Status Action Workflow Buttons (Tanpa tombol Kendala, Surat Jalan Keluar, dan Checklist di daftar Aktif) */}
                       <div className="pt-2 border-t border-slate-200 dark:border-slate-800/80">
-                        {delivery.status === 'scheduled' && (
-                          <div className="space-y-2">
-                            <button
-                              type="button"
-                              onClick={() => setTransferModal({
-                                isOpen: true,
-                                delivery,
-                                reason: delivery.transferRequest?.reason || 'Darurat / Halangan pribadi',
-                                transferType: delivery.transferRequest?.transferType || 'Oper ke driver lain (Driver cari pengganti)',
-                                gpsPhotoUrl: delivery.transferRequest?.gpsPhotoUrl || 'https://images.unsplash.com/photo-1526778548025-fa2f459cd5c1?w=600&auto=format&fit=crop&q=80',
-                                constraintNote: delivery.transferRequest?.constraintNote || delivery.transferRequest?.notes || ''
-                              })}
-                              className={`w-full py-2.5 px-3 rounded-xl border-2 font-black text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-xs cursor-pointer ${
-                                delivery.transferRequest?.status === 'pending'
-                                  ? 'bg-amber-100 dark:bg-amber-950/60 border-amber-600 dark:border-amber-400 text-amber-950 dark:text-amber-200'
-                                  : 'bg-amber-50 hover:bg-amber-100 dark:bg-amber-500/15 dark:hover:bg-amber-500/25 border-amber-500 text-amber-950 dark:text-amber-200'
-                              }`}
-                            >
-                              <ArrowRightLeft className="w-4 h-4 text-amber-700 dark:text-amber-400" />
-                              <span>{delivery.transferRequest?.status === 'pending' ? 'Edit Oper Jadwal' : 'Minta Oper Jadwal'}</span>
-                            </button>
-                            <span className="text-[10px] text-slate-500 dark:text-slate-400 block text-center font-medium">
-                              Jadwal persiapan muat esok hari (H+1). Ajukan oper jadwal jika berhalangan.
-                            </span>
-                          </div>
-                        )}
+                        {delivery.status === 'scheduled' && (() => {
+                          const todayIso = new Date().toISOString().slice(0, 10);
+                          const depDate = (delivery.departureDate || '').slice(0, 10);
+                          const isDueToday = Boolean(depDate && depDate <= todayIso);
+
+                          return (
+                            <div className="space-y-2">
+                              {isDueToday && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleUpdateStatus(delivery, 'in_transit')}
+                                  className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
+                                >
+                                  <Truck className="w-4 h-4" />
+                                  <span>Mulai Berangkat (Jadwal Hari Ini Aktif)</span>
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => setTransferModal({
+                                  isOpen: true,
+                                  delivery,
+                                  reason: delivery.transferRequest?.reason || 'Darurat / Halangan pribadi',
+                                  transferType: delivery.transferRequest?.transferType || 'Oper ke driver lain (Driver cari pengganti)',
+                                  gpsPhotoUrl: delivery.transferRequest?.gpsPhotoUrl || 'https://images.unsplash.com/photo-1526778548025-fa2f459cd5c1?w=600&auto=format&fit=crop&q=80',
+                                  constraintNote: delivery.transferRequest?.constraintNote || delivery.transferRequest?.notes || ''
+                                })}
+                                className={`w-full py-2.5 px-3 rounded-xl border-2 font-black text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-xs cursor-pointer ${
+                                  delivery.transferRequest?.status === 'pending'
+                                    ? 'bg-amber-100 dark:bg-amber-950/60 border-amber-600 dark:border-amber-400 text-amber-950 dark:text-amber-200'
+                                    : 'bg-amber-50 hover:bg-amber-100 dark:bg-amber-500/15 dark:hover:bg-amber-500/25 border-amber-500 text-amber-950 dark:text-amber-200'
+                                }`}
+                              >
+                                <ArrowRightLeft className="w-4 h-4 text-amber-700 dark:text-amber-400" />
+                                <span>{delivery.transferRequest?.status === 'pending' ? 'Edit Oper Jadwal' : 'Minta Oper Jadwal'}</span>
+                              </button>
+                              <span className="text-[10px] text-slate-500 dark:text-slate-400 block text-center font-medium">
+                                {isDueToday
+                                  ? 'Jadwal hari ini otomatis aktif sesuai tanggal kalender.'
+                                  : 'Jadwal mendatang otomatis beralih ke tab Aktif tepat pada tanggal keberangkatan.'}
+                              </span>
+                            </div>
+                          );
+                        })()}
 
                         {delivery.status === 'picked_up' && (
                           <div className="flex items-center gap-2">
                             <button
                               onClick={() => handleUpdateStatus(delivery, 'in_transit')}
-                              className="flex-1 py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
+                              className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
                             >
                               <Truck className="w-4 h-4" />
                               <span>Mulai Berangkat (In Transit)</span>
-                            </button>
-                            <button
-                              onClick={() => setDelayModal({ isOpen: true, delivery, reason: 'Driver / Helper Tidak Masuk (Harus Segera Diganti)', customNote: '' })}
-                              className="px-3 py-2.5 rounded-xl bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 border border-rose-500/40 font-bold text-xs flex items-center justify-center gap-1 transition active:scale-95 cursor-pointer"
-                              title="Lapor Kendala Pengiriman"
-                            >
-                              <AlertTriangle className="w-4 h-4" />
-                              <span>Kendala</span>
                             </button>
                           </div>
                         )}
@@ -1872,24 +2160,17 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                               onClick={() => setPodModal({
                                 isOpen: true,
                                 delivery,
-                                conditionNote: 'Aman, tiba di gudang argo',
+                                conditionNote: '',
+                                serviceNote: '',
                                 hasSignature: true,
                                 photoUrl: delivery.podPhotoUrl || null,
                                 photoTimestamp: delivery.podPhotoTimestamp || null,
                                 postTripFleetStatus: 'available'
                               })}
-                              className="flex-1 py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
+                              className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
                             >
                               <CheckCircle2 className="w-4 h-4" />
                               <span>Konfirmasi Tiba di Gudang Argo</span>
-                            </button>
-                            <button
-                              onClick={() => setDelayModal({ isOpen: true, delivery, reason: 'Antrean Bongkar Panjang di Toko', customNote: '' })}
-                              className="px-3 py-2.5 rounded-xl bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 border border-rose-500/40 font-bold text-xs flex items-center justify-center gap-1 transition active:scale-95 cursor-pointer"
-                              title="Lapor Kendala Pengiriman"
-                            >
-                              <AlertTriangle className="w-4 h-4" />
-                              <span>Kendala</span>
                             </button>
                           </div>
                         )}
@@ -1908,7 +2189,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                                 onClick={() => setPodModal({
                                   isOpen: true,
                                   delivery,
-                                  conditionNote: 'Aman, tiba setelah keterlambatan',
+                                  conditionNote: '',
+                                  serviceNote: '',
                                   hasSignature: true,
                                   photoUrl: delivery.podPhotoUrl || null,
                                   photoTimestamp: delivery.podPhotoTimestamp || null,
@@ -1978,52 +2260,6 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                               </div>
                             )}
                           </div>
-                        )}
-                      </div>
-
-                      {/* Integrated Quick Actions: Surat Jalan Keluar & Checklist Kendaraan */}
-                      <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800/80">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const wb = driverWaybillService.getWaybillForSchedule(delivery);
-                            setActiveWaybillToView(wb);
-                            setIsWaybillModalOpen(true);
-                          }}
-                          className="py-2 px-2.5 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-300 font-bold text-[11px] flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-95"
-                        >
-                          <FileText className="w-3.5 h-3.5 text-blue-400" />
-                          <span>Surat Jalan Keluar</span>
-                        </button>
-
-                        {delivery.status === 'delivered' ? (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setActiveChecklistToEdit(latestChecklist || null);
-                              setChecklistInspectionType('post_trip');
-                              setIsChecklistModalOpen(true);
-                            }}
-                            className="py-2 px-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 font-bold text-[11px] flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-95"
-                            title="Checklist Armada Pasca-Jalan (Pulang)"
-                          >
-                            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                            <span>Checklist Pasca-Jalan (Pulang)</span>
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setActiveChecklistToEdit(latestChecklist || null);
-                              setChecklistInspectionType('pre_trip');
-                              setIsChecklistModalOpen(true);
-                            }}
-                            className="py-2 px-2.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 font-bold text-[11px] flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-95"
-                            title="Checklist Armada Pra-Jalan (Pagi Sebelum Berangkat)"
-                          >
-                            <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
-                            <span>Checklist Pra-Jalan (Pagi)</span>
-                          </button>
                         )}
                       </div>
                     </div>
@@ -2567,7 +2803,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                 <div>
                   <h2 className="text-base font-black text-white">{portalDisplayName}</h2>
                   <div className="text-xs text-slate-400 mt-0.5">
-                    {currentUser?.role === 'driver' ? 'Kru Supir Utama' : (currentUser?.role || currentDriver?.role || 'Pengemudi')}
+                    Role User Manajemen: <strong className="text-amber-400">{syncedUserRoleInfo.roleLabel}</strong> · Dept: {syncedUserRoleInfo.department}
                   </div>
                   <div className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
                     <CheckCircle2 className="w-3 h-3" />
@@ -2575,16 +2811,14 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                   </div>
                 </div>
               </div>
-
-              {/* Grid or other cards if needed */}
             </div>
 
-            {/* Presensi Shift & Keamanan PIN Card */}
+            {/* Presensi Shift & Keamanan PIN (2x Verifikasi) Card */}
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3 text-xs">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <Fingerprint className="w-4 h-4 text-amber-400" />
-                  <span className="font-bold text-slate-200">Presensi Shift &amp; Keamanan PIN</span>
+                  <KeyRound className="w-4 h-4 text-amber-400" />
+                  <span className="font-bold text-slate-200">Presensi Shift &amp; PIN Keamanan (2x Verifikasi)</span>
                 </div>
                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                   activeShift ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
@@ -2600,43 +2834,54 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                     {activeShift ? `Masuk: ${activeShift.checkinTimeFormatted}` : 'Belum Check-In'}
                   </span>
                 </div>
-                {activeShift && (
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="text-slate-400">Metode Verifikasi:</span>
-                    <span className="text-slate-300 font-semibold">
-                      {activeShift.verificationMethod === 'biometric' ? 'Sidik Jari (Biometrik)' : 'PIN Keamanan'}
-                    </span>
-                  </div>
-                )}
                 <div className="flex items-center justify-between text-[11px]">
-                  <span className="text-slate-400">PIN Masuk Bawaan:</span>
-                  <span className="font-mono text-slate-300 font-bold">1234 (Default)</span>
+                  <span className="text-slate-400">Metode Verifikasi:</span>
+                  <span className="text-slate-300 font-semibold">
+                    PIN Keamanan (2x Verifikasi)
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-slate-400">Integrasi Data PIN &amp; Shift:</span>
+                  <span className="text-emerald-400 font-bold">Tersinkron ke Laporan Kiriman Kru</span>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 pt-1">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                 <button
                   type="button"
-                  onClick={() => setIsCheckinModalOpen(true)}
-                  className="flex-1 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black transition cursor-pointer flex items-center justify-center gap-1.5 active:scale-95"
+                  onClick={() => {
+                    setCheckinModalMode('checkin');
+                    setIsCheckinModalOpen(true);
+                  }}
+                  className="py-2.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black transition cursor-pointer flex items-center justify-center gap-1.5 active:scale-95"
                 >
-                  <Fingerprint className="w-3.5 h-3.5" />
-                  <span>{activeShift ? 'Lihat / Perbarui Shift' : 'Check-In Shift Sekarang'}</span>
+                  <KeyRound className="w-3.5 h-3.5" />
+                  <span>{activeShift ? 'Lihat / Perbarui Shift' : 'Check-In Shift (2x PIN)'}</span>
                 </button>
-                {activeShift && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCheckoutOdometer((activeShift.odometerStartKm || 124500) + 65);
-                      setIsCheckoutModalOpen(true);
-                    }}
-                    className="py-2 px-3 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 text-xs font-bold border border-rose-500/30 transition cursor-pointer flex items-center justify-center gap-1 active:scale-95"
-                  >
-                    <Clock className="w-3.5 h-3.5" />
-                    <span>Check-Out</span>
-                  </button>
-                )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCheckinModalMode('change_pin');
+                    setIsCheckinModalOpen(true);
+                  }}
+                  className="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-400 text-xs font-bold border border-amber-500/30 transition cursor-pointer flex items-center justify-center gap-1.5 active:scale-95"
+                >
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>Ubah / Buat PIN Baru (2x)</span>
+                </button>
               </div>
+
+              {activeShift && (
+                <button
+                  type="button"
+                  onClick={() => setIsCheckoutModalOpen(true)}
+                  className="w-full py-2.5 px-3 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 text-xs font-bold border border-rose-500/30 transition cursor-pointer flex items-center justify-center gap-1.5 active:scale-95"
+                >
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>Check-Out Shift (Gabung ke Laporan Kiriman Kru)</span>
+                </button>
+              )}
             </div>
 
             {/* Opsi Aplikasi & Keluar Portal di Profil */}
@@ -3013,14 +3258,14 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       {/* MODAL 2: Konfirmasi Tiba di Gudang Argo */}
       {podModal.isOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
-          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-t-2xl sm:rounded-2xl p-5 space-y-4 shadow-2xl">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-t-2xl sm:rounded-2xl p-5 space-y-4 shadow-2xl max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-2 border-b border-slate-800">
               <div className="flex items-center gap-2 text-emerald-400">
                 <CheckCircle2 className="w-5 h-5 shrink-0" />
                 <h3 className="text-sm font-black text-white">Konfirmasi Tiba di Gudang Argo</h3>
               </div>
               <button
-                onClick={() => setPodModal({ isOpen: false, delivery: null, conditionNote: 'Aman, tiba di gudang argo', hasSignature: true, photoUrl: null, photoTimestamp: null, postTripFleetStatus: 'available' })}
+                onClick={() => setPodModal({ isOpen: false, delivery: null, conditionNote: '', serviceNote: '', hasSignature: true, photoUrl: null, photoTimestamp: null, postTripFleetStatus: 'available' })}
                 className="p-1 rounded-lg text-slate-400 hover:text-white cursor-pointer"
               >
                 <X className="w-5 h-5" />
@@ -3028,54 +3273,70 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
             </div>
 
             <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs space-y-1">
-              <div className="font-bold text-white">{podModal.delivery?.store?.storeName}</div>
+              <div className="font-bold text-white">{podModal.delivery?.store?.storeName || podModal.delivery?.areaName}</div>
               <div className="text-slate-400 text-[11px]">{podModal.delivery?.store?.address}</div>
-              <div className="text-amber-400 font-semibold text-[11px] pt-1">Area Kirim: {podModal.delivery?.store?.storeName || podModal.delivery?.areaName || 'Tujuan'}</div>
+              <div className="text-amber-400 font-semibold text-[11px] pt-1">Area Kirim: {podModal.delivery?.areaName || podModal.delivery?.store?.storeName || 'Tujuan'}</div>
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-300 block">Kendala Tambahan (Opsional):</label>
+              <label className="text-xs font-bold text-slate-300 block">Keterangan Konfirmasi Tiba di Gudang:</label>
               <input
                 type="text"
                 value={podModal.conditionNote}
                 onChange={(e) => setPodModal(prev => ({ ...prev, conditionNote: e.target.value }))}
-                placeholder="Contoh: Aman, tiba sesuai jadwal"
+                placeholder="Isi keterangan tiba di gudang..."
                 className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-emerald-500"
               />
             </div>
 
-            {/* Pilihan Status Pasca-Jalan Armada (Siap vs Perlu Perawatan) */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-300 block">Status Armada Pasca-Jalan (Setelah Selesai):</label>
+            {/* Pilihan Status Armada Sampai di Argo (Aman Tidak Perlu Servis vs Perlu Perawatan) */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-300 block">Status Armada Sampai di Argo:</label>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
-                  onClick={() => setPodModal(prev => ({ ...prev, postTripFleetStatus: 'available' }))}
+                  onClick={() => setPodModal(prev => ({ ...prev, postTripFleetStatus: 'available', serviceNote: '' }))}
                   className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
                     podModal.postTripFleetStatus === 'available'
-                      ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+                      ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 shadow-sm'
                       : 'bg-slate-950 border-slate-800 text-slate-400'
                   }`}
                 >
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  <span>Siap (Available)</span>
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>Aman Tidak Perlu Servis</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setPodModal(prev => ({ ...prev, postTripFleetStatus: 'maintenance' }))}
                   className={`p-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
                     podModal.postTripFleetStatus === 'maintenance'
-                      ? 'bg-amber-500/20 border-amber-500/50 text-amber-300'
+                      ? 'bg-amber-500/20 border-amber-500 text-amber-300 shadow-sm'
                       : 'bg-slate-950 border-slate-800 text-slate-400'
                   }`}
                 >
-                  <AlertTriangle className="w-4 h-4 text-amber-400" />
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
                   <span>Perlu Perawatan</span>
                 </button>
               </div>
+
+              {/* Input Apa yang Perlu Diservis jika memilih Perlu Perawatan */}
+              {podModal.postTripFleetStatus === 'maintenance' && (
+                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/40 space-y-1.5 animate-in fade-in duration-150">
+                  <label className="text-xs font-bold text-amber-300 block">
+                    Apa yang Perlu Diservis / Diperbaiki pada Armada: <span className="text-rose-400">*</span>
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={podModal.serviceNote}
+                    onChange={(e) => setPodModal(prev => ({ ...prev, serviceNote: e.target.value }))}
+                    placeholder="Contoh: Kampas rem belakang tipis, ganti oli mesin, atau pengecekan ban..."
+                    className="w-full bg-slate-950 border border-amber-500/50 text-white text-xs rounded-xl p-2.5 focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+              )}
             </div>
 
-            {/* Foto GPS Sudah di Gudang / Depan Gerbang */}
+            {/* Foto GPS Sudah di Gudang / Depan Gerbang (Full Screen & Utuh Tidak Terpotong) */}
             <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
               <div className="flex items-center justify-between text-xs">
                 <div className="flex items-center gap-1.5 font-bold text-slate-300">
@@ -3084,7 +3345,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                 </div>
                 {podModal.photoUrl ? (
                   <span className="text-[10px] text-emerald-400 font-bold flex items-center gap-1">
-                    <Check className="w-3 h-3" /> Foto GPS Terlampir
+                    <Check className="w-3 h-3" /> Foto GPS Full Screen
                   </span>
                 ) : (
                   <span className="text-[10px] text-amber-400 font-bold">Wajib / GPS Terverifikasi</span>
@@ -3093,31 +3354,18 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
               {podModal.photoUrl ? (
                 <div className="space-y-2">
-                  <div className="relative rounded-lg overflow-hidden border border-slate-700 bg-black group max-h-44 flex items-center justify-center">
+                  <div className="relative rounded-xl overflow-hidden border border-slate-700 bg-black group flex items-center justify-center">
                     <img
                       src={podModal.photoUrl}
-                      alt="GPS Gudang Preview"
-                      className="w-full h-36 object-cover cursor-pointer"
+                      alt="GPS Gudang Preview Utuh"
+                      className="w-full max-h-60 object-contain bg-black cursor-pointer"
                       onClick={() => setViewPhotoModal({
                         isOpen: true,
                         photoUrl: podModal.photoUrl!,
-                        title: `Bukti Foto GPS Gudang - ${podModal.delivery?.store?.storeName}`,
-                        subtitle: `Area: ${podModal.delivery?.store?.storeName || 'Gudang Argo'} | Status: Tiba`
+                        title: `Bukti Foto GPS Gudang - ${podModal.delivery?.store?.storeName || podModal.delivery?.areaName}`,
+                        subtitle: `Area: ${podModal.delivery?.areaName || 'Gudang Argo'} | Foto Utuh Full Screen`
                       })}
                     />
-                    <button
-                      type="button"
-                      onClick={() => setViewPhotoModal({
-                        isOpen: true,
-                        photoUrl: podModal.photoUrl!,
-                        title: `Bukti Foto GPS Gudang - ${podModal.delivery?.store?.storeName}`,
-                        subtitle: `Area: ${podModal.delivery?.store?.storeName || 'Gudang Argo'} | Status: Tiba`
-                      })}
-                      className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1 text-xs text-white font-bold cursor-pointer"
-                    >
-                      <Eye className="w-4 h-4" />
-                      <span>Perbesar Foto</span>
-                    </button>
                   </div>
                   <div className="flex items-center gap-2">
                     <button
@@ -3125,21 +3373,21 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                       onClick={() => setViewPhotoModal({
                         isOpen: true,
                         photoUrl: podModal.photoUrl!,
-                        title: `Bukti Foto GPS Gudang - ${podModal.delivery?.store?.storeName}`,
-                        subtitle: `Area: ${podModal.delivery?.store?.storeName || 'Gudang Argo'} | Status: Tiba`
+                        title: `Bukti Foto GPS Gudang - ${podModal.delivery?.store?.storeName || podModal.delivery?.areaName}`,
+                        subtitle: `Area: ${podModal.delivery?.areaName || 'Gudang Argo'} | Foto Utuh Full Screen`
                       })}
-                      className="flex-1 py-1.5 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-bold text-slate-200 flex items-center justify-center gap-1.5 cursor-pointer"
+                      className="flex-1 py-2 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-bold text-white flex items-center justify-center gap-1.5 cursor-pointer"
                     >
                       <Eye className="w-3.5 h-3.5 text-cyan-400" />
-                      <span>Lihat Foto</span>
+                      <span>Lihat Full Screen</span>
                     </button>
                     <button
                       type="button"
                       onClick={() => setCameraModal({ isOpen: true, delivery: podModal.delivery })}
-                      className="flex-1 py-1.5 px-2 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/30 border border-cyan-500/40 text-[11px] font-bold text-cyan-300 flex items-center justify-center gap-1.5 cursor-pointer"
+                      className="flex-1 py-2 px-2 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/30 border border-cyan-500/40 text-[11px] font-bold text-cyan-300 flex items-center justify-center gap-1.5 cursor-pointer"
                     >
                       <RefreshCw className="w-3.5 h-3.5" />
-                      <span>Foto Ulang</span>
+                      <span>Foto Ulang Full Screen</span>
                     </button>
                   </div>
                 </div>
@@ -3147,12 +3395,12 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setCameraModal({ isOpen: true, delivery: podModal.delivery })}
-                  className="w-full py-3 px-3 rounded-xl bg-gradient-to-r from-cyan-600/25 to-blue-600/25 hover:from-cyan-600/35 hover:to-blue-600/35 border border-cyan-500/40 text-cyan-200 text-xs font-bold flex items-center justify-center gap-2 transition active:scale-95 cursor-pointer shadow-inner"
+                  className="w-full py-3.5 px-3 rounded-xl bg-gradient-to-r from-cyan-600/25 to-blue-600/25 hover:from-cyan-600/35 hover:to-blue-600/35 border border-cyan-500/40 text-cyan-200 text-xs font-bold flex items-center justify-center gap-2 transition active:scale-95 cursor-pointer shadow-inner"
                 >
                   <div className="w-7 h-7 rounded-full bg-cyan-500/30 flex items-center justify-center text-cyan-300">
                     <Camera className="w-4 h-4" />
                   </div>
-                  <span>Buka Kamera &amp; Ambil Foto GPS Gudang / Gerbang</span>
+                  <span>Buka Kamera Full Screen &amp; Ambil Foto GPS</span>
                 </button>
               )}
             </div>
@@ -3160,7 +3408,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
             <div className="flex items-center gap-2 pt-2">
               <button
                 type="button"
-                onClick={() => setPodModal({ isOpen: false, delivery: null, conditionNote: 'Aman, tiba di gudang argo', hasSignature: true, photoUrl: null, photoTimestamp: null, postTripFleetStatus: 'available' })}
+                onClick={() => setPodModal({ isOpen: false, delivery: null, conditionNote: '', serviceNote: '', hasSignature: true, photoUrl: null, photoTimestamp: null, postTripFleetStatus: 'available' })}
                 className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs cursor-pointer"
               >
                 Batal
@@ -3188,35 +3436,35 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         vehiclePlate={assignedFleet?.plateNumber}
       />
 
-      {/* FULL-SCREEN PHOTO INSPECTOR MODAL */}
+      {/* FULL-SCREEN PHOTO INSPECTOR MODAL (UTUH TANPA TERPOTONG) */}
       {viewPhotoModal.isOpen && (
-        <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col justify-between p-3 max-w-md mx-auto animate-in fade-in duration-200">
-          <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+        <div className="fixed inset-0 z-[80] w-screen h-screen bg-black flex flex-col justify-between p-4 animate-in fade-in duration-200">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-800">
             <div className="min-w-0 pr-2">
               <h3 className="text-xs font-bold text-white truncate">{viewPhotoModal.title}</h3>
-              <p className="text-[10px] text-slate-400 truncate">{viewPhotoModal.subtitle}</p>
+              <p className="text-[10px] text-slate-300 truncate">{viewPhotoModal.subtitle}</p>
             </div>
             <button
               onClick={() => setViewPhotoModal({ isOpen: false, photoUrl: '', title: '', subtitle: '' })}
-              className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white cursor-pointer"
+              className="p-2 rounded-full bg-rose-600 text-white hover:bg-rose-500 cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
 
-          <div className="flex-1 flex items-center justify-center py-2 overflow-hidden">
+          <div className="flex-1 w-full h-full flex items-center justify-center py-2 overflow-hidden bg-black">
             <img
               src={viewPhotoModal.photoUrl}
-              alt="Foto POD Penuh"
-              className="max-h-[75vh] w-auto max-w-full object-contain rounded-xl shadow-2xl border border-slate-800"
+              alt="Foto GPS Full Screen"
+              className="w-full h-full object-contain"
             />
           </div>
 
-          <div className="flex items-center gap-2 pt-2 border-t border-slate-800">
+          <div className="flex items-center gap-2 pt-3 border-t border-slate-800 max-w-md mx-auto w-full">
             <a
               href={viewPhotoModal.photoUrl}
-              download={`POD_${Date.now()}.jpg`}
-              className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+              download={`FOTO_GPS_${Date.now()}.jpg`}
+              className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <Download className="w-4 h-4" />
               <span>Unduh Foto</span>
@@ -3225,7 +3473,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               onClick={() => setViewPhotoModal({ isOpen: false, photoUrl: '', title: '', subtitle: '' })}
               className="flex-1 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs cursor-pointer"
             >
-              Tutup
+              Tutup Full Screen
             </button>
           </div>
         </div>
@@ -3577,16 +3825,18 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         }}
       />
 
-      {/* MODAL 8: Presensi Masuk Shift Driver (Biometrik & PIN) */}
+      {/* MODAL 8: Presensi Masuk Shift Driver (PIN Keamanan 2x Verifikasi & Ubah PIN) */}
       <DriverCheckinModal
         isOpen={isCheckinModalOpen}
         onClose={() => setIsCheckinModalOpen(false)}
         driverId={selectedDriverId}
-        driverName={currentDriver?.name || 'Driver'}
+        driverName={currentDriver?.name || portalDisplayName || 'Driver'}
+        userRole={syncedUserRoleInfo.roleLabel}
+        areaName={activeDeliveries[0]?.areaName || deliveries[0]?.areaName || 'Area Distribusi AKK'}
         fleetId={assignedFleet?.id || 'fl-01'}
         plateNumber={assignedFleet?.plateNumber || 'P 8848 U'}
         vehicleType={assignedFleet?.vehicleType || 'Engkel Long Box'}
-        odometerKm={assignedFleet?.odometerKm || 124580}
+        initialMode={checkinModalMode}
         onCheckinSuccess={(shift) => {
           setActiveShift(shift);
         }}
@@ -3598,7 +3848,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         onClose={() => setIsApkModalOpen(false)}
       />
 
-      {/* MODAL 10: Konfirmasi Check-Out Shift Driver */}
+      {/* MODAL 10: Konfirmasi Check-Out Shift Driver (Tanpa Odo Awal, Odo Akhir, dan Catatan Akhir Shift) */}
       {isCheckoutModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
           <div className="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-2xl p-5 space-y-4 shadow-2xl">
@@ -3616,49 +3866,32 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               </button>
             </div>
 
-            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-2 text-xs">
+            <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-2.5 text-xs">
               <div className="flex justify-between items-center">
-                <span className="text-slate-400">Pengemudi:</span>
-                <span className="font-bold text-white">{currentDriver?.name || activeShift?.driverName}</span>
+                <span className="text-slate-400">Nama ({syncedUserRoleInfo.roleLabel}):</span>
+                <span className="font-bold text-white">{currentDriver?.name || activeShift?.driverName || portalDisplayName}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-slate-400">Armada / Plat:</span>
                 <span className="font-mono text-cyan-400 font-bold">{assignedFleet?.plateNumber || activeShift?.plateNumber || 'P 8125 VC'}</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-slate-400">Waktu Masuk:</span>
-                <span className="font-mono text-emerald-400 font-bold">{activeShift?.checkinTimeFormatted}</span>
+                <span className="text-slate-400">Waktu Check-In:</span>
+                <span className="font-mono text-emerald-400 font-bold">{activeShift?.checkinTimeFormatted || '-'}</span>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-slate-400">Odo Awal:</span>
-                <span className="font-mono text-slate-300 font-bold">{activeShift?.odometerStartKm?.toLocaleString()} KM</span>
+                <span className="text-slate-400">Waktu Check-Out:</span>
+                <span className="font-mono text-amber-400 font-bold">
+                  {new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB (Otomatis)
+                </span>
               </div>
             </div>
 
-            <div className="space-y-1">
-              <label className="text-[11px] font-bold text-slate-300 flex items-center justify-between">
-                <span>Odometer Akhir (KM):</span>
-                <span className="text-[10px] text-slate-500 font-normal">Wajib diisi</span>
-              </label>
-              <input
-                type="number"
-                value={checkoutOdometer}
-                onChange={(e) => setCheckoutOdometer(Number(e.target.value))}
-                className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl p-2.5 font-mono font-bold focus:outline-none focus:border-amber-500"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-[11px] font-bold text-slate-300 block">
-                Catatan Akhir Shift (Opsional):
-              </label>
-              <textarea
-                value={checkoutNotes}
-                onChange={(e) => setCheckoutNotes(e.target.value)}
-                placeholder="Contoh: Seluruh toko selesai terantar, armada terparkir aman di DC..."
-                rows={2}
-                className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl p-2.5 focus:outline-none focus:border-amber-500"
-              />
+            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-[11px] text-emerald-300 leading-relaxed flex items-start gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+              <span>
+                Data <strong>Check-Out</strong> ini otomatis digabungkan menjadi satu baris dengan data <strong>Check-In</strong> Anda di dalam sub menu <strong>Laporan Kiriman Kru</strong>.
+              </span>
             </div>
 
             <div className="flex items-center gap-2 pt-2">
@@ -3673,21 +3906,28 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                 type="button"
                 onClick={async () => {
                   const targetDriverId = activeShift?.driverId || selectedDriverId;
-                  const finalNote = `Odo Akhir: ${checkoutOdometer} KM${checkoutNotes ? ` - ${checkoutNotes}` : ''}`;
-                  const res = await driverShiftService.checkOutDriver(targetDriverId, finalNote);
+                  const res = await driverShiftService.checkOutDriver(
+                    targetDriverId,
+                    undefined,
+                    {
+                      driverName: currentDriver?.name || activeShift?.driverName || portalDisplayName,
+                      userRole: syncedUserRoleInfo.roleLabel,
+                      plateNumber: assignedFleet?.plateNumber || activeShift?.plateNumber || 'P 8125 VC',
+                      areaName: activeDeliveries[0]?.areaName || deliveries[0]?.areaName || 'Area Distribusi AKK'
+                    }
+                  );
                   addNotification(
                     'schedule',
-                    'Check-Out Berhasil',
-                    res.message || 'Shift dinas resmi diakhiri hari ini.'
+                    'Check-Out Berhasil & Digabung ke Laporan Kru',
+                    res.message || 'Shift dinas resmi diakhiri dan digabungkan dengan Check-In pada Laporan Kiriman Kru.'
                   );
                   setActiveShift(null);
                   setIsCheckoutModalOpen(false);
-                  setCheckoutNotes('');
                 }}
                 className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-rose-500 hover:from-rose-500 hover:to-rose-400 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-rose-600/30 cursor-pointer active:scale-95 transition"
               >
                 <CheckCircle2 className="w-4 h-4" />
-                <span>Selesai & Check-Out</span>
+                <span>Selesai &amp; Check-Out</span>
               </button>
             </div>
           </div>

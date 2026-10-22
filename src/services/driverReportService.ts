@@ -4,9 +4,10 @@ export interface DriverHelperReport {
   date?: string; // YYYY-MM-DD
   driverId: string;
   driverName: string;
+  userRole?: string;
   helperName?: string;
   plateNumber: string;
-  category: 'kendala_jalan' | 'akhir_kiriman' | 'istirahat' | 'update_lokasi';
+  category: 'kendala_jalan' | 'akhir_kiriman' | 'istirahat' | 'update_lokasi' | 'presensi_shift' | 'pin_keamanan';
   areaName: string;
   deliveryId?: string;
   notes: string;
@@ -17,7 +18,12 @@ export interface DriverHelperReport {
   status: 'pending' | 'verified' | 'follow_up' | 'resolved';
   verifiedBy?: string;
   verifiedAt?: string;
-  // 💡 Solusi & Arahan dari SPV Logistik / Super Admin
+  // Data Presensi Check-In & Check-Out Terpadu + PIN Keamanan
+  shiftId?: string;
+  checkinTimeFormatted?: string;
+  checkoutTimeFormatted?: string;
+  securityPin?: string;
+  // Solusi & Arahan dari SPV Logistik / Super Admin
   solution?: string;
   solutionBy?: string;
   solutionAt?: string;
@@ -29,6 +35,7 @@ const STORAGE_KEY = 'akk_driver_helper_reports_v2';
 
 class DriverReportService {
   private memoryReports: DriverHelperReport[] | null = null;
+  private seqCounter = 0;
 
   private getInitialReports(): DriverHelperReport[] {
     const today = new Date().toISOString().slice(0, 10);
@@ -41,6 +48,7 @@ class DriverReportService {
         date: today,
         driverId: 'crew-01',
         driverName: 'Zainul Agustiar',
+        userRole: 'Driver',
         helperName: 'Rifaldi Aminullah',
         plateNumber: 'P 8125 VC',
         category: 'kendala_jalan',
@@ -63,6 +71,7 @@ class DriverReportService {
         date: today,
         driverId: 'crew-02',
         driverName: 'Ach Taufiq',
+        userRole: 'Driver',
         helperName: 'Budi Santoso',
         plateNumber: 'P 8848 U',
         category: 'kendala_jalan',
@@ -83,6 +92,7 @@ class DriverReportService {
         date: today,
         driverId: 'crew-02',
         driverName: 'Ach Taufiq',
+        userRole: 'Driver',
         helperName: 'Budi Santoso',
         plateNumber: 'P 8848 U',
         category: 'akhir_kiriman',
@@ -102,6 +112,7 @@ class DriverReportService {
         date: yesterday,
         driverId: 'crew-03',
         driverName: 'Hendra Setiawan',
+        userRole: 'Driver',
         helperName: 'Agus Purnomo',
         plateNumber: 'DK 8214 AB',
         category: 'update_lokasi',
@@ -124,10 +135,27 @@ class DriverReportService {
         const data = localStorage.getItem(STORAGE_KEY);
         if (data) {
           const parsed: DriverHelperReport[] = JSON.parse(data);
-          return parsed.map(r => ({
-            ...r,
-            date: r.date || (r.timestamp ? r.timestamp.slice(0, 10) : new Date().toISOString().slice(0, 10))
-          }));
+          const seenIds = new Set<string>();
+          let hadDuplicates = false;
+          const normalized = parsed.map((r, index) => {
+            let uniqueId = r.id || `REP-2026-${1000 + index}`;
+            if (seenIds.has(uniqueId)) {
+              hadDuplicates = true;
+              uniqueId = `${uniqueId}-${index + 1}`;
+            }
+            seenIds.add(uniqueId);
+            return {
+              ...r,
+              id: uniqueId,
+              date: r.date || (r.timestamp ? r.timestamp.slice(0, 10) : new Date().toISOString().slice(0, 10))
+            };
+          });
+          if (hadDuplicates) {
+            try {
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+            } catch {}
+          }
+          return normalized;
         }
         const init = this.getInitialReports();
         localStorage.setItem(STORAGE_KEY, JSON.stringify(init));
@@ -158,16 +186,21 @@ class DriverReportService {
   }
 
   public addReport(
-    report: Omit<DriverHelperReport, 'id' | 'timestamp' | 'status'>
+    report: Omit<DriverHelperReport, 'id' | 'timestamp' | 'status'> & { status?: 'pending' | 'verified' | 'follow_up' | 'resolved' }
   ): DriverHelperReport {
     const list = this.getReports();
     const now = new Date();
+    this.seqCounter += 1;
+    let uniqueId = `REP-${now.getFullYear()}-${Date.now().toString().slice(-4)}${Math.floor(10 + Math.random() * 90)}`;
+    while (list.some(r => r.id === uniqueId)) {
+      uniqueId = `REP-${now.getFullYear()}-${Date.now().toString().slice(-4)}${Math.floor(10 + Math.random() * 90)}-${this.seqCounter}`;
+    }
     const newReport: DriverHelperReport = {
       ...report,
-      id: `REP-${now.getFullYear()}-${Date.now().toString().slice(-5)}`,
+      id: uniqueId,
       timestamp: now.toISOString(),
       date: now.toISOString().slice(0, 10),
-      status: 'pending'
+      status: report.status || 'pending'
     };
     list.unshift(newReport);
     this.saveReports(list);
@@ -176,6 +209,122 @@ class DriverReportService {
       window.dispatchEvent(new CustomEvent('driver-report-updated', { detail: newReport }));
     }
     return newReport;
+  }
+
+  /**
+   * Mencatat Check-In atau menggabungkan Check-Out ke dalam satu laporan terpadu di Laporan Kiriman Kru
+   */
+  public upsertShiftCheckinCheckoutReport(params: {
+    shiftId: string;
+    driverId: string;
+    driverName: string;
+    userRole?: string;
+    plateNumber: string;
+    areaName?: string;
+    checkinTimeFormatted: string;
+    checkoutTimeFormatted?: string;
+    securityPin?: string;
+  }): DriverHelperReport {
+    const list = this.getReports();
+    const today = new Date().toISOString().slice(0, 10);
+
+    // Cari laporan presensi aktif untuk shiftId atau driverId pada hari ini
+    const existingIdx = list.findIndex(
+      r =>
+        r.category === 'presensi_shift' &&
+        (r.shiftId === params.shiftId || (r.driverId === params.driverId && r.date === today && !r.checkoutTimeFormatted))
+    );
+
+    if (existingIdx >= 0) {
+      const existing = list[existingIdx];
+      const mergedCheckout = params.checkoutTimeFormatted || existing.checkoutTimeFormatted;
+      const mergedPin = params.securityPin || existing.securityPin || '****';
+      const updatedNotes = mergedCheckout
+        ? `[PRESENSI SHIFT TERPADU] Check-In: ${existing.checkinTimeFormatted || params.checkinTimeFormatted} | Check-Out: ${mergedCheckout} | PIN Keamanan (2x Verifikasi): ${mergedPin}`
+        : `[PRESENSI CHECK-IN] Waktu Masuk: ${params.checkinTimeFormatted} (Status: Sedang Bertugas) | PIN Keamanan (2x Verifikasi): ${mergedPin}`;
+
+      list[existingIdx] = {
+        ...existing,
+        driverName: params.driverName || existing.driverName,
+        userRole: params.userRole || existing.userRole,
+        plateNumber: params.plateNumber || existing.plateNumber,
+        areaName: params.areaName || existing.areaName,
+        checkoutTimeFormatted: mergedCheckout,
+        securityPin: mergedPin,
+        notes: updatedNotes,
+        status: mergedCheckout ? 'verified' : existing.status,
+        verifiedBy: mergedCheckout ? 'Sistem Presensi Terpadu' : existing.verifiedBy,
+        verifiedAt: mergedCheckout ? new Date().toISOString() : existing.verifiedAt,
+        timestamp: new Date().toISOString()
+      };
+
+      this.saveReports(list);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('driver-report-updated', { detail: list[existingIdx] }));
+      }
+      return list[existingIdx];
+    }
+
+    const pinStr = params.securityPin || '****';
+    const initialNotes = params.checkoutTimeFormatted
+      ? `[PRESENSI SHIFT TERPADU] Check-In: ${params.checkinTimeFormatted} | Check-Out: ${params.checkoutTimeFormatted} | PIN Keamanan (2x Verifikasi): ${pinStr}`
+      : `[PRESENSI CHECK-IN] Waktu Masuk: ${params.checkinTimeFormatted} (Status: Sedang Bertugas) | PIN Keamanan (2x Verifikasi): ${pinStr}`;
+
+    return this.addReport({
+      driverId: params.driverId,
+      driverName: params.driverName,
+      userRole: params.userRole || 'Driver',
+      plateNumber: params.plateNumber || 'P 8848 U',
+      category: 'presensi_shift',
+      areaName: params.areaName || 'Presensi Operasional DC',
+      notes: initialNotes,
+      shiftId: params.shiftId,
+      checkinTimeFormatted: params.checkinTimeFormatted,
+      checkoutTimeFormatted: params.checkoutTimeFormatted,
+      securityPin: pinStr,
+      status: params.checkoutTimeFormatted ? 'verified' : 'pending'
+    });
+  }
+
+  /**
+   * Mencatat perubahan / pembuatan PIN Keamanan baru (2x verifikasi) ke dalam Laporan Kiriman Kru
+   */
+  public recordPinChangeReport(params: {
+    driverId: string;
+    driverName: string;
+    userRole?: string;
+    plateNumber: string;
+    areaName?: string;
+    newPin: string;
+  }): DriverHelperReport {
+    const list = this.getReports();
+    const today = new Date().toISOString().slice(0, 10);
+
+    // Update juga securityPin pada laporan presensi hari ini jika sudah ada
+    const activeShiftIdx = list.findIndex(
+      r => r.category === 'presensi_shift' && r.driverId === params.driverId && r.date === today
+    );
+    if (activeShiftIdx >= 0) {
+      list[activeShiftIdx].securityPin = params.newPin;
+      list[activeShiftIdx].notes = list[activeShiftIdx].notes.replace(
+        /PIN Keamanan \(2x Verifikasi\): [0-9*]+/,
+        `PIN Keamanan (2x Verifikasi): ${params.newPin}`
+      );
+      this.saveReports(list);
+    }
+
+    return this.addReport({
+      driverId: params.driverId,
+      driverName: params.driverName,
+      userRole: params.userRole || 'Driver',
+      plateNumber: params.plateNumber || 'P 8848 U',
+      category: 'pin_keamanan',
+      areaName: params.areaName || 'Keamanan Akun Kru DC',
+      securityPin: params.newPin,
+      notes: `[DATA PIN KEAMANAN KRU] Pengguna memperbarui / mengaktifkan PIN Keamanan (Verifikasi 2x): ${params.newPin}`,
+      status: 'verified',
+      verifiedBy: 'Otentikasi PIN 2x Verifikasi'
+    });
   }
 
   public updateReportSolution(
@@ -255,7 +404,7 @@ class DriverReportService {
     driverName: string;
     driverPhone?: string;
     plateNumber: string;
-    category: 'kendala_jalan' | 'akhir_kiriman' | 'istirahat' | 'update_lokasi';
+    category: 'kendala_jalan' | 'akhir_kiriman' | 'istirahat' | 'update_lokasi' | 'presensi_shift' | 'pin_keamanan';
     reportText?: string;
     notes?: string;
     latitude?: number;

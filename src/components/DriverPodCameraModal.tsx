@@ -599,19 +599,19 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex flex-col justify-between p-0 max-w-md mx-auto animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[70] w-screen h-screen bg-black flex flex-col justify-between p-0 animate-in fade-in duration-200">
       {/* Top Header Controls */}
-      <div className="p-3 bg-gradient-to-b from-black/90 to-transparent flex items-center justify-between z-10">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-full bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400">
+      <div className="p-3.5 bg-gradient-to-b from-black/90 to-transparent flex items-center justify-between z-20">
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-full bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400">
             <Camera className="w-4 h-4" />
           </div>
           <div>
             <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
-              <span>Bukti Foto Serah Terima (POD)</span>
+              <span>Kamera Full Screen • Bukti Foto (POD &amp; GPS)</span>
             </h3>
-            <p className="text-[10px] text-slate-400 truncate max-w-[200px]">
-              {delivery?.store?.storeName || 'Area Tujuan'}
+            <p className="text-[10px] text-slate-300 truncate max-w-[240px]">
+              {delivery?.areaName || delivery?.store?.storeName || 'Area Tujuan'}
             </p>
           </div>
         </div>
@@ -620,7 +620,7 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
           {!capturedImage && hasTorch && (
             <button
               onClick={toggleTorch}
-              className={`p-2 rounded-full cursor-pointer transition ${isTorchOn ? 'bg-amber-500 text-slate-950 font-bold' : 'bg-slate-800/80 text-slate-300'}`}
+              className={`p-2.5 rounded-full cursor-pointer transition ${isTorchOn ? 'bg-amber-500 text-slate-950 font-bold' : 'bg-slate-800/80 text-white'}`}
               title="Flash / Torch"
             >
               {isTorchOn ? <Zap className="w-4 h-4" /> : <ZapOff className="w-4 h-4" />}
@@ -630,7 +630,7 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
           {!capturedImage && !cameraError && (
             <button
               onClick={handleFlipCamera}
-              className="p-2 rounded-full bg-slate-800/80 text-slate-300 hover:text-white cursor-pointer transition"
+              className="p-2.5 rounded-full bg-slate-800/80 text-white hover:bg-slate-700 cursor-pointer transition"
               title="Balik Kamera (Depan/Belakang)"
             >
               <RefreshCw className="w-4 h-4" />
@@ -639,34 +639,34 @@ export const DriverPodCameraModal: React.FC<DriverPodCameraModalProps> = ({
 
           <button
             onClick={handleClose}
-            className="p-2 rounded-full bg-slate-800/80 text-slate-300 hover:text-white cursor-pointer"
+            className="p-2.5 rounded-full bg-slate-800/80 text-white hover:bg-rose-600 cursor-pointer transition"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
       </div>
 
-      {/* Main Viewport Body */}
-      <div className="flex-1 relative flex items-center justify-center bg-black overflow-hidden select-none">
+      {/* Main Viewport Body - Full Screen */}
+      <div className="flex-1 relative flex items-center justify-center bg-black overflow-hidden select-none w-full h-full">
         {/* White Snap Flash effect */}
         {isFlashActive && (
           <div className="absolute inset-0 bg-white z-40 transition-opacity duration-150" />
         )}
 
-        {/* REVIEW MODE: Captured Photo Preview */}
+        {/* REVIEW MODE: Captured Photo Preview Full Screen Uncropped */}
         {capturedImage ? (
-          <div className="relative w-full h-full flex flex-col items-center justify-center p-2">
+          <div className="relative w-full h-full flex flex-col items-center justify-center bg-black">
             <img
               src={capturedImage}
-              alt="Bukti Foto POD"
-              className="max-h-[75vh] w-auto max-w-full object-contain rounded-xl shadow-2xl border border-slate-800"
+              alt="Bukti Foto POD Full Screen"
+              className="w-full h-full object-contain"
             />
-            <div className="absolute top-4 left-4 right-4 bg-black/60 backdrop-blur-md rounded-xl p-2.5 border border-emerald-500/30 flex items-center justify-between text-xs">
+            <div className="absolute top-3 left-4 right-4 bg-black/75 backdrop-blur-md rounded-xl p-2.5 border border-emerald-500/40 flex items-center justify-between text-xs">
               <div className="flex items-center gap-2 text-emerald-400">
                 <Check className="w-4 h-4 shrink-0" />
-                <span className="font-bold">Foto Berhasil Dijepret & Dilengkapi Stempel POD</span>
+                <span className="font-bold text-white">Foto Full Screen Berhasil Dijepret &amp; Stempel GPS Aktif</span>
               </div>
-              <span className="text-[10px] font-mono text-slate-300">
+              <span className="text-[10px] font-mono text-emerald-300">
                 {new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
               </span>
             </div>

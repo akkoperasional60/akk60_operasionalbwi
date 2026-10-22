@@ -6,7 +6,7 @@ import {
 } from '../types';
 import { logisticsStore } from './store';
 
-const STORAGE_KEY = 'akk_driver_outbound_waybills_v2';
+const STORAGE_KEY = 'akk_driver_outbound_waybills_v3';
 
 class DriverWaybillService {
   /**
@@ -122,22 +122,22 @@ class DriverWaybillService {
       checkerName: 'Rahmat Hidayat (Checker Outbound DC)',
       checkerNotes: 'Karton box kering, kondisi segel utuh, muatan disusun stabil sesuai SOP distribusi PT AKK.',
       driverNotes: schedule.notes || '',
-      signedByDriver: true,
-      signedByDriverAt: `${rawDate} 07:15 WIB`,
-      signedByChecker: true,
-      signedByCheckerAt: `${rawDate} 07:25 WIB`,
-      // 4 Role-based digital signatures
+      signedByDriver: false,
+      signedByDriverAt: '',
+      signedByChecker: false,
+      signedByCheckerAt: '',
+      // 4 Role-based signatures dikosongi terlebih dahulu
       preparedByName: 'MUHAMMAD SYAIFUL BAHRI',
-      preparedBySigned: true,
-      preparedBySignedAt: `${rawDate} 07:10 WIB`,
+      preparedBySigned: false,
+      preparedBySignedAt: '',
       acknowledgedByName: 'Hadi Purnomo',
-      acknowledgedBySigned: true,
-      acknowledgedBySignedAt: `${rawDate} 07:20 WIB`,
+      acknowledgedBySigned: false,
+      acknowledgedBySignedAt: '',
       securityOfficerName: 'Slamet Riyadi (Security)',
-      securitySigned: true,
-      securitySignedAt: `${rawDate} 07:30 WIB`,
-      driverSigned: true,
-      driverSignedAt: `${rawDate} 07:35 WIB`,
+      securitySigned: false,
+      securitySignedAt: '',
+      driverSigned: false,
+      driverSignedAt: '',
       qrCodeData: `PT_AKK|${waybillNumber}|${fleetPlate}|${sealNumber}|${rawDate}`,
       synced: true,
       createdAt: schedule.createdAt || new Date().toISOString()

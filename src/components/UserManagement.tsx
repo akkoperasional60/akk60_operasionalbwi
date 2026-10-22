@@ -111,6 +111,18 @@ const DEPARTMENT_FILTER_OPTIONS = [
   { id: 'super_admin', label: 'Super Admin', shortLabel: 'Super Admin', icon: '👑' },
 ];
 
+const OFFICIAL_DEPARTMENT_OPTIONS = [
+  'Logistik',
+  'Pengiriman',
+  'Adm. Penjualan',
+  'Adm. Pembelian',
+  'Gudang',
+  'Finance & Tax',
+  'Satpam',
+  'Human Resources',
+  'Marketing'
+];
+
 export interface UserManagementProps {
   onNavigateToE2E?: () => void;
 }
@@ -149,6 +161,30 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
+  // View Password per user account state
+  const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
+  const [copiedPasswordUserId, setCopiedPasswordUserId] = useState<string | null>(null);
+
+  const getEffectivePassword = (u: UserProfile): string => {
+    if (u.password && u.password.trim()) return u.password;
+    if (u.role === 'super_admin') return 'admin123';
+    if (u.email && u.email.includes('@')) return u.email.split('@')[0].toLowerCase();
+    return 'password123';
+  };
+
+  const togglePasswordVisibility = (userId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setVisiblePasswords(prev => ({ ...prev, [userId]: !prev[userId] }));
+  };
+
+  const handleCopyUserPassword = (u: UserProfile, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const pass = getEffectivePassword(u);
+    navigator.clipboard.writeText(pass).catch(() => {});
+    setCopiedPasswordUserId(u.id);
+    setTimeout(() => setCopiedPasswordUserId(null), 2000);
+  };
+
   // In-Page Pop-up Notification Modal State (Request: popup di depan halaman user manajemen)
   const [pageModalNotification, setPageModalNotification] = useState<{
     title: string;
@@ -166,8 +202,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
     fullName: '',
     email: '',
     phone: '',
-    role: 'spv_logistik' as UserRole,
-    department: '',
+    role: 'unassigned' as UserRole,
+    department: 'Logistik',
     status: 'approved' as UserApprovalStatus,
     notes: '',
     approvedBy: ''
@@ -178,7 +214,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
   const [newUser, setNewUser] = useState({
     fullName: '',
     email: '',
-    password: ''
+    password: '',
+    department: 'Logistik'
   });
 
   useEffect(() => {
@@ -213,6 +250,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
 
   const ROLE_LABELS: Record<UserRole, string> = {
     super_admin: 'Super Admin / Manager',
+    dispatcher: 'Dispatcher / SPV Logistik',
     spv_logistik: 'SPV Logistik',
     operasional: 'Operasional',
     security: 'Security / Keamanan',
@@ -224,7 +262,8 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
     driver: 'Kru Supir / Driver',
     marketing_online: 'Marketing Online',
     marketing_offline: 'Marketing Offline',
-    crew_helper: 'Kru Helper'
+    crew_helper: 'Kru Helper',
+    unassigned: '⚠️ Perlu Diisi (Belum Ada Role)'
   };
 
   const toggleModuleExpansion = (modId: string) => {
@@ -337,6 +376,42 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
     showNotification('Akun Disetujui', 'Akun pengguna berhasil disetujui dan kini berstatus aktif.', 'success');
   };
 
+  const handleDeactivateUser = (user: UserProfile, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!isSuperAdmin) {
+      showNotification('Akses Ditolak', 'Hanya Super Admin yang dapat menonaktifkan akun pengguna.', 'warning');
+      return;
+    }
+    if (user.role === 'super_admin') {
+      showNotification('Tindakan Dibatasi', 'Akun utama Super Admin tidak dapat dinonaktifkan.', 'warning');
+      return;
+    }
+    logisticsStore.deactivateUser(user.id);
+    setSaveSuccessMessage(`Akun "${user.fullName}" berhasil dinonaktifkan. Hak akses ditutup, histori data tetap tersimpan.`);
+    setTimeout(() => setSaveSuccessMessage(null), 5000);
+    showNotification(
+      'Akun Dinonaktifkan',
+      `Akun "${user.fullName}" kini berstatus Nonaktif. Hak akses disembunyikan sementara, namun seluruh histori pengiriman & log aktivitas tetap tersimpan utuh.`,
+      'warning'
+    );
+  };
+
+  const handleActivateUser = (user: UserProfile, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!isSuperAdmin) {
+      showNotification('Akses Ditolak', 'Hanya Super Admin yang dapat mengaktifkan akun pengguna.', 'warning');
+      return;
+    }
+    logisticsStore.activateUser(user.id);
+    setSaveSuccessMessage(`Akun "${user.fullName}" berhasil diaktifkan kembali dan hak akses dipulihkan!`);
+    setTimeout(() => setSaveSuccessMessage(null), 5000);
+    showNotification(
+      'Akun Diaktifkan Kembali',
+      `Akun "${user.fullName}" telah aktif kembali. Pengaturan hak akses kini ditampilkan dan akun terbaca pada pemrosesan sistem ke depannya.`,
+      'success'
+    );
+  };
+
   const handleDelete = (userId: string) => {
     if (!isSuperAdmin) {
       showNotification('Akses Ditolak', 'Hanya Super Admin yang dapat menghapus akun pengguna.', 'warning');
@@ -414,25 +489,30 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       fullName: newUser.fullName || 'Pengguna Baru',
       email: newUser.email,
       phone: '-',
-      role: 'spv_logistik',
-      department: 'Umum',
-      notes: 'Akun dibuat langsung oleh Super Admin AKK'
+      role: 'unassigned',
+      department: newUser.department || 'Logistik',
+      password: newUser.password || 'password123',
+      notes: 'Akun baru terdaftar — Role perlu diisi oleh Super Admin'
     });
-    // Removed automatic approval
 
     setIsAddUserModalOpen(false);
     setSelectedUserId(created.id);
     setNewUser({
       fullName: '',
       email: '',
-      password: ''
+      password: '',
+      department: 'Logistik'
     });
+    showNotification(
+      'Akun Baru Terdaftar',
+      `Akun "${created.fullName}" berhasil dibuat dengan status Role: Perlu Diisi. Silakan klik tombol Edit Pengguna untuk memilih Role yang sesuai.`,
+      'info'
+    );
   };
-
-  // Simplified Add User Modal UI (I will update the JSX below to match this)
 
   const pendingCount = users.filter(u => u.status === 'pending').length;
   const approvedCount = users.filter(u => u.status === 'approved').length;
+  const inactiveCount = users.filter(u => u.status === 'inactive').length;
   const rejectedCount = users.filter(u => u.status === 'rejected').length;
 
   const matchUserDepartment = (u: UserProfile, filterKey: string) => {
@@ -552,17 +632,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
             <span>Tambah User Langsung</span>
           </button>
 
-          {onNavigateToE2E && (
-            <button
-              onClick={onNavigateToE2E}
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 font-bold text-xs transition cursor-pointer"
-              title="Buka Pusat Pengujian E2E & Simulasi Akun Pengguna"
-            >
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              <span>Pusat Uji E2E &amp; Simulasi Akun</span>
-            </button>
-          )}
-
           {/* Department / Role Filter Dropdown in Top Toolbar */}
           <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 text-xs shadow-inner">
             <Filter className="w-3.5 h-3.5 text-amber-400 shrink-0" />
@@ -613,6 +682,14 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
             >
               Aktif ({approvedCount})
             </button>
+            <button
+              onClick={() => setStatusFilter('inactive')}
+              className={`px-2.5 py-1.5 rounded-md font-semibold transition cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+                statusFilter === 'inactive' ? 'bg-rose-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <span>Nonaktif ({inactiveCount})</span>
+            </button>
           </div>
 
           <div className="relative flex-1 sm:w-64">
@@ -631,75 +708,25 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       {/* ================= SPLIT SCREEN MASTER-DETAIL LAYOUT ================= */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         
-        {/* LEFT COLUMN: User List (List User) */}
-        <div className="lg:col-span-5 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm flex flex-col max-h-[82vh]">
+        {/* LEFT COLUMN: Clean & Simple User List */}
+        <div className="lg:col-span-4 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm flex flex-col max-h-[82vh]">
           {/* Header */}
           <div className="p-3.5 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
             <h3 className="font-bold text-white text-xs flex items-center gap-2">
               <Users className="w-4 h-4 text-amber-400" />
               <span>Daftar Pengguna ({filteredUsers.length})</span>
             </h3>
-            <span className="text-[10px] text-slate-400">Pilih user untuk atur akses</span>
-          </div>
-
-          {/* Quick Filter Pill Ribbon for Roles & Departments */}
-          <div className="p-2.5 bg-slate-950/70 border-b border-slate-800 space-y-2">
-            <div className="flex items-center justify-between text-[11px]">
-              <span className="text-slate-400 font-bold uppercase tracking-wider flex items-center gap-1.5 text-[10px]">
-                <Filter className="w-3 h-3 text-amber-400" />
-                <span>Pilih Departemen / Role:</span>
-              </span>
-              {departmentFilter !== 'all' && (
-                <button
-                  type="button"
-                  onClick={() => setDepartmentFilter('all')}
-                  className="text-amber-400 hover:text-amber-300 font-bold text-[10px] flex items-center gap-1 cursor-pointer bg-amber-500/10 hover:bg-amber-500/20 px-2 py-0.5 rounded border border-amber-500/30 transition"
-                >
-                  <X className="w-3 h-3" />
-                  <span>Reset Filter</span>
-                </button>
-              )}
-            </div>
-
-            {/* Horizontally Scrollable Department Filter Pills */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
-              {DEPARTMENT_FILTER_OPTIONS.map(opt => {
-                const count = countUsersInDept(opt.id);
-                const isActive = departmentFilter === opt.id;
-                return (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() => setDepartmentFilter(opt.id)}
-                    className={`px-2.5 py-1 rounded-lg text-[11px] font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-1.5 ${
-                      isActive
-                        ? 'bg-amber-500 text-slate-950 shadow-md ring-2 ring-amber-400 font-extrabold'
-                        : 'bg-slate-800/80 text-slate-300 hover:bg-slate-750 hover:text-white border border-slate-700/60'
-                    }`}
-                  >
-                    <span>{opt.icon}</span>
-                    <span>{opt.shortLabel}</span>
-                    <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-black ${
-                      isActive ? 'bg-slate-950 text-amber-300' : 'bg-slate-900 text-slate-400'
-                    }`}>
-                      {count}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Active Filter Indicator Badge */}
-            {departmentFilter !== 'all' && (
-              <div className="pt-1 flex items-center justify-between text-[11px] text-amber-300 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/20">
-                <span className="flex items-center gap-1.5">
-                  <span>{activeDeptOption?.icon}</span>
-                  <span>Menampilkan filter: <strong>{activeDeptOption?.label}</strong></span>
-                </span>
-                <span className="font-mono text-[10px] bg-amber-500/20 px-1.5 py-0.5 rounded font-bold">
-                  {filteredUsers.length} User
-                </span>
-              </div>
+            {departmentFilter !== 'all' ? (
+              <button
+                type="button"
+                onClick={() => setDepartmentFilter('all')}
+                className="text-amber-400 hover:text-amber-300 font-bold text-[10px] flex items-center gap-1 cursor-pointer bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30 transition"
+              >
+                <X className="w-3 h-3" />
+                <span>Reset Filter</span>
+              </button>
+            ) : (
+              <span className="text-[10px] text-slate-400">Pilih user untuk rincian</span>
             )}
           </div>
 
@@ -712,56 +739,77 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
               filteredUsers.map(user => {
                 const isSelected = selectedUser?.id === user.id;
                 const isCurrent = user.id === currentUser.id;
+                const isInactive = user.status === 'inactive';
 
                 return (
                   <div
                     key={user.id}
                     onClick={() => setSelectedUserId(user.id)}
-                    className={`p-3.5 transition cursor-pointer flex items-center justify-between gap-3 ${
+                    className={`px-3.5 py-3 transition cursor-pointer flex items-center justify-between gap-3 ${
                       isSelected 
                         ? 'bg-amber-600/15 border-l-4 border-amber-500 text-white' 
+                        : isInactive
+                        ? 'bg-slate-950/60 hover:bg-slate-900/80 text-slate-400 opacity-85'
                         : 'hover:bg-slate-800/60 text-slate-300'
                     }`}
                   >
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs shrink-0 shadow ${
-                        isSelected ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-200'
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 shadow-xs ${
+                        isSelected ? 'bg-amber-500 text-slate-950' : isInactive ? 'bg-slate-800 text-slate-500 border border-slate-700' : 'bg-slate-800 text-slate-200'
                       }`}>
                         {user.role === 'super_admin' ? '👑' : user.fullName.substring(0, 2).toUpperCase()}
                       </div>
                       <div className="min-w-0">
                         <div className="font-bold text-xs truncate flex items-center gap-1.5">
-                          <span className={isSelected ? 'text-amber-300 font-extrabold' : 'text-white'}>
+                          <span className={isSelected ? 'text-amber-300 font-extrabold' : isInactive ? 'text-slate-400 line-through' : 'text-white'}>
                             {user.role === 'super_admin' ? 'Super Admin' : user.fullName}
                           </span>
                           {isCurrent && (
-                            <span className="px-1 py-0.2 rounded text-[8px] font-bold bg-blue-500/25 text-blue-300">
+                            <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-blue-500/20 text-blue-300 shrink-0">
                               Anda
                             </span>
                           )}
                         </div>
-                        <div className="text-[11px] text-slate-400 truncate mt-0.5">
-                          {ROLE_LABELS[user.role] || user.role}
-                        </div>
-                        <div className="text-[10px] text-slate-500 truncate mt-0.5">
-                          {user.department}
+                        <div className="text-[11px] truncate mt-0.5 flex items-center gap-1.5">
+                          {user.role === 'unassigned' ? (
+                            <span className="text-rose-400 font-bold text-[10px]">
+                              ⚠️ Perlu Diisi Role
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">{ROLE_LABELS[user.role] || user.role}</span>
+                          )}
+                          <span className="text-slate-600">&bull;</span>
+                          <span className="text-[10px] text-slate-500 truncate">
+                            {user.department || 'Perlu Diisi'}
+                          </span>
                         </div>
                       </div>
                     </div>
 
-                    <div className="flex flex-col items-end gap-1 shrink-0">
+                    <div className="shrink-0">
                       {user.status === 'approved' && (
-                        <span className="w-2 h-2 rounded-full bg-emerald-500" title="Aktif" />
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                          Aktif
+                        </span>
+                      )}
+                      {user.status === 'inactive' && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                          <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
+                          Nonaktif
+                        </span>
                       )}
                       {user.status === 'pending' && (
-                        <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" title="Pending" />
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
+                          Pending
+                        </span>
                       )}
                       {user.status === 'rejected' && (
-                        <span className="w-2 h-2 rounded-full bg-rose-500" title="Ditolak" />
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-900/40 text-rose-300 border border-rose-700/40">
+                          Ditolak
+                        </span>
                       )}
-                      <span className="text-[10px] text-slate-400">
-                        {user.status === 'approved' ? 'Aktif' : user.status === 'pending' ? 'Pending' : 'Ditolak'}
-                      </span>
                     </div>
                   </div>
                 );
@@ -770,218 +818,397 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
           </div>
         </div>
 
-        {/* RIGHT COLUMN: Selected User Details & Menu/Submenu Granular Access */}
-        <div className="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm flex flex-col">
+        {/* RIGHT COLUMN: Selected User Details, Password & Menu/Submenu Granular Access */}
+        <div className="lg:col-span-8 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm flex flex-col">
           {selectedUser ? (
             <>
               {/* Selected User Header Banner */}
-              <div className="p-4 bg-slate-950 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-amber-600 to-orange-600 flex items-center justify-center text-white font-bold text-base shadow-md">
-                    {selectedUser.role === 'super_admin' ? '👑' : selectedUser.fullName.substring(0, 2).toUpperCase()}
+              <div className="p-4 bg-slate-950 border-b border-slate-800 space-y-3.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-white font-bold text-sm shadow-sm shrink-0 ${
+                      selectedUser.status === 'inactive'
+                        ? 'bg-slate-800 border border-slate-700 text-slate-400'
+                        : 'bg-amber-600'
+                    }`}>
+                      {selectedUser.role === 'super_admin' ? '👑' : selectedUser.fullName.substring(0, 2).toUpperCase()}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-sm font-bold text-white">
+                          {selectedUser.role === 'super_admin' ? 'Super Admin' : selectedUser.fullName}
+                        </h3>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-black border ${
+                          selectedUser.role === 'unassigned'
+                            ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                            : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                        }`}>
+                          {ROLE_LABELS[selectedUser.role] || selectedUser.role}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                          selectedUser.status === 'approved'
+                            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                            : selectedUser.status === 'inactive'
+                            ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                            : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                        }`}>
+                          {selectedUser.status === 'approved' ? '🟢 Status: Aktif' : selectedUser.status === 'inactive' ? '⚫ Status: Nonaktif' : '🟡 Status: Pending'}
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-400 flex items-center gap-3 mt-1 flex-wrap">
+                        <span className="flex items-center gap-1">
+                          <Mail className="w-3 h-3 text-slate-500" />
+                          {selectedUser.email}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Building className="w-3 h-3 text-slate-500" />
+                          {selectedUser.department || 'Perlu Diisi'}
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="text-sm font-bold text-white">
-                        {selectedUser.role === 'super_admin' ? 'Super Admin' : selectedUser.fullName}
-                      </h3>
-                      <span className="px-2 py-0.5 rounded text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                        {ROLE_LABELS[selectedUser.role] || selectedUser.role}
-                      </span>
-                    </div>
-                    <div className="text-[11px] text-slate-400 flex items-center gap-3 mt-1 flex-wrap">
-                      <span className="flex items-center gap-1">
-                        <Mail className="w-3 h-3 text-slate-500" />
-                        {selectedUser.email}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Building className="w-3 h-3 text-slate-500" />
-                        {selectedUser.department}
-                      </span>
-                    </div>
+
+                  {/* User Actions in Detail View: Edit & Aktifkan/Nonaktifkan */}
+                  <div className="flex items-center gap-2 self-end sm:self-auto flex-wrap">
+                    {isSuperAdmin && (
+                      <button
+                        onClick={() => handleOpenEdit(selectedUser)}
+                        className="px-3 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white border border-blue-500/40 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs active:scale-95"
+                        title={`Edit Data ${selectedUser.fullName} (${ROLE_LABELS[selectedUser.role] || selectedUser.role})`}
+                      >
+                        <Edit3 className="w-3.5 h-3.5 text-blue-400" />
+                        <span>Edit Pengguna</span>
+                      </button>
+                    )}
+                    {isSuperAdmin && selectedUser.role !== 'super_admin' && (
+                      selectedUser.status === 'inactive' ? (
+                        <button
+                          onClick={() => handleActivateUser(selectedUser)}
+                          className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs active:scale-95"
+                        >
+                          <UserCheck className="w-3.5 h-3.5" />
+                          <span>Aktifkan User</span>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleDeactivateUser(selectedUser)}
+                          className="px-3 py-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/40 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs active:scale-95"
+                        >
+                          <UserX className="w-3.5 h-3.5" />
+                          <span>Nonaktifkan User</span>
+                        </button>
+                      )
+                    )}
+                    {selectedUser.status === 'pending' && isSuperAdmin && (
+                      <button
+                        onClick={() => handleApprove(selectedUser.id)}
+                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs cursor-pointer shadow-xs active:scale-95"
+                      >
+                        Setujui Akun
+                      </button>
+                    )}
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 self-end sm:self-auto flex-wrap">
-                  {onNavigateToE2E && (
-                    <button
-                      onClick={() => {
-                        logisticsStore.setCurrentUser(selectedUser);
-                        onNavigateToE2E();
-                      }}
-                      className="px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 hover:text-white border border-emerald-500/40 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-sm active:scale-95"
-                      title={`Simulasikan sesi dan uji alur kerja sistem sebagai ${selectedUser.fullName}`}
-                    >
-                      <Eye className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>Uji Akun Ini</span>
-                    </button>
-                  )}
+                {/* Dedicated Password & Credentials Bar for Selected User */}
+                <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+                  <div className="flex items-center gap-2.5 flex-wrap">
+                    <div className="w-7 h-7 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                      <Key className="w-3.5 h-3.5" />
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block font-semibold">Kata Sandi / Password Akun ({selectedUser.email}):</span>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <code className="px-2 py-0.5 rounded bg-slate-950 border border-slate-800 font-mono font-bold text-amber-300 text-xs">
+                          {visiblePasswords[selectedUser.id] ? getEffectivePassword(selectedUser) : '••••••••••••'}
+                        </code>
+                        <button
+                          type="button"
+                          onClick={() => togglePasswordVisibility(selectedUser.id)}
+                          className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 font-bold text-[11px] flex items-center gap-1.5 transition cursor-pointer border border-slate-700"
+                        >
+                          {visiblePasswords[selectedUser.id] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          <span>{visiblePasswords[selectedUser.id] ? 'Sembunyikan Password' : 'Lihat Password'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleCopyUserPassword(selectedUser)}
+                          className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-semibold text-[11px] flex items-center gap-1 transition cursor-pointer border border-slate-700"
+                        >
+                          {copiedPasswordUserId === selectedUser.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                          <span>{copiedPasswordUserId === selectedUser.id ? 'Tersalin' : 'Salin'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
                   {isSuperAdmin && (
                     <button
-                      onClick={() => handleOpenEdit(selectedUser)}
-                      className="px-3 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white border border-blue-500/40 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-sm active:scale-95"
-                      title={`Edit Data ${selectedUser.fullName} (${ROLE_LABELS[selectedUser.role] || selectedUser.role})`}
+                      type="button"
+                      onClick={() => setIsPasswordModalOpen(true)}
+                      className="px-3 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 font-bold text-[11px] flex items-center gap-1.5 transition cursor-pointer self-end sm:self-auto"
                     >
-                      <Edit3 className="w-3.5 h-3.5 text-blue-400" />
-                      <span>Edit {selectedUser.fullName}</span>
-                    </button>
-                  )}
-                  {selectedUser.status === 'pending' && isSuperAdmin && (
-                    <button
-                      onClick={() => handleApprove(selectedUser.id)}
-                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs cursor-pointer shadow-sm active:scale-95"
-                    >
-                      Setujui Akun
+                      <Lock className="w-3.5 h-3.5" />
+                      <span>Ubah Password</span>
                     </button>
                   )}
                 </div>
               </div>
 
-              {/* Granular Menu & Submenu Permissions Section */}
-              <div className="p-5 space-y-4 max-h-[65vh] overflow-y-auto text-xs">
-                <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div>
-                    <div className="font-bold text-white flex items-center gap-1.5">
-                      <ShieldCheck className="w-4 h-4 text-amber-400" />
-                      <span>Rincian Menu &amp; Sub-Menu Hak Akses</span>
+              {/* Conditional Content: Hide Hak Akses if User is Inactive */}
+              {selectedUser.status === 'inactive' ? (
+                <div className="p-6 space-y-5 text-xs flex-1 bg-slate-950/40">
+                  <div className="p-5 rounded-2xl bg-rose-950/20 border border-rose-500/30 space-y-3">
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400 shrink-0">
+                        <Lock className="w-5 h-5" />
+                      </div>
+                      <div className="space-y-1">
+                        <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                          <span>Hak Akses Tidak Ditampilkan (Akun Nonaktif)</span>
+                        </h4>
+                        <p className="text-slate-300 leading-relaxed text-xs">
+                          Akun <strong className="text-amber-300">{selectedUser.fullName}</strong> saat ini berstatus <strong className="text-rose-400">NONAKTIF</strong>. Sesuai aturan integrasi sistem, pengaturan dan daftar hak akses tidak dimunculkan serta tidak dapat digunakan untuk pemrosesan operasional baru sampai akun ini diaktifkan kembali.
+                        </p>
+                      </div>
                     </div>
-                    <div className="text-[11px] text-slate-400 mt-0.5">
-                      Centang modul dan sub-menu yang dapat diakses, serta atur pembatasan input data (*Full Akses* vs *Hanya Lihat*).
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                      <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1">
+                        <div className="font-bold text-emerald-400 flex items-center gap-1.5">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>Histori Data Tetap Terlihat</span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Seluruh riwayat jadwal pengiriman, surat jalan, laporan aktivitas, dan log audit milik <strong>{selectedUser.fullName}</strong> tetap tersimpan utuh dan terlihat di sistem.
+                        </p>
+                      </div>
+
+                      <div className="p-3 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1">
+                        <div className="font-bold text-amber-400 flex items-center gap-1.5">
+                          <ShieldAlert className="w-3.5 h-3.5" />
+                          <span>Pemrosesan Sistem Ke Depan</span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 leading-relaxed">
+                          Hanya akun berstatus <strong>Aktif</strong> yang akan terbaca pada pemrosesan sistem ke depannya. Aktifkan kembali akun ini untuk memulihkan hak akses.
+                        </p>
+                      </div>
+                    </div>
+
+                    {isSuperAdmin && (
+                      <div className="pt-2 flex items-center justify-end">
+                        <button
+                          type="button"
+                          onClick={() => handleActivateUser(selectedUser)}
+                          className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-emerald-600/25 transition cursor-pointer active:scale-95"
+                        >
+                          <UserCheck className="w-4 h-4" />
+                          <span>Aktifkan Kembali Akun &amp; Tampilkan Hak Akses</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Preserved History Data Preview for Inactive User */}
+                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2.5">
+                    <div className="font-bold text-slate-200 flex items-center justify-between">
+                      <span className="flex items-center gap-2">
+                        <Clock className="w-4 h-4 text-amber-400" />
+                        <span>Arsip &amp; Histori Data Pengguna ({selectedUser.fullName})</span>
+                      </span>
+                      <span className="px-2 py-0.5 rounded text-[10px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-bold">
+                        Data Historis Tersimpan
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-[11px]">
+                      <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                        <span className="text-slate-400 block">ID Akun &amp; Departemen</span>
+                        <strong className="text-white">{selectedUser.id} &bull; {selectedUser.department || '-'}</strong>
+                      </div>
+                      <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                        <span className="text-slate-400 block">Role Terakhir</span>
+                        <strong className="text-amber-300">{ROLE_LABELS[selectedUser.role] || selectedUser.role}</strong>
+                      </div>
+                      <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800">
+                        <span className="text-slate-400 block">Catatan Status</span>
+                        <strong className="text-slate-300">{selectedUser.notes || 'Akun dinonaktifkan sementara'}</strong>
+                      </div>
                     </div>
                   </div>
-                  <button
-                    onClick={() => setIsCopyModalOpen(true)}
-                    className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 font-bold flex items-center gap-1.5 transition cursor-pointer shrink-0"
-                    title="Salin hak akses dari user lain"
-                  >
-                    <Copy className="w-3.5 h-3.5" />
-                    <span>Copy Akses</span>
-                  </button>
                 </div>
-
-                {/* Modules Accordion List */}
-                <div className="space-y-3">
-                  {MODULE_DEFINITIONS.map(mod => {
-                    const modState = editingPermissions[mod.id] || { enabled: true, subMenus: {} };
-                    const isExpanded = expandedModules[mod.id];
-
-                    return (
-                      <div key={mod.id} className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-xs">
-                        <div className="p-3.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <input
-                              type="checkbox"
-                              checked={modState.enabled}
-                              onChange={(e) => handleToggleModuleEnabled(mod.id, e.target.checked)}
-                              disabled={!isSuperAdmin}
-                              className="w-4 h-4 rounded bg-slate-950 border-slate-700 text-amber-500 focus:ring-amber-500 cursor-pointer"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => toggleModuleExpansion(mod.id)}
-                              className="font-bold text-white flex items-center gap-2 text-left cursor-pointer hover:text-amber-400"
-                            >
-                              <span>{mod.name}</span>
-                              {isExpanded ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
-                            </button>
-                          </div>
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            modState.enabled ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-slate-800 text-slate-500'
-                          }`}>
-                            {modState.enabled ? 'Aktif' : 'Nonaktif'}
+              ) : (
+                <>
+                  {/* Role Unassigned Warning Banner if role is 'unassigned' */}
+                  {selectedUser.role === 'unassigned' && (
+                    <div className="mx-5 mt-4 p-3.5 rounded-xl bg-amber-500/15 border border-amber-500/40 flex items-center justify-between gap-3 text-xs">
+                      <div className="flex items-center gap-2.5">
+                        <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+                        <div>
+                          <strong className="text-amber-300 block">Role Akun Baru Belum Diisi (Perlu Diisi)</strong>
+                          <span className="text-slate-300 text-[11px]">
+                            Akun baru tidak otomatis menjadi SPV Logistik. Silakan klik <strong>Edit Pengguna</strong> untuk memilih Role dan Departemen yang sesuai.
                           </span>
                         </div>
-
-                        {isExpanded && modState.enabled && (
-                          <div className="p-3 divide-y divide-slate-800/60 space-y-2">
-                            {mod.subMenus.map(sub => {
-                              const accessLevel = modState.subMenus[sub.id] || 'read_only';
-                              const isSubActive = accessLevel !== 'none';
-
-                              return (
-                                <div key={sub.id} className="pt-2 first:pt-0 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                                  <div className="flex items-center gap-2.5">
-                                    <input
-                                      type="checkbox"
-                                      checked={isSubActive}
-                                      onChange={(e) => handleSubMenuPermissionChange(
-                                        mod.id, 
-                                        sub.id, 
-                                        e.target.checked ? 'full_access' : 'none'
-                                      )}
-                                      disabled={!isSuperAdmin}
-                                      className="w-3.5 h-3.5 rounded bg-slate-900 border-slate-700 text-amber-500 cursor-pointer"
-                                    />
-                                    <span className={isSubActive ? 'text-slate-200 font-medium' : 'text-slate-500 line-through'}>
-                                      {sub.name}
-                                    </span>
-                                  </div>
-
-                                  {isSubActive && (
-                                    <div className="flex items-center gap-1.5 self-end sm:self-auto">
-                                      <span className="text-[10px] text-slate-400">Akses Input:</span>
-                                      <select
-                                        value={accessLevel}
-                                        onChange={(e) => handleSubMenuPermissionChange(mod.id, sub.id, e.target.value as any)}
-                                        disabled={!isSuperAdmin}
-                                        className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[11px] text-white font-medium focus:outline-none focus:border-amber-500 cursor-pointer"
-                                      >
-                                        <option value="full_access">🟢 Full Akses (Bisa Input/Edit)</option>
-                                        <option value="read_only">🟡 Hanya Lihat (Read Only)</option>
-                                        <option value="none">🔴 Tidak Ada Akses</option>
-                                      </select>
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
                       </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Bottom Right Actions Footer (Copy Akses, Ubah Password, Simpan Akses, Hapus) */}
-              <div className="p-4 bg-slate-950 border-t border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  {isSuperAdmin && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => setIsPasswordModalOpen(true)}
-                        className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-300 font-bold flex items-center gap-1.5 transition cursor-pointer border border-slate-700 text-xs shadow-xs"
-                        title="Ubah password akun apabila user lupa password"
-                      >
-                        <Key className="w-4 h-4 text-amber-400" />
-                        <span>Ubah Password</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(selectedUser.id)}
-                        className="px-3.5 py-2 rounded-xl bg-rose-950/50 hover:bg-rose-900 text-rose-300 font-bold flex items-center gap-1.5 transition cursor-pointer border border-rose-950 text-xs shadow-xs"
-                        title="Hapus akun dari sistem"
-                      >
-                        <XCircle className="w-4 h-4 text-rose-400" />
-                        <span>Hapus Akun</span>
-                      </button>
-                    </>
+                      {isSuperAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEdit(selectedUser)}
+                          className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shrink-0 cursor-pointer"
+                        >
+                          Isi Role Sekarang
+                        </button>
+                      )}
+                    </div>
                   )}
-                </div>
 
-                {isSuperAdmin && (
-                  <button
-                    type="button"
-                    onClick={handleSaveAccess}
-                    className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold flex items-center gap-1.5 shadow-lg shadow-amber-500/20 transition cursor-pointer active:scale-95 text-xs self-end sm:self-auto"
-                  >
-                    <Save className="w-4 h-4" />
-                    <span>Simpan Akses</span>
-                  </button>
-                )}
-              </div>
+                  {/* Granular Menu & Submenu Permissions Section */}
+                  <div className="p-5 space-y-4 max-h-[65vh] overflow-y-auto text-xs">
+                    <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <div className="font-bold text-white flex items-center gap-1.5">
+                          <ShieldCheck className="w-4 h-4 text-amber-400" />
+                          <span>Rincian Menu &amp; Sub-Menu Hak Akses</span>
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-0.5">
+                          Centang modul dan sub-menu yang dapat diakses, serta atur pembatasan input data (*Full Akses* vs *Hanya Lihat*).
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setIsCopyModalOpen(true)}
+                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 font-bold flex items-center gap-1.5 transition cursor-pointer shrink-0"
+                        title="Salin hak akses dari user lain"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Copy Akses</span>
+                      </button>
+                    </div>
+
+                    {/* Modules Accordion List */}
+                    <div className="space-y-3">
+                      {MODULE_DEFINITIONS.map(mod => {
+                        const modState = editingPermissions[mod.id] || { enabled: true, subMenus: {} };
+                        const isExpanded = expandedModules[mod.id];
+
+                        return (
+                          <div key={mod.id} className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-xs">
+                            <div className="p-3.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <input
+                                  type="checkbox"
+                                  checked={modState.enabled}
+                                  onChange={(e) => handleToggleModuleEnabled(mod.id, e.target.checked)}
+                                  disabled={!isSuperAdmin}
+                                  className="w-4 h-4 rounded bg-slate-950 border-slate-700 text-amber-500 focus:ring-amber-500 cursor-pointer"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => toggleModuleExpansion(mod.id)}
+                                  className="font-bold text-white flex items-center gap-2 text-left cursor-pointer hover:text-amber-400"
+                                >
+                                  <span>{mod.name}</span>
+                                  {isExpanded ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronRight className="w-4 h-4 text-slate-400" />}
+                                </button>
+                              </div>
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                modState.enabled ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-slate-800 text-slate-500'
+                              }`}>
+                                {modState.enabled ? 'Aktif' : 'Nonaktif'}
+                              </span>
+                            </div>
+
+                            {isExpanded && modState.enabled && (
+                              <div className="p-3 divide-y divide-slate-800/60 space-y-2">
+                                {mod.subMenus.map(sub => {
+                                  const accessLevel = modState.subMenus[sub.id] || 'read_only';
+                                  const isSubActive = accessLevel !== 'none';
+
+                                  return (
+                                    <div key={sub.id} className="pt-2 first:pt-0 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                      <div className="flex items-center gap-2.5">
+                                        <input
+                                          type="checkbox"
+                                          checked={isSubActive}
+                                          onChange={(e) => handleSubMenuPermissionChange(
+                                            mod.id, 
+                                            sub.id, 
+                                            e.target.checked ? 'full_access' : 'none'
+                                          )}
+                                          disabled={!isSuperAdmin}
+                                          className="w-3.5 h-3.5 rounded bg-slate-900 border-slate-700 text-amber-500 cursor-pointer"
+                                        />
+                                        <span className={isSubActive ? 'text-slate-200 font-medium' : 'text-slate-500 line-through'}>
+                                          {sub.name}
+                                        </span>
+                                      </div>
+
+                                      {isSubActive && (
+                                        <div className="flex items-center gap-1.5 self-end sm:self-auto">
+                                          <span className="text-[10px] text-slate-400">Akses Input:</span>
+                                          <select
+                                            value={accessLevel}
+                                            onChange={(e) => handleSubMenuPermissionChange(mod.id, sub.id, e.target.value as any)}
+                                            disabled={!isSuperAdmin}
+                                            className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-[11px] text-white font-medium focus:outline-none focus:border-amber-500 cursor-pointer"
+                                          >
+                                            <option value="full_access">🟢 Full Akses (Bisa Input/Edit)</option>
+                                            <option value="read_only">🟡 Hanya Lihat (Read Only)</option>
+                                            <option value="none">🔴 Tidak Ada Akses</option>
+                                          </select>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Bottom Right Actions Footer (Copy Akses, Ubah Password, Simpan Akses, Hapus) */}
+                  <div className="p-4 bg-slate-950 border-t border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {isSuperAdmin && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setIsPasswordModalOpen(true)}
+                            className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-300 font-bold flex items-center gap-1.5 transition cursor-pointer border border-slate-700 text-xs shadow-xs"
+                            title="Ubah password akun apabila user lupa password"
+                          >
+                            <Key className="w-4 h-4 text-amber-400" />
+                            <span>Ubah Password</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(selectedUser.id)}
+                            className="px-3.5 py-2 rounded-xl bg-rose-950/50 hover:bg-rose-900 text-rose-300 font-bold flex items-center gap-1.5 transition cursor-pointer border border-rose-950 text-xs shadow-xs"
+                            title="Hapus akun dari sistem"
+                          >
+                            <XCircle className="w-4 h-4 text-rose-400" />
+                            <span>Hapus Akun</span>
+                          </button>
+                        </>
+                      )}
+                    </div>
+
+                    {isSuperAdmin && (
+                      <button
+                        type="button"
+                        onClick={handleSaveAccess}
+                        className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold flex items-center gap-1.5 shadow-lg shadow-amber-500/20 transition cursor-pointer active:scale-95 text-xs self-end sm:self-auto"
+                      >
+                        <Save className="w-4 h-4" />
+                        <span>Simpan Akses</span>
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
             </>
           ) : (
             <div className="p-12 text-center text-slate-500 text-xs">
@@ -1188,15 +1415,32 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
               </div>
 
               <div>
+                <label className="text-slate-400 block mb-1">Departemen / Divisi</label>
+                <select
+                  value={newUser.department}
+                  onChange={(e) => setNewUser({ ...newUser, department: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white cursor-pointer"
+                >
+                  {OFFICIAL_DEPARTMENT_OPTIONS.map(dept => (
+                    <option key={dept} value={dept}>{dept}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
                 <label className="text-slate-400 block mb-1">Password</label>
                 <input
-                  type="password"
+                  type="text"
                   required
-                  placeholder="********"
+                  placeholder="Minimal 6 karakter"
                   value={newUser.password}
                   onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
                   className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
                 />
+              </div>
+
+              <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-300">
+                ℹ️ Akun baru otomatis diberi keterangan Role: <strong>Perlu Diisi</strong> (tidak langsung menjadi SPV Logistik).
               </div>
 
               <div className="pt-2 flex justify-end gap-2 border-t border-slate-800">
@@ -1211,7 +1455,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                   type="submit"
                   className="px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold shadow"
                 >
-                  Simpan &amp; Setujui
+                  Simpan Akun Baru
                 </button>
               </div>
             </form>
@@ -1304,6 +1548,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                     onChange={(e) => setEditFormData({ ...editFormData, role: e.target.value as UserRole })}
                     className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-amber-500 cursor-pointer"
                   >
+                    <option value="unassigned">⚠️ Perlu Diisi (Belum Ditentukan)</option>
                     <option value="super_admin">👑 Super Admin / Manager</option>
                     <option value="spv_logistik">🚛 SPV Logistik</option>
                     <option value="operasional">📋 Operasional (Operational Lead)</option>
@@ -1328,11 +1573,12 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                   <select
                     value={editFormData.status}
                     onChange={(e) => setEditFormData({ ...editFormData, status: e.target.value as UserApprovalStatus })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-amber-500"
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-amber-500 cursor-pointer"
                   >
-                    <option value="approved">Aktif / Disetujui (Approved)</option>
-                    <option value="pending">Menunggu Approval (Pending)</option>
-                    <option value="rejected">Ditolak / Dibekukan (Rejected)</option>
+                    <option value="approved">🟢 Aktif / Disetujui (Approved)</option>
+                    <option value="inactive">⚫ Nonaktif (Hak Akses Ditutup, Histori Tersimpan)</option>
+                    <option value="pending">🟡 Menunggu Approval (Pending)</option>
+                    <option value="rejected">🔴 Ditolak / Dibekukan (Rejected)</option>
                   </select>
                 </div>
 
@@ -1342,13 +1588,19 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                     <span>Departemen / Divisi</span>
                     <span className="text-rose-400">*</span>
                   </label>
-                  <input
-                    type="text"
+                  <select
                     required
                     value={editFormData.department}
                     onChange={(e) => setEditFormData({ ...editFormData, department: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
-                  />
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-amber-500 cursor-pointer"
+                  >
+                    {!OFFICIAL_DEPARTMENT_OPTIONS.includes(editFormData.department) && editFormData.department && (
+                      <option value={editFormData.department}>{editFormData.department}</option>
+                    )}
+                    {OFFICIAL_DEPARTMENT_OPTIONS.map(dept => (
+                      <option key={dept} value={dept}>{dept}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 

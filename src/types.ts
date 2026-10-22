@@ -1,5 +1,5 @@
-export type UserRole = 'super_admin' | 'spv_logistik' | 'operasional' | 'security' | 'driver' | 'crew_helper' | 'sales_admin' | 'purchasing_admin' | 'hr_admin' | 'finance_tax_admin' | 'warehouse_admin' | 'marketing_online' | 'marketing_offline';
-export type UserApprovalStatus = 'approved' | 'pending' | 'rejected';
+export type UserRole = 'super_admin' | 'dispatcher' | 'spv_logistik' | 'operasional' | 'security' | 'driver' | 'crew_helper' | 'sales_admin' | 'purchasing_admin' | 'hr_admin' | 'finance_tax_admin' | 'warehouse_admin' | 'marketing_online' | 'marketing_offline' | 'unassigned';
+export type UserApprovalStatus = 'approved' | 'pending' | 'rejected' | 'inactive';
 
 export type FleetStatus = 'available' | 'on-duty' | 'maintenance';
 export type CrewStatus = 'available' | 'on-duty' | 'off';

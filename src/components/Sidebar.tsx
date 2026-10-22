@@ -230,40 +230,42 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   const renderSidebarContent = () => (
-    <div className="h-full flex flex-col justify-between overflow-y-auto bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800">
+    <div className="h-full flex flex-col justify-between overflow-y-auto bg-slate-900 border-r border-slate-800">
       {/* Brand Header & User Session Card */}
-      <div className={`border-b border-slate-200 dark:border-slate-800 ${isMinimized ? 'p-3 flex flex-col items-center justify-center' : 'p-4'}`}>
+      <div className={`border-b border-slate-800 ${isMinimized ? 'p-3 flex flex-col items-center justify-center' : 'p-4'}`}>
         {isMinimized ? (
-          <div className="flex flex-col items-center gap-2.5 w-full">
+          <div className="flex flex-col items-center gap-3 w-full">
             <div
               onClick={() => handleTabClick('dashboard')}
-              className="cursor-pointer hover:opacity-80 transition"
+              className="cursor-pointer hover:opacity-85 transition"
               title="PT Anugrah Kemasan Kreatif"
             >
               <AkkLogo size="md" showText={false} />
             </div>
 
+            {/* Single Sidebar Expand Arrow Button */}
             {onToggleMinimize && (
               <button
                 onClick={onToggleMinimize}
-                className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-800 text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
-                title="Perbesar Sidebar"
+                className="w-9 h-8 rounded-lg bg-slate-950 border border-slate-800 text-amber-400 hover:bg-amber-500 hover:text-slate-950 hover:border-amber-500 flex items-center justify-center transition-all cursor-pointer shadow-xs"
+                title="Perlebar Sidebar"
+                aria-label="Perlebar Sidebar"
               >
-                <ChevronRight className="w-4 h-4" />
+                <ChevronRight className="w-4 h-4 stroke-[2.5]" />
               </button>
             )}
 
             {/* Compact User Avatar */}
-            <div className="relative mt-1">
+            <div className="relative pt-1">
               <div
                 onClick={() => onOpenAuth('login')}
-                className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xs cursor-pointer hover:opacity-90 transition"
+                className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold text-xs cursor-pointer hover:opacity-90 transition shadow-sm"
                 title={`${currentUser.fullName || 'User'} (${currentUser.role})`}
               >
                 {currentUser.fullName ? currentUser.fullName.substring(0, 1).toUpperCase() : 'U'}
               </div>
               <span
-                className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-white dark:ring-slate-900 ${
+                className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-slate-900 ${
                   currentUser.status === 'approved'
                     ? 'bg-emerald-500'
                     : currentUser.status === 'pending'
@@ -275,35 +277,37 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         ) : (
           <>
-            <div className="flex items-center justify-between w-full">
+            <div className="flex items-center justify-between w-full gap-2">
               <div
                 onClick={() => handleTabClick('dashboard')}
-                className="cursor-pointer hover:opacity-90 transition-opacity"
+                className="cursor-pointer hover:opacity-90 transition-opacity min-w-0"
               >
                 <AkkLogo size="sm" showSubtitle={true} />
               </div>
 
+              {/* Single Sidebar Minimize Arrow Button */}
               {onToggleMinimize && (
                 <button
                   onClick={onToggleMinimize}
-                  className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-800 text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+                  className="w-8 h-8 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 hover:bg-amber-500 hover:text-slate-950 hover:border-amber-500 flex items-center justify-center transition-all cursor-pointer shrink-0 shadow-xs"
                   title="Minimalkan Sidebar"
+                  aria-label="Minimalkan Sidebar"
                 >
-                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <ChevronLeft className="w-4 h-4 stroke-[2.5]" />
                 </button>
               )}
             </div>
 
             {/* User Session Profile Card */}
-            <div className="mt-3 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 space-y-2">
-              <div className="flex items-center justify-between">
+            <div className="mt-3.5 p-3 rounded-xl border border-slate-800 bg-slate-950 space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className="relative shrink-0">
-                    <div className="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xs">
+                    <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold text-xs shadow-xs">
                       {currentUser.fullName ? currentUser.fullName.substring(0, 1).toUpperCase() : 'U'}
                     </div>
                     <span
-                      className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full ring-2 ring-white dark:ring-slate-900 ${
+                      className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-slate-950 ${
                         currentUser.status === 'approved'
                           ? 'bg-emerald-500'
                           : currentUser.status === 'pending'
@@ -313,37 +317,44 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     />
                   </div>
                   <div className="min-w-0">
-                    <div className="text-xs font-semibold text-slate-900 dark:text-white truncate">
+                    <div className="text-xs font-bold text-white truncate">
                       {currentUser.fullName}
                     </div>
-                    <div className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                    <div className="text-[10px] text-slate-400 truncate font-medium">
                       {currentUser.role === 'super_admin' && 'Super Admin / Mgr'}
-                      {currentUser.role === 'spv_logistik' && 'SPV Logistik Logistik'}
+                      {currentUser.role === 'spv_logistik' && 'SPV Logistik'}
+                      {currentUser.role === 'operasional' && 'Operasional'}
+                      {currentUser.role === 'security' && 'Security / Satpam'}
                       {currentUser.role === 'driver' && 'Kru Supir Utama'}
-                      {currentUser.role === 'sales_admin' && 'Admin Penjualan'}
-                      {currentUser.role === 'purchasing_admin' && 'Admin Pembelian'}
+                      {currentUser.role === 'sales_admin' && 'Adm. Penjualan'}
+                      {currentUser.role === 'purchasing_admin' && 'Adm. Pembelian'}
                       {currentUser.role === 'hr_admin' && 'HR Admin'}
-                      {currentUser.role === 'finance_tax_admin' && 'Finance & Tax Admin'}
+                      {currentUser.role === 'finance_tax_admin' && 'Finance & Tax'}
                       {currentUser.role === 'warehouse_admin' && 'Admin Gudang'}
                       {currentUser.role === 'marketing_online' && 'Marketing Online'}
                       {currentUser.role === 'marketing_offline' && 'Marketing Offline'}
                       {currentUser.role === 'crew_helper' && 'Kru Helper'}
+                      {currentUser.role === 'unassigned' && 'Perlu Diisi'}
                     </div>
                   </div>
                 </div>
 
                 {/* Status Indicator */}
-                <div>
+                <div className="shrink-0">
                   {currentUser.status === 'approved' ? (
-                    <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                    <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                       Aktif
                     </span>
                   ) : currentUser.status === 'pending' ? (
-                    <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                    <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
                       Pending
                     </span>
+                  ) : currentUser.status === 'inactive' ? (
+                    <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                      Nonaktif
+                    </span>
                   ) : (
-                    <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+                    <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
                       Ditolak
                     </span>
                   )}
@@ -351,17 +362,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </div>
 
               {/* Quick Actions */}
-              <div className="pt-2 border-t border-slate-200 dark:border-slate-700/60 flex items-center justify-between text-[10px]">
+              <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-[10px]">
                 <button
                   onClick={() => onOpenAuth('login')}
-                  className="text-blue-600 dark:text-blue-400 hover:underline font-medium flex items-center gap-1 cursor-pointer"
+                  className="text-blue-400 hover:underline font-bold flex items-center gap-1 cursor-pointer"
                 >
                   <LogIn className="w-3 h-3" />
                   <span>Ganti Akun</span>
                 </button>
                 <button
                   onClick={() => onOpenAuth('register')}
-                  className="text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 cursor-pointer"
+                  className="text-slate-400 hover:text-white font-semibold cursor-pointer"
                 >
                   Daftar Baru
                 </button>
@@ -372,15 +383,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {/* Structured Navigation Menu */}
-      <nav className={`${isMinimized ? 'p-2 space-y-1' : 'p-3 space-y-3'} flex-1 overflow-x-hidden`}>
+      <nav className={`${isMinimized ? 'p-2 space-y-1.5' : 'p-3 space-y-3'} flex-1 overflow-x-hidden`}>
         {/* ============================================================ */}
         {/* MENU UTAMA PALING ATAS: DASHBOARD                            */}
         {/* ============================================================ */}
         {canAccess(currentUser, 'dashboard') && (
-          <div className="space-y-1 pb-2 border-b border-slate-200 dark:border-slate-800">
+          <div className="space-y-1 pb-2 border-b border-slate-800">
             {!isMinimized && (
               <div className="px-2 mb-1">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-400">
+                <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
                   Dashboard Utama
                 </span>
               </div>
@@ -411,22 +422,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
           return (
             <div className="space-y-1">
               {isMinimized ? (
-                <div className="pt-2 pb-1 flex justify-center" title="Logistik & Pengiriman">
+                <div className="pt-1 pb-0.5 flex justify-center" title="Logistik & Pengiriman">
                   <div className="w-6 h-px bg-slate-800" />
                 </div>
               ) : (
-                <div className="flex items-center justify-between px-2 mb-1.5">
+                <div className="flex items-center justify-between px-2 mb-1">
                   <button
                     onClick={() => setIsLogistikOpen(!isLogistikOpen)}
-                    className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 hover:text-cyan-300 transition cursor-pointer text-left w-full"
+                    className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 hover:text-cyan-400 transition cursor-pointer text-left w-full"
                   >
                     <Truck className="w-3.5 h-3.5 text-cyan-400" />
                     <span>Logistik & Pengiriman</span>
-                    <span className="ml-auto text-slate-500 flex items-center gap-1.5">
+                    <span className="ml-auto text-slate-400">
                       {isLogistikOpen ? (
-                        <ChevronDown className="w-3.5 h-3.5 transition-transform duration-200 text-cyan-400" />
+                        <ChevronDown className="w-3.5 h-3.5 text-cyan-400" />
                       ) : (
-                        <ChevronRight className="w-3.5 h-3.5 transition-transform duration-200" />
+                        <ChevronRight className="w-3.5 h-3.5" />
                       )}
                     </span>
                   </button>
@@ -434,7 +445,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               )}
 
               {(!isMinimized ? isLogistikOpen : true) && (
-                <div className={`space-y-0.5 ${!isMinimized ? 'pl-2 border-l border-slate-200 dark:border-slate-800 ml-2.5 my-1' : ''}`}>
+                <div className={`space-y-0.5 ${!isMinimized ? 'pl-2 border-l border-slate-800 ml-2.5 my-1' : ''}`}>
                   {canLogisticsPortal && renderNavItem(
                     'driver_portal',
                     'Portal Driver Mobile',
@@ -445,13 +456,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     'Laporan Kiriman Kru',
                     <MapPin className="w-4 h-4 text-blue-500" />,
                     pendingReportsCount > 0 ? (
-                      <span className="text-[10px] font-bold bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300 px-1.5 py-0.2 rounded-full">
+                      <span className="text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30 px-1.5 py-0.2 rounded-full">
                         {pendingReportsCount}
                       </span>
                     ) : undefined
                   )}
                   {canLogisticsOps && renderNavItem('operational_dashboard', 'Dashboard Operasional', <Truck className="w-4 h-4" />)}
-                  {canLogisticsOps && renderNavItem('analytics_reports', 'Analitik Armada & Kru', <BarChart3 className="w-4 h-4 text-slate-500" />)}
+                  {canLogisticsOps && renderNavItem('analytics_reports', 'Analitik Armada & Kru', <BarChart3 className="w-4 h-4" />)}
                   {canLogisticsSched && renderNavItem('schedules', 'Jadwal & Penugasan', <Calendar className="w-4 h-4" />)}
                   {canLogisticsFleets && renderNavItem('fleets', 'Armada & Kru Supir', <Truck className="w-4 h-4" />)}
                   {canLogisticsFleets && renderNavItem('fuel_efficiency', 'Efisiensi BBM', <Fuel className="w-4 h-4" />)}
@@ -482,24 +493,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
           if (!hasSales) return null;
 
           return (
-            <div className={`space-y-1 ${!isMinimized ? 'pt-2 border-t border-slate-800/60' : ''}`}>
+            <div className={`space-y-1 ${!isMinimized ? 'pt-2 border-t border-slate-800' : ''}`}>
               {isMinimized ? (
-                <div className="pt-2 pb-1 flex justify-center" title="Admin Penjualan">
+                <div className="pt-1 pb-0.5 flex justify-center" title="Admin Penjualan">
                   <div className="w-6 h-px bg-slate-800" />
                 </div>
               ) : (
-                <div className="flex items-center justify-between px-2 mb-1.5">
+                <div className="flex items-center justify-between px-2 mb-1">
                   <button
                     onClick={() => setIsSalesAdminOpen(!isSalesAdminOpen)}
                     className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 hover:text-amber-400 transition cursor-pointer text-left w-full"
                   >
                     <Briefcase className="w-3.5 h-3.5 text-amber-400" />
                     <span>Admin Penjualan</span>
-                    <span className="ml-auto text-slate-500 flex items-center gap-1.5">
+                    <span className="ml-auto text-slate-400">
                       {isSalesAdminOpen ? (
-                        <ChevronDown className="w-3.5 h-3.5 transition-transform duration-200 text-amber-400" />
+                        <ChevronDown className="w-3.5 h-3.5 text-amber-400" />
                       ) : (
-                        <ChevronRight className="w-3.5 h-3.5 transition-transform duration-200" />
+                        <ChevronRight className="w-3.5 h-3.5" />
                       )}
                     </span>
                   </button>
@@ -507,7 +518,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               )}
 
               {(!isMinimized ? isSalesAdminOpen : true) && (
-                <div className={`space-y-1 ${!isMinimized ? 'pl-2 border-l-2 border-amber-500/30 ml-2.5 my-1 shadow-[0_0_8px_rgba(245,158,11,0.15)]' : ''}`}>
+                <div className={`space-y-0.5 ${!isMinimized ? 'pl-2 border-l border-slate-800 ml-2.5 my-1' : ''}`}>
                   {canSalesDash && renderNavItem('sales_dashboard', 'Dashboard Penjualan', <ShoppingBag className="w-4 h-4" />)}
                   {canSalesActs && renderNavItem('sales_activities', 'Aktivitas Harian Admin', <Activity className="w-4 h-4" />)}
                   {canSalesSched && renderNavItem('sales_schedules', 'Jadwal Admin & Produksi', <Calendar className="w-4 h-4" />)}
@@ -516,35 +527,39 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   {canSalesJob && renderNavItem('sales_jobdesk', 'Pengaturan SOP & Jobdesk', <Settings className="w-4 h-4" />)}
 
                   {canSalesKpi && (
-                    <div className="space-y-1">
-                      <button
-                        onClick={() => setIsKpiDropdownOpen(!isKpiDropdownOpen)}
-                        className={`group w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all duration-200 cursor-pointer ${
-                          isKpiActive
-                            ? 'neu-pressed bg-amber-500/15 text-amber-300 font-bold border border-amber-500/40 shadow-[0_0_10px_rgba(245,158,11,0.2)]'
-                            : 'text-slate-400 hover:text-amber-300 hover:bg-slate-800/50 hover:translate-x-1 border border-transparent'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <Sparkles className={`w-4 h-4 shrink-0 transition-transform duration-200 group-hover:scale-115 ${isKpiActive ? 'text-amber-400' : 'text-slate-400 group-hover:text-amber-300'}`} />
-                          <span className="truncate">Data KPI Penjualan</span>
-                        </div>
-                        {isKpiDropdownOpen ? (
-                          <ChevronDown className="w-3.5 h-3.5 text-amber-400" />
-                        ) : (
-                          <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
-                        )}
-                      </button>
+                    isMinimized ? (
+                      renderNavItem('sales_kpi_individual', 'Data KPI Penjualan', <Sparkles className="w-4 h-4" />)
+                    ) : (
+                      <div className="space-y-1">
+                        <button
+                          onClick={() => setIsKpiDropdownOpen(!isKpiDropdownOpen)}
+                          className={`group w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition cursor-pointer ${
+                            isKpiActive
+                              ? 'bg-blue-600 text-white font-semibold'
+                              : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <Sparkles className="w-4 h-4 shrink-0" />
+                            <span className="truncate">Data KPI Penjualan</span>
+                          </div>
+                          {isKpiDropdownOpen ? (
+                            <ChevronDown className="w-3.5 h-3.5" />
+                          ) : (
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          )}
+                        </button>
 
-                      {isKpiDropdownOpen && (
-                        <div className="space-y-1 pl-3 border-l-2 border-amber-500/25 ml-3 my-1">
-                          {renderNavItem('sales_kpi_individual', '1. KPI Individu Staf', <User className="w-3.5 h-3.5" />)}
-                          {renderNavItem('sales_kpi_fines', '2. Akumulasi Denda', <ShieldAlert className="w-3.5 h-3.5" />)}
-                          {renderNavItem('sales_kpi_nusantara', '3. Persentase Kiriman', <Percent className="w-3.5 h-3.5" />)}
-                          {renderNavItem('sales_kpi_omset', '4. Omset Admin Penjualan', <TrendingUp className="w-3.5 h-3.5" />)}
-                        </div>
-                      )}
-                    </div>
+                        {isKpiDropdownOpen && (
+                          <div className="space-y-0.5 pl-2.5 border-l border-slate-800 ml-3 my-1">
+                            {renderNavItem('sales_kpi_individual', '1. KPI Individu Staf', <User className="w-3.5 h-3.5" />)}
+                            {renderNavItem('sales_kpi_fines', '2. Akumulasi Denda', <ShieldAlert className="w-3.5 h-3.5" />)}
+                            {renderNavItem('sales_kpi_nusantara', '3. Persentase Kiriman', <Percent className="w-3.5 h-3.5" />)}
+                            {renderNavItem('sales_kpi_omset', '4. Omset Admin Penjualan', <TrendingUp className="w-3.5 h-3.5" />)}
+                          </div>
+                        )}
+                      </div>
+                    )
                   )}
                 </div>
               )}
@@ -560,16 +575,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
           if (!canWh) return null;
 
           return (
-            <div className={`space-y-1 ${!isMinimized ? 'pt-2 border-t border-slate-800/60' : ''}`}>
+            <div className={`space-y-1 ${!isMinimized ? 'pt-2 border-t border-slate-800' : ''}`}>
               {isMinimized ? (
-                <div className="pt-2 pb-1 flex justify-center" title="Gudang">
+                <div className="pt-1 pb-0.5 flex justify-center" title="Gudang">
                   <div className="w-6 h-px bg-slate-800" />
                 </div>
               ) : (
-                <div className="flex items-center justify-between px-2 mb-1.5">
+                <div className="flex items-center justify-between px-2 mb-1">
                   <button
                     onClick={() => setIsWarehouseOpen(!isWarehouseOpen)}
-                    className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 hover:text-cyan-300 transition cursor-pointer text-left w-full"
+                    className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 hover:text-cyan-400 transition cursor-pointer text-left w-full"
                   >
                     <Building2 className="w-3.5 h-3.5 text-cyan-400" />
                     <span>Gudang</span>
@@ -581,7 +596,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               )}
 
               {(!isMinimized ? isWarehouseOpen : true) && (
-                <div className={`space-y-1 ${!isMinimized ? 'pl-2 border-l-2 border-cyan-500/30 ml-2.5 my-1' : ''}`}>
+                <div className={`space-y-0.5 ${!isMinimized ? 'pl-2 border-l border-slate-800 ml-2.5 my-1' : ''}`}>
                   {renderNavItem('warehouse_dashboard', 'Dashboard Gudang', <Building2 className="w-4 h-4" />)}
                 </div>
               )}
@@ -597,13 +612,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
           if (!canMkt) return null;
 
           return (
-            <div className={`space-y-1 ${!isMinimized ? 'pt-2 border-t border-slate-800/60' : ''}`}>
+            <div className={`space-y-1 ${!isMinimized ? 'pt-2 border-t border-slate-800' : ''}`}>
               {isMinimized ? (
-                <div className="pt-2 pb-1 flex justify-center" title="Marketing">
+                <div className="pt-1 pb-0.5 flex justify-center" title="Marketing">
                   <div className="w-6 h-px bg-slate-800" />
                 </div>
               ) : (
-                <div className="flex items-center justify-between px-2 mb-1.5">
+                <div className="flex items-center justify-between px-2 mb-1">
                   <button
                     onClick={() => setIsMarketingOpen(!isMarketingOpen)}
                     className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 hover:text-emerald-400 transition cursor-pointer text-left w-full"
@@ -618,7 +633,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               )}
 
               {(!isMinimized ? isMarketingOpen : true) && (
-                <div className={`space-y-1 ${!isMinimized ? 'pl-2 border-l-2 border-emerald-500/30 ml-2.5 my-1' : ''}`}>
+                <div className={`space-y-0.5 ${!isMinimized ? 'pl-2 border-l border-slate-800 ml-2.5 my-1' : ''}`}>
                   {canAccess(currentUser, 'marketing', 'kampanye') && renderNavItem('marketing_online', 'Marketing Online', <Globe className="w-4 h-4" />)}
                   {canAccess(currentUser, 'marketing', 'leads_pipeline') && renderNavItem('marketing_offline', 'Marketing Offline', <Megaphone className="w-4 h-4" />)}
                   {canAccess(currentUser, 'marketing', 'laporan_kunjungan') && renderNavItem('customer_map', 'Jaringan Toko & Mitra', <MapPin className="w-4 h-4" />)}
@@ -636,13 +651,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
           if (!canPur) return null;
 
           return (
-            <div className={`space-y-1 ${!isMinimized ? 'pt-2 border-t border-slate-800/60' : ''}`}>
+            <div className={`space-y-1 ${!isMinimized ? 'pt-2 border-t border-slate-800' : ''}`}>
               {isMinimized ? (
-                <div className="pt-2 pb-1 flex justify-center" title="Admin Pembelian">
+                <div className="pt-1 pb-0.5 flex justify-center" title="Admin Pembelian">
                   <div className="w-6 h-px bg-slate-800" />
                 </div>
               ) : (
-                <div className="flex items-center justify-between px-2 mb-1.5">
+                <div className="flex items-center justify-between px-2 mb-1">
                   <button
                     onClick={() => setIsPurchasingOpen(!isPurchasingOpen)}
                     className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 hover:text-purple-400 transition cursor-pointer text-left w-full"
@@ -657,37 +672,41 @@ export const Sidebar: React.FC<SidebarProps> = ({
               )}
 
               {(!isMinimized ? isPurchasingOpen : true) && (
-                <div className={`space-y-1 ${!isMinimized ? 'pl-2 border-l-2 border-purple-500/30 ml-2.5 my-1' : ''}`}>
+                <div className={`space-y-0.5 ${!isMinimized ? 'pl-2 border-l border-slate-800 ml-2.5 my-1' : ''}`}>
                   {canAccess(currentUser, 'purchasing', 'permintaan_pembelian') && renderNavItem('purchasing_dashboard', 'Dashboard Pembelian', <ShoppingBag className="w-4 h-4" />)}
 
                   {canAccess(currentUser, 'purchasing', 'po_vendor') && (
-                    <div className="space-y-1">
-                      <button
-                        onClick={() => setIsPurchasingStockOpen(!isPurchasingStockOpen)}
-                        className={`group w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition-all duration-200 cursor-pointer ${
-                          currentTab === 'purchasing_stock_overview' || currentTab === 'purchasing_stock_forecast'
-                            ? 'neu-pressed bg-purple-500/15 text-purple-300 font-bold border border-purple-500/40 shadow-[0_0_10px_rgba(168,85,247,0.2)]'
-                            : 'text-slate-400 hover:text-purple-300 hover:bg-slate-800/40 hover:translate-x-1 border border-transparent'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <Layers className={`w-4 h-4 shrink-0 transition-transform duration-200 group-hover:scale-115 ${currentTab === 'purchasing_stock_overview' || currentTab === 'purchasing_stock_forecast' ? 'text-purple-400' : 'text-slate-400'}`} />
-                          <span className="truncate">Analisa Stok</span>
-                        </div>
-                        {isPurchasingStockOpen ? (
-                          <ChevronDown className="w-3.5 h-3.5 text-purple-400" />
-                        ) : (
-                          <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
-                        )}
-                      </button>
+                    isMinimized ? (
+                      renderNavItem('purchasing_stock_overview', 'Analisa Stok', <Layers className="w-4 h-4" />)
+                    ) : (
+                      <div className="space-y-1">
+                        <button
+                          onClick={() => setIsPurchasingStockOpen(!isPurchasingStockOpen)}
+                          className={`group w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition cursor-pointer ${
+                            currentTab === 'purchasing_stock_overview' || currentTab === 'purchasing_stock_forecast'
+                              ? 'bg-blue-600 text-white font-semibold'
+                              : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <Layers className="w-4 h-4 shrink-0" />
+                            <span className="truncate">Analisa Stok</span>
+                          </div>
+                          {isPurchasingStockOpen ? (
+                            <ChevronDown className="w-3.5 h-3.5" />
+                          ) : (
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          )}
+                        </button>
 
-                      {isPurchasingStockOpen && (
-                        <div className="space-y-1 pl-3 border-l-2 border-purple-500/25 ml-3 my-1">
-                          {renderNavItem('purchasing_stock_overview', 'Ringkasan Stok', <Database className="w-3.5 h-3.5" />)}
-                          {renderNavItem('purchasing_stock_forecast', 'Prediksi Kebutuhan', <TrendingUp className="w-3.5 h-3.5" />)}
-                        </div>
-                      )}
-                    </div>
+                        {isPurchasingStockOpen && (
+                          <div className="space-y-0.5 pl-2.5 border-l border-slate-800 ml-3 my-1">
+                            {renderNavItem('purchasing_stock_overview', 'Ringkasan Stok', <Database className="w-3.5 h-3.5" />)}
+                            {renderNavItem('purchasing_stock_forecast', 'Prediksi Kebutuhan', <TrendingUp className="w-3.5 h-3.5" />)}
+                          </div>
+                        )}
+                      </div>
+                    )
                   )}
                 </div>
               )}
@@ -703,13 +722,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
           if (!canFin) return null;
 
           return (
-            <div className={`space-y-1 ${!isMinimized ? 'pt-2 border-t border-slate-800/60' : ''}`}>
+            <div className={`space-y-1 ${!isMinimized ? 'pt-2 border-t border-slate-800' : ''}`}>
               {isMinimized ? (
-                <div className="pt-2 pb-1 flex justify-center" title="Finance & Tax">
+                <div className="pt-1 pb-0.5 flex justify-center" title="Finance & Tax">
                   <div className="w-6 h-px bg-slate-800" />
                 </div>
               ) : (
-                <div className="flex items-center justify-between px-2 mb-1.5">
+                <div className="flex items-center justify-between px-2 mb-1">
                   <button
                     onClick={() => setIsFinanceOpen(!isFinanceOpen)}
                     className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 hover:text-amber-400 transition cursor-pointer text-left w-full"
@@ -724,7 +743,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               )}
 
               {(!isMinimized ? isFinanceOpen : true) && (
-                <div className={`space-y-1 ${!isMinimized ? 'pl-2 border-l-2 border-amber-500/30 ml-2.5 my-1' : ''}`}>
+                <div className={`space-y-0.5 ${!isMinimized ? 'pl-2 border-l border-slate-800 ml-2.5 my-1' : ''}`}>
                   {renderNavItem('finance_dashboard', 'Dashboard Finance', <Database className="w-4 h-4" />)}
                 </div>
               )}
@@ -740,13 +759,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
           if (!canHr) return null;
 
           return (
-            <div className={`space-y-1 ${!isMinimized ? 'pt-2 border-t border-slate-800/60' : ''}`}>
+            <div className={`space-y-1 ${!isMinimized ? 'pt-2 border-t border-slate-800' : ''}`}>
               {isMinimized ? (
-                <div className="pt-2 pb-1 flex justify-center" title="HR">
+                <div className="pt-1 pb-0.5 flex justify-center" title="Human Resources">
                   <div className="w-6 h-px bg-slate-800" />
                 </div>
               ) : (
-                <div className="flex items-center justify-between px-2 mb-1.5">
+                <div className="flex items-center justify-between px-2 mb-1">
                   <button
                     onClick={() => setIsHrOpen(!isHrOpen)}
                     className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 hover:text-indigo-400 transition cursor-pointer text-left w-full"
@@ -761,21 +780,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
               )}
 
               {(!isMinimized ? isHrOpen : true) && (
-                <div className={`space-y-1 ${!isMinimized ? 'pl-2 border-l-2 border-indigo-500/30 ml-2.5 my-1' : ''}`}>
+                <div className={`space-y-0.5 ${!isMinimized ? 'pl-2 border-l border-slate-800 ml-2.5 my-1' : ''}`}>
                   {canAccess(currentUser, 'hr', 'hr_data_karyawan') && (
                     <>
-                      <div className="text-[9px] font-black uppercase tracking-wider text-indigo-300/80 px-2 pt-1">
-                        1. HR
-                      </div>
+                      {!isMinimized && (
+                        <div className="text-[9px] font-black uppercase tracking-wider text-indigo-400 px-2 pt-1">
+                          1. HR
+                        </div>
+                      )}
                       {renderNavItem('hr_dashboard', 'Dashboard & Presensi', <Users className="w-4 h-4" />)}
                     </>
                   )}
 
                   {canAccess(currentUser, 'hr', 'ga_security') && (
                     <>
-                      <div className="text-[9px] font-black uppercase tracking-wider text-indigo-300/80 px-2 pt-2 border-t border-slate-800/50">
-                        2. General Affair (GA)
-                      </div>
+                      {!isMinimized && (
+                        <div className="text-[9px] font-black uppercase tracking-wider text-indigo-400 px-2 pt-2 border-t border-slate-800/50">
+                          2. General Affair (GA)
+                        </div>
+                      )}
                       {renderNavItem('ga_security', 'Security (Keamanan)', <ShieldAlert className="w-4 h-4" />)}
                       {renderNavItem('ga_hk', 'HK (Housekeeping)', <Brush className="w-4 h-4" />)}
                       {renderNavItem('ga_aset', 'Aset (Inventaris Pabrik)', <Building2 className="w-4 h-4" />)}
@@ -784,9 +807,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
                   {canAccess(currentUser, 'hr', 'td_video_training') && (
                     <>
-                      <div className="text-[9px] font-black uppercase tracking-wider text-indigo-300/80 px-2 pt-2 border-t border-slate-800/50">
-                        3. Training &amp; Dev
-                      </div>
+                      {!isMinimized && (
+                        <div className="text-[9px] font-black uppercase tracking-wider text-indigo-400 px-2 pt-2 border-t border-slate-800/50">
+                          3. Training &amp; Dev
+                        </div>
+                      )}
                       {renderNavItem('training_videos', 'Video Training SOP', <Video className="w-4 h-4" />)}
                       {renderNavItem('training_karyawan', 'Training Karyawan', <Award className="w-4 h-4" />)}
                     </>
@@ -809,23 +834,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
           if (!hasSys) return null;
 
           return (
-            <div className={`space-y-1 ${!isMinimized ? 'pt-2 border-t border-slate-800/60' : ''}`}>
-              {!isMinimized && (
-                <div className="px-2 mb-1.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+            <div className={`space-y-1 ${!isMinimized ? 'pt-2 border-t border-slate-800' : ''}`}>
+              {isMinimized ? (
+                <div className="pt-1 pb-0.5 flex justify-center" title="Sistem & Pengguna">
+                  <div className="w-6 h-px bg-slate-800" />
+                </div>
+              ) : (
+                <div className="px-2 mb-1 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
                   <Users className="w-3.5 h-3.5 text-indigo-400" />
                   <span>Sistem & Pengguna</span>
                 </div>
               )}
 
-              <div className={`space-y-1 ${!isMinimized ? 'pl-2 border-l-2 border-indigo-500/30 ml-2.5 my-1' : ''}`}>
+              <div className={`space-y-0.5 ${!isMinimized ? 'pl-2 border-l border-slate-800 ml-2.5 my-1' : ''}`}>
                 {canSysLog && renderNavItem('activity_log', 'Log Aktivitas Sistem', <History className="w-4 h-4" />)}
                 {canSysUsers && renderNavItem(
                   'users',
                   'Manajemen User & Approval',
                   <Users className="w-4 h-4" />,
                   pendingUsersCount > 0 ? (
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500 text-slate-950 shadow-[0_0_8px_rgba(245,158,11,0.8)] animate-pulse">
-                      {pendingReportsCount}
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500 text-slate-950">
+                      {pendingUsersCount}
                     </span>
                   ) : undefined
                 )}
@@ -837,15 +866,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
         })()}
       </nav>
 
-      {/* Sidebar Footer with Tactile Neumorphism and Neon V2 Accents */}
+      {/* Sidebar Footer */}
       {isMinimized ? (
-        <div className="p-2 border-t border-slate-800/80 bg-slate-950/70 neu-pressed-sm flex flex-col items-center gap-2">
+        <div className="p-2.5 border-t border-slate-800 bg-slate-950 flex flex-col items-center gap-2">
           <ThemeSwitcher variant="icon-only" />
 
-          {/* Unduh APK Android Driver Mobile (Minimized) with Neon Pulse */}
+          {/* Unduh APK Android Driver Mobile (Minimized) */}
           <button
             onClick={() => setIsApkModalOpen(true)}
-            className="p-2 rounded-xl neu-button text-emerald-400 hover:text-emerald-300 border border-emerald-500/40 hover:shadow-[0_0_12px_rgba(16,185,129,0.5)] transition-all cursor-pointer"
+            className="p-2 rounded-lg bg-slate-900 border border-slate-800 text-emerald-400 hover:bg-slate-800 transition cursor-pointer"
             title="Unduh Berkas APK Android (v1.0.4) untuk Portal Driver & Helper Mobile"
           >
             <Smartphone className="w-4 h-4" />
@@ -857,29 +886,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
               logisticsStore.logoutUser();
               onOpenAuth('login');
             }}
-            className="p-2 rounded-xl neu-button text-slate-400 hover:text-rose-400 hover:border-rose-500/50 hover:shadow-[0_0_12px_rgba(244,63,94,0.4)] transition-all cursor-pointer"
+            className="p-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-rose-400 hover:border-rose-500/40 transition cursor-pointer"
             title="Keluar Sesi (Logout)"
           >
             <LogOut className="w-4 h-4" />
           </button>
-
-          {onToggleMinimize && (
-            <button
-              onClick={onToggleMinimize}
-              className="w-full flex items-center justify-center p-2 rounded-xl neu-button text-amber-400 border border-slate-700/60 transition cursor-pointer"
-              title="Perbesar Sidebar"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          )}
         </div>
       ) : (
-        <div className="p-3 border-t border-slate-200 dark:border-slate-800 space-y-2">
+        <div className="p-3 border-t border-slate-800 bg-slate-950 space-y-2">
           {/* DC Status & Time */}
-          <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 px-1">
+          <div className="flex items-center justify-between text-[11px] text-slate-400 px-1">
             <div className="flex items-center gap-1.5">
-              <Building2 className="w-3.5 h-3.5 text-slate-400" />
-              <span className="font-medium">AKK Banyuwangi DC</span>
+              <Building2 className="w-3.5 h-3.5 text-amber-400" />
+              <span className="font-semibold">AKK Banyuwangi DC</span>
             </div>
             <span className="font-mono text-[10px]">
               {currentTime}
@@ -890,15 +909,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <button
             type="button"
             onClick={() => setIsApkModalOpen(true)}
-            className="w-full p-2 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/80 text-xs flex items-center justify-between gap-2 transition cursor-pointer"
+            className="w-full p-2 rounded-lg bg-slate-900 border border-slate-800 hover:bg-slate-800 text-xs flex items-center justify-between gap-2 transition cursor-pointer"
             title="Unduh Berkas APK Android (v1.0.4) untuk Portal Driver & Helper Mobile"
           >
             <div className="flex items-center gap-2 min-w-0">
-              <div className="w-6 h-6 rounded bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800 flex items-center justify-center shrink-0">
+              <div className="w-6 h-6 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center justify-center shrink-0">
                 <Smartphone className="w-3.5 h-3.5" />
               </div>
               <div className="text-left min-w-0">
-                <div className="text-[11px] font-semibold text-slate-800 dark:text-slate-200 truncate">
+                <div className="text-[11px] font-bold text-white truncate">
                   APK Driver v1.0.4
                 </div>
               </div>
@@ -913,7 +932,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               logisticsStore.logoutUser();
               onOpenAuth('login');
             }}
-            className="w-full py-2 px-3 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-rose-50 dark:hover:bg-rose-950/30 hover:border-rose-200 dark:hover:border-rose-900 text-slate-600 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-400 text-xs font-medium flex items-center justify-center gap-2 transition cursor-pointer"
+            className="w-full py-2 px-3 rounded-lg bg-slate-900 border border-slate-800 hover:bg-rose-500/15 hover:border-rose-500/30 text-slate-300 hover:text-rose-400 text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer"
             title="Keluar Sesi / Log Out dari Sistem PT AKK"
           >
             <LogOut className="w-3.5 h-3.5" />

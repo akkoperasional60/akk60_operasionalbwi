@@ -6,18 +6,18 @@ import {
   AlertTriangle,
   CheckCircle2,
   Share2,
-  Navigation,
   Send,
   Truck,
-  Check,
-  Building2,
   RefreshCw,
   CameraOff,
-  Coffee
+  Coffee,
+  FileText,
+  Maximize2
 } from 'lucide-react';
 import { Schedule } from '../types';
 import { driverChecklistService } from '../services/driverChecklistService';
 import { driverReportService } from '../services/driverReportService';
+import { driverWaybillService } from '../services/driverWaybillService';
 import { logisticsStore } from '../services/store';
 
 export type GmapsReportCategory = 'kendala_jalan' | 'akhir_kiriman' | 'istirahat' | 'update_lokasi';
@@ -54,13 +54,14 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   onReportSubmitted
 }) => {
   const [category, setCategory] = useState<GmapsReportCategory>('kendala_jalan');
-  const [selectedDeliveryId, setSelectedDeliveryId] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
   const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null);
   const [isCapturing, setIsCapturing] = useState<boolean>(false);
+  const [isFullPhotoPreviewOpen, setIsFullPhotoPreviewOpen] = useState<boolean>(false);
 
-  // Live Camera Stream State
+  // Live Camera Stream State (Full Screen)
   const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [cameraError, setCameraError] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -70,7 +71,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
 
   // Lookup inisial armada dari master data
   const fleets = logisticsStore.getFleets();
-  const matchedFleet = fleets.find(f => 
+  const matchedFleet = fleets.find(f =>
     f.plateNumber.replace(/\s+/g, '').toUpperCase() === (autoPlateNumber || '').replace(/\s+/g, '').toUpperCase()
   );
   const fleetInitial = matchedFleet?.initialCode || (autoPlateNumber.includes('8848') ? 'ES-03' : autoPlateNumber.includes('8125') ? 'N1 / NP1' : autoPlateNumber.includes('8509') ? 'A3 / NP3' : undefined);
@@ -82,13 +83,50 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Otomatis pilih jadwal / Surat Jalan Keluar yang sedang aktif hari ini (tanpa scrolldown manual)
+  const todayStr = new Date().toISOString().split('T')[0];
+  const activeDelivery: Schedule | null = React.useMemo(() => {
+    if (!deliveries || deliveries.length === 0) return null;
+    // Prioritaskan yang sedang in_transit / picked_up atau jadwal hari ini
+    const inTransit = deliveries.find(d => d.status === 'in_transit' || d.status === 'picked_up');
+    if (inTransit) return inTransit;
+    const todayMatch = deliveries.find(d => d.departureDate <= todayStr && d.status !== 'delivered');
+    if (todayMatch) return todayMatch;
+    return deliveries[0];
+  }, [deliveries, todayStr]);
+
+  const activeWaybill = React.useMemo(() => {
+    if (!activeDelivery) return null;
+    try {
+      return driverWaybillService.getWaybillForSchedule(activeDelivery);
+    } catch {
+      return null;
+    }
+  }, [activeDelivery]);
+
+  const currentAreaName = React.useMemo(() => {
+    if (activeWaybill?.destination) {
+      const area = activeWaybill.destination.areaName || activeWaybill.destination.storeName;
+      const city = activeWaybill.destination.city ? ` (${activeWaybill.destination.city})` : '';
+      return `${area}${city}`;
+    }
+    if (activeDelivery) {
+      const area = activeDelivery.areaName || activeDelivery.store?.storeName || 'Area Pengiriman';
+      const city = activeDelivery.store?.city ? ` (${activeDelivery.store.city})` : '';
+      return `${area}${city}`;
+    }
+    return 'Sesuai Surat Jalan Keluar Aktif';
+  }, [activeWaybill, activeDelivery]);
+
+  const currentWaybillNo = activeWaybill?.waybillNumber || activeDelivery?.trackingNumber || 'SJ-OUT/AKK/AKTIF';
+
   useEffect(() => {
     if (isOpen) {
       // 1. Ambil nomor kendaraan otomatis sesuai data checklist terbaru
       try {
         const checklists = driverChecklistService.getChecklists();
-        const activeChecklist = driverId 
-          ? checklists.find(c => c.driverId === driverId) 
+        const activeChecklist = driverId
+          ? checklists.find(c => c.driverId === driverId)
           : checklists[0];
         if (activeChecklist?.plateNumber) {
           setAutoPlateNumber(activeChecklist.plateNumber);
@@ -99,12 +137,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
         setAutoPlateNumber(plateNumber);
       }
 
-      // 2. Auto-select area kirim pertama jika tersedia
-      if (deliveries.length > 0 && !selectedDeliveryId) {
-        setSelectedDeliveryId(deliveries[0].id);
-      }
-
-      // 3. Rekam koordinat GPS di background
+      // 2. Rekam koordinat GPS di background
       if (typeof navigator !== 'undefined' && navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
           (pos) => {
@@ -121,13 +154,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     } else {
       stopLiveCamera();
     }
-  }, [isOpen, deliveries, driverId, plateNumber]);
-
-  // Selected delivery object
-  const selectedDelivery = deliveries.find(d => d.id === selectedDeliveryId) || null;
-  const currentAreaName = selectedDelivery 
-    ? `${selectedDelivery.areaName || selectedDelivery.store?.storeName || 'Area Pengiriman'}${selectedDelivery.store?.city ? ` (${selectedDelivery.store.city})` : ''}`
-    : 'Laporan Umum (Rute Perjalanan)';
+  }, [isOpen, driverId, plateNumber]);
 
   // Automatically attach stream to video element when camera is active
   useEffect(() => {
@@ -140,22 +167,22 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     }
   }, [isCameraActive]);
 
-  // Start live webcam / mobile camera stream with auto-fallbacks
-  const startLiveCamera = async () => {
+  // Start live webcam / mobile camera stream in FULL SCREEN mode
+  const startLiveCamera = async (mode: 'environment' | 'user' = facingMode) => {
+    stopLiveCamera();
     setCameraError(null);
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error('NOT_SUPPORTED');
       }
-      
+
       let stream: MediaStream | null = null;
       let lastErr: unknown = null;
 
-      // Tier 1: Try mobile back camera with ideal HD
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           video: {
-            facingMode: { ideal: 'environment' },
+            facingMode: { ideal: mode },
             width: { ideal: 1280 },
             height: { ideal: 720 }
           },
@@ -163,23 +190,19 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
         });
       } catch (e1) {
         lastErr = e1;
-        console.warn('[DriverGmaps] Tier 1 camera constraint failed:', e1);
       }
 
-      // Tier 2: Try simple facingMode environment
       if (!stream) {
         try {
           stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'environment' },
+            video: { facingMode: mode },
             audio: false
           });
         } catch (e2) {
           lastErr = e2;
-          console.warn('[DriverGmaps] Tier 2 facingMode failed:', e2);
         }
       }
 
-      // Tier 3: Fallback for laptop / desktop webcams or any video source
       if (!stream) {
         try {
           stream = await navigator.mediaDevices.getUserMedia({
@@ -188,7 +211,6 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
           });
         } catch (e3) {
           lastErr = e3;
-          console.warn('[DriverGmaps] Tier 3 basic video failed:', e3);
         }
       }
 
@@ -200,19 +222,17 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       setIsCameraActive(true);
       setCameraError(null);
     } catch (err: unknown) {
-      console.warn('[DriverGmaps] Live camera access error:', err);
       const errName = err instanceof Error ? err.name : '';
       const msg = err instanceof Error ? err.message : String(err);
 
-      // Log camera error to Firebase / logisticsStore activity log in real-time
       try {
         logisticsStore.logActivity(
           'Akses Kamera Ditolak',
           driverName || 'Driver Operasional',
           `Kendala Gmaps/Rute Kamera (${errName || 'Error'}): ${msg} [Plat: ${autoPlateNumber}]`
         );
-      } catch (logErr) {
-        console.warn('Failed to log camera error to store:', logErr);
+      } catch {
+        // ignore
       }
 
       if (
@@ -234,17 +254,18 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     }
   };
 
-  // Trigger native camera synchronously on user gesture
+  const handleFlipCamera = () => {
+    const nextMode = facingMode === 'environment' ? 'user' : 'environment';
+    setFacingMode(nextMode);
+    startLiveCamera(nextMode);
+  };
+
   const openDeviceCameraNative = () => {
     if (cameraInputRef.current) {
       cameraInputRef.current.click();
     } else if (fileInputRef.current) {
       fileInputRef.current.click();
     }
-  };
-
-  const openDeviceCamera = () => {
-    startLiveCamera();
   };
 
   const stopLiveCamera = () => {
@@ -281,10 +302,10 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     // Line 1: Header
     ctx.fillStyle = '#38bdf8';
     ctx.font = `bold ${fontSize}px system-ui, sans-serif`;
-    const titleTag = category === 'kendala_jalan' 
-      ? '⚠️ KENDALA DI JALAN' 
-      : category === 'akhir_kiriman' 
-      ? '📦 AKHIR KIRIMAN (POD)' 
+    const titleTag = category === 'kendala_jalan'
+      ? '⚠️ KENDALA DI JALAN'
+      : category === 'akhir_kiriman'
+      ? '📦 AKHIR KIRIMAN (POD)'
       : '☕ LAPORAN ISTIRAHAT KRU';
     ctx.fillText(`${titleTag} • PT ANUGRAH KEMASAN KREATIF`, 16, bannerY + 10);
 
@@ -356,73 +377,21 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     reader.readAsDataURL(file);
   };
 
-  // Generate a verified sample proof photo if device camera hardware is unavailable
-  const useSampleProofPhoto = () => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 1000;
-    canvas.height = 700;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const bgGrad = ctx.createLinearGradient(0, 0, 1000, 700);
-    bgGrad.addColorStop(0, '#0f172a');
-    bgGrad.addColorStop(1, '#020617');
-    ctx.fillStyle = bgGrad;
-    ctx.fillRect(0, 0, 1000, 700);
-
-    ctx.strokeStyle = 'rgba(56, 189, 248, 0.15)';
-    ctx.lineWidth = 1;
-    for (let i = 40; i < 1000; i += 60) {
-      ctx.beginPath();
-      ctx.moveTo(i, 0);
-      ctx.lineTo(i, 700);
-      ctx.stroke();
-    }
-    for (let j = 40; j < 700; j += 60) {
-      ctx.beginPath();
-      ctx.moveTo(0, j);
-      ctx.lineTo(1000, j);
-      ctx.stroke();
-    }
-
-    ctx.strokeStyle = '#f59e0b';
-    ctx.lineWidth = 3;
-    ctx.strokeRect(40, 40, 920, 500);
-
-    ctx.fillStyle = '#ffffff';
-    ctx.font = 'bold 28px system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText('DOKUMENTASI PENGIRIMAN & BUKTI FISIK', 500, 180);
-
-    ctx.font = 'bold 20px system-ui, sans-serif';
-    ctx.fillStyle = '#38bdf8';
-    ctx.fillText('PT ANUGRAH KEMASAN KREATIF • LOGISTIK BANYUWANGI', 500, 230);
-
-    ctx.font = '16px monospace';
-    ctx.fillStyle = '#fde047';
-    ctx.fillText(`ARMADA: ${autoPlateNumber} ${fleetInitial ? `[INISIAL: ${fleetInitial}]` : ''}`, 500, 290);
-    ctx.fillText(`DRIVER: ${driverName} | AREA: ${currentAreaName}`, 500, 330);
-    ctx.fillText(`STATUS: ${category === 'kendala_jalan' ? 'KENDALA JALAN' : category === 'akhir_kiriman' ? 'AKHIR KIRIMAN (SELESAI)' : 'UPDATE LOKASI GMAPS'}`, 500, 370);
-
-    ctx.textAlign = 'left';
-    applyWatermarkToCanvas(canvas);
-  };
-
   const gmapsLink = `https://www.google.com/maps?q=${driverLat},${driverLng}`;
 
-  // WhatsApp formatted share text
   const getWhatsAppShareText = () => {
-    const categoryLabel = category === 'kendala_jalan' 
-      ? '🚨 LAPORAN KENDALA DI JALAN' 
-      : category === 'akhir_kiriman' 
-      ? '📦 LAPORAN AKHIR KIRIMAN (SELESAI BONGKAR)' 
+    const categoryLabel = category === 'kendala_jalan'
+      ? '🚨 LAPORAN KENDALA DI JALAN'
+      : category === 'akhir_kiriman'
+      ? '📦 LAPORAN AKHIR KIRIMAN (SELESAI BONGKAR)'
       : '📍 UPDATE TITIK LOKASI GMAPS';
 
     return encodeURIComponent(
       `*${categoryLabel}*\n` +
       `*Driver:* ${driverName}\n` +
       `*Armada:* ${autoPlateNumber}${fleetInitial ? ` [Inisial: ${fleetInitial}]` : ''}\n` +
-      `*Area Kirim:* ${currentAreaName}\n` +
+      `*Area Kirim (Surat Jalan):* ${currentAreaName}\n` +
+      `*No. Surat Jalan:* ${currentWaybillNo}\n` +
       `*Keterangan:* ${notes || 'Dokumentasi terlampir'}\n` +
       `*Titik Google Maps:* ${gmapsLink}\n` +
       `*Waktu:* ${new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB`
@@ -435,14 +404,13 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   };
 
   const handleSubmit = () => {
-    // 1. Simpan ke service laporan driver/helper agar terlist di submenu baru admin
     driverReportService.addReport({
       driverId: driverId || 'crew-driver',
       driverName: driverName,
       plateNumber: autoPlateNumber,
       category,
       areaName: currentAreaName,
-      deliveryId: selectedDelivery?.id,
+      deliveryId: activeDelivery?.id,
       notes: notes || (category === 'akhir_kiriman' ? 'Selesai serah terima di area tujuan' : 'Dokumentasi pengiriman'),
       photoUrl: photoDataUrl,
       latitude: driverLat,
@@ -450,10 +418,9 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
       gmapsUrl: gmapsLink
     });
 
-    // 2. Jalankan callback update status
     onReportSubmitted({
       category,
-      delivery: selectedDelivery,
+      delivery: activeDelivery,
       notes,
       photoUrl: photoDataUrl,
       distanceMeters: null,
@@ -471,284 +438,373 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
-      <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-2xl flex flex-col max-h-[92vh] shadow-2xl overflow-hidden">
-        
-        {/* Header */}
-        <div className="p-4 bg-gradient-to-r from-slate-900 via-slate-850 to-slate-900 border-b border-slate-800 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-amber-500 to-amber-400 text-slate-950 flex items-center justify-center shadow-md font-black">
-              <Share2 className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="text-sm font-black text-white">
-                Lapor Kendala, Istirahat &amp; Akhir Kirim
-              </h3>
-              <p className="text-[10px] text-slate-400">
-                Dokumentasi kendala rute, waktu istirahat kru, dan konfirmasi serah terima
-              </p>
-            </div>
-          </div>
-
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Scrollable Body */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
-          
-          {/* Category Selector Tabs */}
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              Pilih Jenis Laporan:
-            </label>
-            <div className="grid grid-cols-3 gap-1.5">
-              <button
-                type="button"
-                onClick={() => setCategory('kendala_jalan')}
-                className={`py-2 px-1.5 rounded-xl border text-[11px] font-bold flex flex-col items-center gap-1 transition cursor-pointer ${
-                  category === 'kendala_jalan'
-                    ? 'bg-rose-500/20 border-rose-500 text-rose-300 shadow-sm'
-                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <AlertTriangle className="w-4 h-4 text-rose-400" />
-                <span>Kendala Jalan</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setCategory('akhir_kiriman')}
-                className={`py-2 px-1.5 rounded-xl border text-[11px] font-bold flex flex-col items-center gap-1 transition cursor-pointer ${
-                  category === 'akhir_kiriman'
-                    ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 shadow-sm'
-                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                <span>Akhir Kiriman</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setCategory('istirahat')}
-                className={`py-2 px-1.5 rounded-xl border text-[11px] font-bold flex flex-col items-center gap-1 transition cursor-pointer ${
-                  category === 'istirahat' || category === 'update_lokasi'
-                    ? 'bg-amber-500/20 border-amber-500 text-amber-300 shadow-sm'
-                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Coffee className="w-4 h-4 text-amber-400" />
-                <span>Istirahat</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Nomor Kendaraan Armada (Otomatis Terisi Sesuai Data Checklist) */}
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
-              <span>Nomor Kendaraan Armada:</span>
-              <span className="text-[10px] text-emerald-400 font-normal">✓ Otomatis terisi data checklist</span>
-            </label>
-            <div className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs flex items-center justify-between flex-wrap gap-2">
-              <div className="flex items-center gap-2">
-                <Truck className="w-4 h-4 text-amber-400" />
-                <span className="font-mono font-bold text-amber-300 text-sm">{autoPlateNumber}</span>
-                {fleetInitial && (
-                  <span className="px-2 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[11px] font-black">
-                    Inisial: {fleetInitial}
-                  </span>
-                )}
+    <>
+      {/* FULL SCREEN LIVE CAMERA OVERLAY WHEN TAKING PHOTO */}
+      {isCameraActive && (
+        <div className="fixed inset-0 z-[80] w-screen h-screen bg-black flex flex-col justify-between p-0 animate-in fade-in duration-150">
+          {/* Top Camera Bar */}
+          <div className="p-4 bg-gradient-to-b from-black/90 to-transparent flex items-center justify-between z-20">
+            <div className="flex items-center gap-2.5">
+              <span className="w-3 h-3 rounded-full bg-rose-500 animate-ping" />
+              <div>
+                <div className="text-xs font-black text-white">
+                  KAMERA FULL SCREEN • {category === 'kendala_jalan' ? 'KENDALA JALAN' : category === 'akhir_kiriman' ? 'AKHIR KIRIMAN' : 'ISTIRAHAT'}
+                </div>
+                <div className="text-[10px] text-amber-300 font-mono">
+                  Area: {currentAreaName} ({autoPlateNumber})
+                </div>
               </div>
-              <span className="text-[10px] text-slate-400 font-medium">Terverifikasi Checklist</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleFlipCamera}
+                className="p-2.5 rounded-full bg-slate-800/90 text-white hover:bg-slate-700 cursor-pointer"
+                title="Balik Kamera"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={stopLiveCamera}
+                className="p-2.5 rounded-full bg-rose-600/90 text-white hover:bg-rose-500 cursor-pointer"
+                title="Tutup Kamera"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
           </div>
 
-          {/* NAMA AREA KIRIM (Menggantikan Toko Tujuan Terkait, Tanpa Nomor PO) */}
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
-              <span>Nama Area Kirim:</span>
-              <span className="text-[10px] text-slate-500 lowercase">({deliveries.length} area terdaftar)</span>
-            </label>
-            <select
-              value={selectedDeliveryId}
-              onChange={(e) => setSelectedDeliveryId(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200 font-semibold focus:outline-none focus:border-amber-500 cursor-pointer"
+          {/* Full Screen Video Viewfinder */}
+          <div className="flex-1 relative w-full h-full flex items-center justify-center overflow-hidden bg-black">
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="w-full h-full object-cover"
+            />
+            <div className="absolute inset-6 pointer-events-none border border-white/25 rounded-2xl flex flex-col justify-between p-3">
+              <div className="flex justify-between">
+                <div className="w-6 h-6 border-t-2 border-l-2 border-amber-400" />
+                <div className="w-6 h-6 border-t-2 border-r-2 border-amber-400" />
+              </div>
+              <div className="flex justify-between">
+                <div className="w-6 h-6 border-b-2 border-l-2 border-amber-400" />
+                <div className="w-6 h-6 border-b-2 border-r-2 border-amber-400" />
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom Full Screen Shutter Bar */}
+          <div className="p-6 bg-gradient-to-t from-black via-black/90 to-transparent flex items-center justify-between px-8 z-20">
+            <button
+              type="button"
+              onClick={openDeviceCameraNative}
+              className="px-3.5 py-2 rounded-xl bg-slate-800 text-white text-xs font-bold border border-slate-700 cursor-pointer"
             >
-              <option value="">-- Laporan Umum (Tidak Terikat Area Tertentu) --</option>
-              {deliveries.map((del) => {
-                const areaTitle = del.areaName || del.store?.storeName || 'Area Pengiriman';
-                const cityTitle = del.store?.city ? ` (${del.store.city})` : '';
-                return (
-                  <option key={del.id} value={del.id}>
-                    {areaTitle}{cityTitle}
-                  </option>
-                );
-              })}
-            </select>
-          </div>
+              Kamera HP
+            </button>
 
-          {/* Photo Capture & Upload Section */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                Unggah Foto Bukti (Kamera / Galeri):
-              </label>
-              {photoDataUrl && (
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={startLiveCamera}
-                    className="text-[10px] text-amber-400 font-bold hover:underline cursor-pointer flex items-center gap-1"
-                  >
-                    <Camera className="w-3 h-3" />
-                    <span>Buka Kamera</span>
-                  </button>
-                  <span className="text-slate-600">&bull;</span>
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="text-[10px] text-blue-400 font-bold hover:underline cursor-pointer"
-                  >
-                    Pilih Galeri
-                  </button>
-                </div>
-              )}
+            <button
+              type="button"
+              onClick={captureLivePhoto}
+              className="w-20 h-20 rounded-full border-4 border-white p-1.5 flex items-center justify-center shadow-2xl active:scale-90 transition cursor-pointer"
+            >
+              <div className="w-full h-full rounded-full bg-amber-500 hover:bg-amber-400 flex items-center justify-center text-slate-950">
+                <Camera className="w-8 h-8" />
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={stopLiveCamera}
+              className="px-3.5 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-bold border border-slate-700 cursor-pointer"
+            >
+              Batal
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* FULL SCREEN PHOTO PREVIEW MODAL */}
+      {isFullPhotoPreviewOpen && photoDataUrl && (
+        <div
+          className="fixed inset-0 z-[85] w-screen h-screen bg-black/95 flex flex-col justify-between p-4 animate-in fade-in duration-150"
+          onClick={() => setIsFullPhotoPreviewOpen(false)}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-white bg-slate-900/90 px-3 py-1.5 rounded-xl border border-slate-700">
+              Pratinjau Foto Bukti Full Screen (Utuh Tanpa Terpotong)
+            </span>
+            <button
+              type="button"
+              onClick={() => setIsFullPhotoPreviewOpen(false)}
+              className="p-2.5 rounded-full bg-rose-600 text-white font-bold cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="flex-1 flex items-center justify-center overflow-hidden my-2">
+            <img
+              src={photoDataUrl}
+              alt="Full Screen Bukti"
+              className="w-full h-full object-contain"
+            />
+          </div>
+          <div className="text-center text-xs text-slate-300 pb-2">
+            Ketuk di mana saja untuk menutup tampilan penuh
+          </div>
+        </div>
+      )}
+
+      <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
+        <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-2xl flex flex-col max-h-[92vh] shadow-2xl overflow-hidden">
+          
+          {/* Header - High Contrast */}
+          <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center shadow-md font-black shrink-0">
+                <Share2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-white">
+                  Lapor Kendala, Istirahat &amp; Akhir Kirim
+                </h3>
+                <p className="text-[11px] text-slate-300 font-medium">
+                  Dokumentasi kendala rute, waktu istirahat kru, dan konfirmasi serah terima
+                </p>
+              </div>
             </div>
 
-            {/* Native Device Camera Trigger */}
-            <input
-              type="file"
-              ref={cameraInputRef}
-              accept="image/*"
-              capture="environment"
-              onChange={handlePhotoUpload}
-              className="hidden"
-            />
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
 
-            {/* Gallery / File Picker */}
-            <input
-              type="file"
-              ref={fileInputRef}
-              accept="image/*"
-              onChange={handlePhotoUpload}
-              className="hidden"
-            />
-
-            {/* LIVE CAMERA VIEWFINDER (Direct WebRTC Stream) */}
-            {isCameraActive && (
-              <div className="relative rounded-2xl overflow-hidden border-2 border-amber-500 shadow-2xl bg-black animate-in fade-in">
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  className="w-full max-h-72 object-cover bg-black"
-                />
-                <div className="absolute top-2 left-2 bg-black/75 backdrop-blur-md px-2.5 py-1 rounded-lg text-[10px] text-amber-300 font-mono font-bold flex items-center gap-1.5 border border-amber-500/40">
-                  <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
-                  <span>Kamera Aktif &bull; {currentAreaName}</span>
-                </div>
+          {/* Scrollable Body */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
+            
+            {/* Category Selector Tabs */}
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                Pilih Jenis Laporan:
+              </label>
+              <div className="grid grid-cols-3 gap-1.5">
                 <button
                   type="button"
-                  onClick={stopLiveCamera}
-                  className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/70 text-slate-300 hover:text-white cursor-pointer"
-                  title="Tutup Kamera"
+                  onClick={() => setCategory('kendala_jalan')}
+                  className={`py-2 px-1.5 rounded-xl border text-[11px] font-bold flex flex-col items-center gap-1 transition cursor-pointer ${
+                    category === 'kendala_jalan'
+                      ? 'bg-rose-500/20 border-rose-500 text-rose-400 shadow-sm'
+                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
                 >
-                  <X className="w-4 h-4" />
+                  <AlertTriangle className="w-4 h-4 text-rose-400" />
+                  <span>Kendala Jalan</span>
                 </button>
-                <div className="absolute bottom-3 inset-x-0 flex items-center justify-center gap-3">
-                  <button
-                    type="button"
-                    onClick={captureLivePhoto}
-                    className="px-5 py-2.5 rounded-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center gap-2 shadow-xl shadow-amber-500/40 active:scale-95 transition cursor-pointer"
-                  >
-                    <Camera className="w-4 h-4" />
-                    <span>Jepret Foto Sekarang</span>
-                  </button>
-                </div>
-              </div>
-            )}
 
-            {/* ERROR ALERT & RECOVERY IF CAMERA PERMISSION DENIED */}
-            {cameraError && !isCameraActive && (
-              <div className="p-3 rounded-2xl bg-amber-500/15 border border-amber-500/40 text-amber-200 space-y-2">
-                <div className="flex items-start gap-2">
-                  <CameraOff className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                  <div className="text-[11px] leading-relaxed flex-1">
-                    <span className="font-bold text-white block">Akses Kamera Perangkat Terkendala</span>
-                    {cameraError}
-                    <div className="mt-3 bg-slate-900 rounded-lg p-3 text-[10px] border border-slate-700">
-                      <p className="font-bold text-amber-300 mb-2">Panduan Perbaikan (Android):</p>
-                      <ol className="list-decimal list-inside space-y-1 text-slate-300">
-                        <li>Buka <span className="font-bold">Pengaturan (Settings)</span> HP.</li>
-                        <li>Pilih <span className="font-bold">Aplikasi (Apps)</span> &gt; Browser Anda (Chrome).</li>
-                        <li>Pilih <span className="font-bold">Izin (Permissions)</span> &gt; <span className="font-bold">Kamera</span>.</li>
-                        <li>Pilih <span className="font-bold">Izinkan hanya saat aplikasi digunakan</span>.</li>
-                        <li>Muat ulang halaman ini.</li>
-                      </ol>
+                <button
+                  type="button"
+                  onClick={() => setCategory('akhir_kiriman')}
+                  className={`py-2 px-1.5 rounded-xl border text-[11px] font-bold flex flex-col items-center gap-1 transition cursor-pointer ${
+                    category === 'akhir_kiriman'
+                      ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400 shadow-sm'
+                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <span>Akhir Kiriman</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setCategory('istirahat')}
+                  className={`py-2 px-1.5 rounded-xl border text-[11px] font-bold flex flex-col items-center gap-1 transition cursor-pointer ${
+                    category === 'istirahat' || category === 'update_lokasi'
+                      ? 'bg-amber-500/20 border-amber-500 text-amber-400 shadow-sm'
+                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Coffee className="w-4 h-4 text-amber-400" />
+                  <span>Istirahat</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Nomor Kendaraan Armada (Otomatis Terisi Sesuai Data Checklist) */}
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
+                <span>Nomor Kendaraan Armada:</span>
+                <span className="text-[10px] text-emerald-400 font-bold">✓ Otomatis terisi data checklist</span>
+              </label>
+              <div className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <Truck className="w-4 h-4 text-amber-400" />
+                  <span className="font-mono font-bold text-amber-400 text-sm">{autoPlateNumber}</span>
+                  {fleetInitial && (
+                    <span className="px-2 py-0.5 rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/40 text-[11px] font-black">
+                      Inisial: {fleetInitial}
+                    </span>
+                  )}
+                </div>
+                <span className="text-[10px] text-slate-400 font-medium">Terverifikasi Checklist</span>
+              </div>
+            </div>
+
+            {/* NAMA AREA KIRIM (OTOMATIS SESUAI SURAT JALAN KELUAR - TANPA SCROLLDOWN) */}
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
+                <span>Nama Area Kirim:</span>
+                <span className="text-[10px] text-emerald-400 font-bold">✓ Otomatis sesuai Surat Jalan Keluar</span>
+              </label>
+              <div className="w-full bg-slate-950 border border-emerald-500/40 rounded-xl px-3 py-2.5 text-xs flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <MapPin className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <div className="min-w-0">
+                    <div className="font-bold text-white text-xs truncate">
+                      {currentAreaName}
+                    </div>
+                    <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1 mt-0.5">
+                      <FileText className="w-3 h-3 text-amber-400 shrink-0" />
+                      <span>No. SJ: {currentWaybillNo}</span>
                     </div>
                   </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-amber-500/20">
-                  <button
-                    type="button"
-                    onClick={startLiveCamera}
-                    className="px-3 py-1.5 rounded-lg bg-amber-500 text-slate-950 font-bold text-[11px] flex items-center gap-1.5 cursor-pointer hover:bg-amber-400 active:scale-95 transition"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    <span>Izinkan &amp; Buka Kamera Ulang</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={openDeviceCameraNative}
-                    className="px-2.5 py-1.5 rounded-lg bg-slate-800 text-cyan-300 font-bold text-[11px] border border-slate-700 hover:bg-slate-700 cursor-pointer transition flex items-center gap-1"
-                  >
-                    <Camera className="w-3.5 h-3.5" />
-                    <span>Kamera Bawaan HP</span>
-                  </button>
-                </div>
+                <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold shrink-0">
+                  Terkunci Otomatis
+                </span>
               </div>
-            )}
+            </div>
 
-            {!isCameraActive && (
-              photoDataUrl ? (
-                <div className="relative rounded-2xl overflow-hidden border border-slate-700 shadow-lg group">
-                  <img
-                    src={photoDataUrl}
-                    alt="Foto Bukti Gmaps"
-                    className="w-full max-h-56 object-cover"
-                  />
-                  <div className="absolute top-2 right-2 bg-black/70 backdrop-blur-md px-2 py-1 rounded-lg text-[10px] text-emerald-400 font-bold flex items-center gap-1 border border-emerald-500/30">
-                    <CheckCircle2 className="w-3 h-3" />
-                    <span>Foto Berstempel Siap Kirim</span>
-                  </div>
-                  <div className="absolute bottom-2 right-2 flex items-center gap-1.5">
+            {/* Photo Capture & Upload Section */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  Unggah Foto Bukti (Kamera Full Screen / Galeri):
+                </label>
+                {photoDataUrl && (
+                  <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={startLiveCamera}
-                      className="px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-slate-900 text-amber-300 font-bold text-[10px] border border-amber-500/30 cursor-pointer flex items-center gap-1"
+                      onClick={() => startLiveCamera()}
+                      className="text-[10px] text-amber-400 font-bold hover:underline cursor-pointer flex items-center gap-1"
                     >
                       <Camera className="w-3 h-3" />
-                      <span>Kamera Langsung</span>
+                      <span>Foto Ulang Full Screen</span>
+                    </button>
+                    <span className="text-slate-600">&bull;</span>
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="text-[10px] text-blue-400 font-bold hover:underline cursor-pointer"
+                    >
+                      Pilih Galeri
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Native Device Camera Trigger */}
+              <input
+                type="file"
+                ref={cameraInputRef}
+                accept="image/*"
+                capture="environment"
+                onChange={handlePhotoUpload}
+                className="hidden"
+              />
+
+              {/* Gallery / File Picker */}
+              <input
+                type="file"
+                ref={fileInputRef}
+                accept="image/*"
+                onChange={handlePhotoUpload}
+                className="hidden"
+              />
+
+              {/* ERROR ALERT & RECOVERY IF CAMERA PERMISSION DENIED */}
+              {cameraError && !isCameraActive && (
+                <div className="p-3 rounded-2xl bg-amber-500/15 border border-amber-500/40 text-amber-200 space-y-2">
+                  <div className="flex items-start gap-2">
+                    <CameraOff className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <div className="text-[11px] leading-relaxed flex-1">
+                      <span className="font-bold text-white block">Akses Kamera Perangkat Terkendala</span>
+                      {cameraError}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-amber-500/20">
+                    <button
+                      type="button"
+                      onClick={() => startLiveCamera()}
+                      className="px-3 py-1.5 rounded-lg bg-amber-500 text-slate-950 font-bold text-[11px] flex items-center gap-1.5 cursor-pointer hover:bg-amber-400 active:scale-95 transition"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>Izinkan &amp; Buka Kamera Ulang</span>
                     </button>
                     <button
                       type="button"
                       onClick={openDeviceCameraNative}
-                      className="px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-slate-900 text-cyan-300 font-bold text-[10px] border border-cyan-500/30 cursor-pointer flex items-center gap-1"
+                      className="px-2.5 py-1.5 rounded-lg bg-slate-800 text-cyan-300 font-bold text-[11px] border border-slate-700 hover:bg-slate-700 cursor-pointer transition flex items-center gap-1"
                     >
-                      <span>Kamera HP</span>
+                      <Camera className="w-3.5 h-3.5" />
+                      <span>Kamera Bawaan HP</span>
                     </button>
+                  </div>
+                </div>
+              )}
+
+              {photoDataUrl ? (
+                <div className="relative rounded-2xl overflow-hidden border border-slate-700 bg-black shadow-lg group">
+                  <img
+                    src={photoDataUrl}
+                    alt="Foto Bukti Full"
+                    onClick={() => setIsFullPhotoPreviewOpen(true)}
+                    className="w-full max-h-64 object-contain bg-black cursor-pointer"
+                  />
+                  <div className="absolute top-2 left-2 bg-black/75 backdrop-blur-md px-2.5 py-1 rounded-lg text-[10px] text-emerald-400 font-bold flex items-center gap-1 border border-emerald-500/30">
+                    <CheckCircle2 className="w-3 h-3" />
+                    <span>Foto Berstempel Siap Kirim</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsFullPhotoPreviewOpen(true)}
+                    className="absolute top-2 right-2 bg-black/80 hover:bg-black text-white px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 border border-white/20 cursor-pointer"
+                  >
+                    <Maximize2 className="w-3 h-3 text-amber-400" />
+                    <span>Layar Penuh</span>
+                  </button>
+                  <div className="p-2 bg-slate-950 border-t border-slate-800 flex items-center justify-between gap-2">
+                    <span className="text-[10px] text-slate-400">Ketuk gambar untuk layar penuh</span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => startLiveCamera()}
+                        className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-amber-400 font-bold text-[10px] border border-amber-500/30 cursor-pointer flex items-center gap-1"
+                      >
+                        <Camera className="w-3 h-3" />
+                        <span>Kamera Full Screen</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={openDeviceCameraNative}
+                        className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-cyan-400 font-bold text-[10px] border border-cyan-500/30 cursor-pointer flex items-center gap-1"
+                      >
+                        <span>Kamera HP</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               ) : (
                 <div className="space-y-2">
                   <button
                     type="button"
-                    onClick={startLiveCamera}
+                    onClick={() => startLiveCamera()}
+                    disabled={isCapturing}
                     className="w-full p-4 rounded-2xl border-2 border-dashed border-amber-500/70 hover:border-amber-400 bg-amber-500/10 hover:bg-amber-500/15 flex items-center justify-center gap-3 cursor-pointer transition text-center group active:scale-95 shadow-lg shadow-amber-500/10"
                   >
                     <div className="w-12 h-12 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 group-hover:scale-110 transition shrink-0">
@@ -756,10 +812,10 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                     </div>
                     <div className="text-left">
                       <div className="font-black text-white text-sm">
-                        Buka Kamera HP Langsung
+                        Buka Kamera Full Screen
                       </div>
-                      <div className="text-[11px] text-amber-300 font-medium mt-0.5">
-                        Izinkan kamera &amp; ambil foto berstempel resmi operasional
+                      <div className="text-[11px] text-amber-400 font-medium mt-0.5">
+                        Layar penuh otomatis &amp; foto berstempel resmi operasional
                       </div>
                     </div>
                   </button>
@@ -768,63 +824,61 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                     <button
                       type="button"
                       onClick={openDeviceCameraNative}
-                      className="py-2.5 px-3 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-700 text-slate-300 font-bold text-[11px] flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-95"
+                      className="py-2.5 px-3 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold text-[11px] flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-95"
                     >
                       <Camera className="w-3.5 h-3.5 text-cyan-400" />
                       <span>Alternatif: Buka Kamera Bawaan HP</span>
                     </button>
                   </div>
                 </div>
-              )
-            )}
+              )}
+            </div>
+
+            {/* Notes Input */}
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                Keterangan / Catatan Laporan:
+              </label>
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder={
+                  category === 'kendala_jalan'
+                    ? 'Contoh: Macet perbaikan jalan di jalur Rogojampi, perkiraan keterlambatan 25 menit...'
+                    : category === 'akhir_kiriman'
+                    ? 'Contoh: Muatan diterima lengkap di gudang toko dalam keadaan baik...'
+                    : 'Contoh: Istirahat makan siang & ibadah di SPBU / Rest Area selama 30 menit...'
+                }
+                rows={3}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-slate-200 focus:outline-none focus:border-amber-500 placeholder-slate-500"
+              />
+            </div>
           </div>
 
-          {/* Notes Input */}
-          <div className="space-y-1">
-            <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              Keterangan / Catatan Laporan:
-            </label>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder={
-                category === 'kendala_jalan'
-                  ? 'Contoh: Macet perbaikan jalan di jalur Rogojampi, perkiraan keterlambatan 25 menit...'
-                  : category === 'akhir_kiriman'
-                  ? 'Contoh: Muatan 15 box diterima lengkap di gudang toko dalam keadaan baik...'
-                  : category === 'istirahat'
-                  ? 'Contoh: Istirahat makan siang & ibadah di SPBU / Rest Area selama 30 menit...'
-                  : 'Catatan kondisi rute atau posisi armada...'
-              }
-              rows={3}
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-slate-200 focus:outline-none focus:border-amber-500 placeholder-slate-500"
-            />
+          {/* Footer Buttons */}
+          <div className="p-4 bg-slate-950 border-t border-slate-800 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleShareWhatsApp}
+              className="flex-1 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
+              title="Bagikan format laporan & link koordinat ke grup WhatsApp"
+            >
+              <Share2 className="w-4 h-4" />
+              <span>Bagikan WA</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleSubmit}
+              className="flex-1 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-black text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md shadow-amber-500/20 cursor-pointer"
+            >
+              <Send className="w-4 h-4" />
+              <span>Simpan Laporan</span>
+            </button>
           </div>
+
         </div>
-
-        {/* Footer Buttons */}
-        <div className="p-4 bg-slate-950 border-t border-slate-800 flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleShareWhatsApp}
-            className="flex-1 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
-            title="Bagikan format laporan & link koordinat ke grup WhatsApp"
-          >
-            <Share2 className="w-4 h-4" />
-            <span>Bagikan WA</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handleSubmit}
-            className="flex-1 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-black text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md shadow-amber-500/20 cursor-pointer"
-          >
-            <Send className="w-4 h-4" />
-            <span>Simpan Laporan</span>
-          </button>
-        </div>
-
       </div>
-    </div>
+    </>
   );
 };

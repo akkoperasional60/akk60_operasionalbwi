@@ -465,6 +465,8 @@ export class E2ETestRunner {
         description: 'SPV Logistik berhasil menerbitkan solusi resmi untuk laporan kendala',
         passed: Boolean(updated && updated.status === 'resolved' && updated.solution?.includes('Singojuruh'))
       });
+
+      driverReportService.deleteReport(newReport.id);
     }
 
     const isAllPassed = assertions.every(a => a.passed);
