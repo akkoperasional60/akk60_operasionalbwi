@@ -607,10 +607,9 @@ class LogisticsStore {
     }
     this.supabaseConfig = savedSupabaseConf;
 
-    // Auto-migrate crew pool to ensure all 19 drivers & helpers are loaded and legacy mock crews replaced
-    if (!this.crews || this.crews.length < 19 || this.crews.some(c => c.name === 'Agus Setiawan' || c.name === 'Slamet Riyadi' || c.name === 'Wahyu Nugroho')) {
-      this.crews = [...INITIAL_CREWS];
-      this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
+    // Synchronize crew pool directly with User Management (driver & crew_helper)
+    if (!this.crews || !Array.isArray(this.crews)) {
+      this.crews = [];
     }
 
     // Self-heal and migrate stores if missing or if all stores are stacked on identical dummy coordinates (-8.36, 114.15)
@@ -664,54 +663,8 @@ class LogisticsStore {
       }
     }
 
-    // Deduplicate crews & purge non-crew accounts (like Super Admin) and sync with User Management (driver & crew_helper, active or inactive)
-    if (Array.isArray(this.crews)) {
-      const nonCrewNames = new Set(
-        this.users
-          .filter(u => u.role !== 'driver' && u.role !== 'crew_helper')
-          .map(u => (u.fullName || '').trim().toLowerCase())
-      );
-      nonCrewNames.add('super admin');
-      nonCrewNames.add('tamu / belum login');
-
-      const uniqueCrewsMap = new Map<string, Crew>();
-      for (const c of this.crews) {
-        if (!c || !c.id || !c.name) continue;
-        const lowerC = c.name.trim().toLowerCase();
-        if (nonCrewNames.has(lowerC) || c.id === 'crw-usr-001') continue;
-        uniqueCrewsMap.set(c.id, c);
-      }
-
-      // Ensure all users with role 'driver' or 'crew_helper' (active or inactive) exist in crews
-      this.users.forEach(u => {
-        if (u.role === 'driver' || u.role === 'crew_helper') {
-          const cleanName = (u.fullName || '').trim();
-          if (!cleanName) return;
-          const existingCrew = Array.from(uniqueCrewsMap.values()).find(
-            c => c.name.trim().toLowerCase() === cleanName.toLowerCase() || c.id === `crw-${u.id}`
-          );
-          if (!existingCrew) {
-            const newCrewFromUser: Crew = {
-              id: `crw-${u.id}`,
-              name: cleanName,
-              phone: u.phone || '0812-3456-7890',
-              role: u.role === 'crew_helper' ? 'Kernet / Helper' : 'Driver Utama',
-              licenseNumber: 'SIM-' + Math.floor(Math.random() * 900000 + 100000),
-              licenseType: u.role === 'crew_helper' ? 'SIM A' : 'SIM B1 Umum',
-              status: u.status === 'inactive' ? 'off-duty' : 'available',
-              tripsCompleted: 15,
-              rating: 4.9
-            };
-            uniqueCrewsMap.set(newCrewFromUser.id, newCrewFromUser);
-          } else if (u.status === 'inactive' && existingCrew.status !== 'off-duty') {
-            uniqueCrewsMap.set(existingCrew.id, { ...existingCrew, status: 'off-duty' });
-          }
-        }
-      });
-
-      this.crews = Array.from(uniqueCrewsMap.values());
-      this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
-    }
+    // Synchronize crews strictly with User Management (driver & crew_helper)
+    this.syncUsersWithCrews();
 
     let updatedFleets = false;
 
@@ -1671,70 +1624,99 @@ class LogisticsStore {
     this.notify();
   }
 
-  public getCrews(): Crew[] {
-    const nonCrewNames = new Set(
-      this.users
-        .filter(u => u.role !== 'driver' && u.role !== 'crew_helper')
-        .map(u => (u.fullName || '').trim().toLowerCase())
-    );
-    nonCrewNames.add('super admin');
-    nonCrewNames.add('tamu / belum login');
-
-    const seenIds = new Set<string>();
+  /**
+   * Menghitung daftar kru yang tersinkronisasi dari Manajemen User (role: driver / crew_helper)
+   * tanpa memicu efek samping penyimpanan atau notifikasi listener.
+   */
+  private computeSyncedCrews(): Crew[] {
+    const syncedCrews: Crew[] = [];
     const seenNames = new Set<string>();
-    const result: Crew[] = [];
+    const defaultFleetId = this.fleets?.[0]?.id;
 
-    // 1. Existing valid crews from Data Kru & Supir
-    for (const c of this.crews) {
-      if (!c || !c.id || !c.name) continue;
-      const cleanNameLower = c.name.trim().toLowerCase();
-      if (nonCrewNames.has(cleanNameLower) || c.id === 'crw-usr-001') continue;
-      if (seenIds.has(c.id) || seenNames.has(cleanNameLower)) continue;
-
-      // Sync status/role if linked to a user in User Management
-      const linkedUser = this.users.find(
-        u => (u.role === 'driver' || u.role === 'crew_helper') &&
-          (u.fullName.trim().toLowerCase() === cleanNameLower || `crw-${u.id}` === c.id)
-      );
-      const syncedCrew: Crew = linkedUser
-        ? {
-            ...c,
-            name: linkedUser.fullName.trim(),
-            role: linkedUser.role === 'crew_helper' ? 'Kernet / Helper' : (c.role.includes('Helper') ? 'Driver Utama' : c.role),
-            status: linkedUser.status === 'inactive' ? 'off-duty' : c.status
-          }
-        : c;
-
-      seenIds.add(syncedCrew.id);
-      seenNames.add(syncedCrew.name.trim().toLowerCase());
-      result.push(syncedCrew);
-    }
-
-    // 2. Include any driver or crew_helper from User Management (active or inactive) not yet in result
     for (const u of this.users) {
       if (u.role !== 'driver' && u.role !== 'crew_helper') continue;
       const cleanName = (u.fullName || '').trim();
-      const cleanNameLower = cleanName.toLowerCase();
-      if (!cleanName || seenNames.has(cleanNameLower)) continue;
+      if (!cleanName) continue;
+      const lowerName = cleanName.toLowerCase();
+      if (lowerName === 'super admin' || lowerName === 'tamu / belum login' || seenNames.has(lowerName)) continue;
 
-      const crewId = `crw-${u.id}`;
-      const newCrew: Crew = {
+      const existingInStore = (this.crews || []).find(
+        c => c && c.name && (c.name.trim().toLowerCase() === lowerName || c.id === `crw-${u.id}`)
+      );
+      const existingInInitial = INITIAL_CREWS.find(
+        c => c.name.trim().toLowerCase() === lowerName
+      );
+      const refCrew = existingInStore || existingInInitial;
+
+      const crewId = refCrew?.id || `crw-${u.id}`;
+      const crewRole: Crew['role'] = u.role === 'crew_helper'
+        ? 'Kernet / Helper'
+        : (refCrew && !refCrew.role.includes('Helper') ? refCrew.role : 'Driver Utama');
+
+      const crewStatus: Crew['status'] = u.status === 'inactive'
+        ? 'off-duty'
+        : (existingInStore?.status === 'on-duty' ? 'on-duty' : 'available');
+
+      const crewItem: Crew = {
         id: crewId,
         name: cleanName,
-        phone: u.phone || '0812-3456-7890',
-        role: u.role === 'crew_helper' ? 'Kernet / Helper' : 'Driver Utama',
-        licenseNumber: 'SIM-' + Math.floor(Math.random() * 900000 + 100000),
-        licenseType: u.role === 'crew_helper' ? 'SIM A' : 'SIM B1 Umum',
-        status: u.status === 'inactive' ? 'off-duty' : 'available',
-        tripsCompleted: 12,
-        rating: 4.9
+        phone: u.phone && u.phone !== '-' ? u.phone : (refCrew?.phone || '0812-3456-7890'),
+        role: crewRole,
+        licenseNumber: refCrew?.licenseNumber || 'SIM-920418',
+        licenseType: u.role === 'crew_helper' ? 'SIM A' : (refCrew?.licenseType || 'SIM B1 Umum'),
+        status: crewStatus,
+        currentFleetId: existingInStore?.currentFleetId || refCrew?.currentFleetId || defaultFleetId,
+        tripsCompleted: refCrew?.tripsCompleted ?? 18,
+        rating: refCrew?.rating ?? 4.9
       };
-      seenIds.add(crewId);
-      seenNames.add(cleanNameLower);
-      result.push(newCrew);
+
+      seenNames.add(lowerName);
+      syncedCrews.push(crewItem);
     }
 
-    return result;
+    return syncedCrews;
+  }
+
+  /**
+   * Sinkronisasi 2 arah antara Manajemen User (role: driver / crew_helper) dan daftar Kru Jadwal Penugasan
+   */
+  public syncUsersWithCrews(): Crew[] {
+    const syncedCrews = this.computeSyncedCrews();
+    this.crews = syncedCrews;
+    try {
+      safeSetItem(STORAGE_KEYS.CREWS, JSON.stringify(this.crews));
+    } catch {}
+    return syncedCrews;
+  }
+
+  public getCrews(): Crew[] {
+    return this.computeSyncedCrews();
+  }
+
+  public getDriverCrews(): Crew[] {
+    const all = this.computeSyncedCrews();
+    const drivers = all.filter(c => {
+      const linkedUser = this.users.find(
+        u => (u.role === 'driver' || u.role === 'crew_helper') &&
+          (u.fullName.trim().toLowerCase() === c.name.trim().toLowerCase() || `crw-${u.id}` === c.id)
+      );
+      if (linkedUser) return linkedUser.role === 'driver';
+      return !c.role.toLowerCase().includes('helper') && !c.role.toLowerCase().includes('kernet');
+    });
+    return drivers.length > 0 ? drivers : all;
+  }
+
+  public getHelperCrews(): Crew[] {
+    const all = this.computeSyncedCrews();
+    const helpers = all.filter(c => {
+      const linkedUser = this.users.find(
+        u => (u.role === 'driver' || u.role === 'crew_helper') &&
+          (u.fullName.trim().toLowerCase() === c.name.trim().toLowerCase() || `crw-${u.id}` === c.id)
+      );
+      if (linkedUser) return linkedUser.role === 'crew_helper';
+      return c.role.toLowerCase().includes('helper') || c.role.toLowerCase().includes('kernet');
+    });
+    return helpers.length > 0 ? helpers : all;
   }
 
   public setCrews(crews: Crew[]): void {
@@ -2188,6 +2170,7 @@ class LogisticsStore {
     }
 
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
+    this.syncUsersWithCrews();
     this.notify();
   }
 
@@ -2214,6 +2197,7 @@ class LogisticsStore {
     }
 
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
+    this.syncUsersWithCrews();
     this.notify();
   }
 
@@ -2239,6 +2223,7 @@ class LogisticsStore {
     }
 
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
+    this.syncUsersWithCrews();
     this.logActivity('Nonaktifkan User', user.fullName, `Akun ${user.fullName} dinonaktifkan. Hak akses ditutup, histori data tetap tersimpan.`);
     this.notify();
     return true;
@@ -2270,6 +2255,7 @@ class LogisticsStore {
     }
 
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
+    this.syncUsersWithCrews();
     this.logActivity('Aktifkan User', user.fullName, `Akun ${user.fullName} diaktifkan kembali dan hak akses dipulihkan.`);
     this.notify();
     return true;
@@ -2357,6 +2343,7 @@ class LogisticsStore {
     }
 
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
+    this.syncUsersWithCrews();
     this.notify();
     return true;
   }
@@ -2364,6 +2351,7 @@ class LogisticsStore {
   public deleteUser(userId: string) {
     this.users = this.users.filter(u => u.id !== userId);
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
+    this.syncUsersWithCrews();
     this.notify();
   }
 
@@ -2375,22 +2363,30 @@ class LogisticsStore {
     phone?: string;
     notes?: string;
     password?: string;
+    status?: UserApprovalStatus;
   }): UserProfile {
+    const resolvedRole: UserRole = data.role || 'unassigned';
     const newUser: UserProfile = {
       id: 'usr-' + Math.random().toString(36).substring(2, 8),
       fullName: data.fullName,
       email: data.email,
-      role: data.role || 'unassigned',
-      department: data.department || 'Logistik',
-      phone: data.phone || '',
+      role: resolvedRole,
+      department: data.department || 'Logistik & Pengiriman',
+      phone: data.phone || '0812-3456-7890',
       password: data.password || 'password123',
-      status: 'pending',
+      status: data.status || (resolvedRole !== 'unassigned' ? 'approved' : 'pending'),
       createdAt: new Date().toISOString(),
-      notes: data.notes || 'Pendaftaran baru - Role perlu diisi oleh Admin'
+      approvedAt: (data.status === 'approved' || resolvedRole !== 'unassigned') ? new Date().toISOString() : undefined,
+      approvedBy: (data.status === 'approved' || resolvedRole !== 'unassigned') ? (this.currentUser?.fullName || 'Super Admin') : undefined,
+      notes: data.notes || (resolvedRole !== 'unassigned' ? 'Terdaftar & Terintegrasi dengan Sistem AKK' : 'Pendaftaran baru - Role perlu diisi oleh Admin'),
+      permissions: {
+        modules: getDefaultPermissionsForRole(resolvedRole)
+      }
     };
 
     this.users = [newUser, ...this.users];
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
+    this.syncUsersWithCrews();
     this.notify();
 
     return newUser;
@@ -2673,7 +2669,9 @@ class LogisticsStore {
         changed = true;
       }
       if (changed) {
-        this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
+        try {
+          safeSetItem(STORAGE_KEYS.CREWS, JSON.stringify(this.crews));
+        } catch {}
       }
     } else {
       const defaultFleet = this.fleets.find(f => f.plateNumber === 'P 8509 VQ') || this.fleets[0];
@@ -2697,7 +2695,9 @@ class LogisticsStore {
       } else {
         this.crews.push(matchedCrew);
       }
-      this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
+      try {
+        safeSetItem(STORAGE_KEYS.CREWS, JSON.stringify(this.crews));
+      } catch {}
     }
 
     try {
@@ -3403,6 +3403,38 @@ class LogisticsStore {
   }
 
   public addCrew(crew: Omit<Crew, 'id' | 'tripsCompleted' | 'rating'>): Crew {
+    const cleanName = (crew.name || '').trim();
+    const isHelper = (crew.role || '').toLowerCase().includes('helper') || (crew.role || '').toLowerCase().includes('kernet');
+    const targetUserRole: UserRole = isHelper ? 'crew_helper' : 'driver';
+
+    // Ensure a corresponding user exists in Manajemen User
+    const existingUser = this.users.find(u => u.fullName.trim().toLowerCase() === cleanName.toLowerCase());
+    if (!existingUser && cleanName) {
+      const emailSlug = cleanName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'kru';
+      const createdUser: UserProfile = {
+        id: 'usr-' + Math.random().toString(36).substring(2, 8),
+        fullName: cleanName,
+        email: `${emailSlug}@gmail.com`,
+        password: `${emailSlug}123`,
+        role: targetUserRole,
+        department: 'Logistik & Pengiriman',
+        phone: crew.phone || '0812-3456-7890',
+        status: 'approved',
+        createdAt: new Date().toISOString(),
+        approvedAt: new Date().toISOString(),
+        approvedBy: this.currentUser?.fullName || 'Super Admin',
+        notes: `Terintegrasi dari Data Kru & Jadwal Pengiriman (${crew.role})`,
+        permissions: {
+          modules: getDefaultPermissionsForRole(targetUserRole)
+        }
+      };
+      this.users = [createdUser, ...this.users];
+      this.saveToStorage(STORAGE_KEYS.USERS, this.users);
+    } else if (existingUser && existingUser.role !== 'driver' && existingUser.role !== 'crew_helper') {
+      existingUser.role = targetUserRole;
+      this.saveToStorage(STORAGE_KEYS.USERS, this.users);
+    }
+
     const newCrew: Crew = {
       ...crew,
       id: 'crw-' + Math.random().toString(36).substring(2, 8),
@@ -3410,7 +3442,7 @@ class LogisticsStore {
       rating: 5.0
     };
     this.crews = [...this.crews, newCrew];
-    this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
+    this.syncUsersWithCrews();
     this.logActivity('Tambah Kru', newCrew.name, `Menambahkan kru baru ${newCrew.name} sebagai ${newCrew.role}`);
     
     // Asynchronous backend integration with Supabase

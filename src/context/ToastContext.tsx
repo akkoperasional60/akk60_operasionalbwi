@@ -190,16 +190,16 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
 
     setNotifications(prev => [newNotif, ...prev].slice(0, 50)); // Cap at 50 history logs
-    setVisibleToasts(prev => [...prev, newNotif]);
+    setVisibleToasts(prev => [...prev.slice(-1), newNotif]);
 
     if (soundEnabled) {
       playChime(urgent || type === 'sla_warning' ? 'urgent' : type === 'checker' ? 'success' : 'normal');
     }
 
-    // Auto dismiss toasts after 7 seconds (or 10 seconds for urgent alerts)
+    // Auto dismiss toasts after 5 seconds (or 8 seconds for urgent alerts)
     setTimeout(() => {
       setVisibleToasts(prev => prev.filter(t => t.id !== newNotif.id));
-    }, (urgent || type === 'sla_warning') ? 10000 : 7000);
+    }, (urgent || type === 'sla_warning') ? 8000 : 5000);
   }, [soundEnabled]);
 
   const removeToast = useCallback((id: string) => {

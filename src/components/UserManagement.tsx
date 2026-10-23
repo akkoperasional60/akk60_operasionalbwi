@@ -215,8 +215,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
   const [newUser, setNewUser] = useState({
     fullName: '',
     email: '',
+    phone: '',
+    role: 'driver' as UserRole,
     password: '',
-    department: 'Logistik'
+    department: 'Logistik & Pengiriman'
   });
 
   useEffect(() => {
@@ -495,14 +497,22 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
     e.preventDefault();
     if (!newUser.email) return;
 
+    const chosenRole: UserRole = newUser.role || 'unassigned';
+    const isCrewRole = chosenRole === 'driver' || chosenRole === 'crew_helper';
+
     const created = logisticsStore.registerUser({
       fullName: newUser.fullName || 'Pengguna Baru',
       email: newUser.email,
-      phone: '-',
-      role: 'unassigned',
-      department: newUser.department || 'Logistik',
+      phone: newUser.phone || '0812-3456-7890',
+      role: chosenRole,
+      department: newUser.department || 'Logistik & Pengiriman',
       password: newUser.password || 'password123',
-      notes: 'Akun baru terdaftar — Role perlu diisi oleh Super Admin'
+      status: chosenRole !== 'unassigned' ? 'approved' : 'pending',
+      notes: isCrewRole
+        ? `Akun ${chosenRole === 'driver' ? 'Kru Supir / Driver' : 'Kru Helper / Kernet'} aktif & terintegrasi otomatis ke Daftar Jadwal Pengiriman`
+        : chosenRole !== 'unassigned'
+        ? `Akun aktif untuk role ${ROLE_LABELS[chosenRole] || chosenRole}`
+        : 'Akun baru terdaftar — Role perlu diisi oleh Super Admin'
     });
 
     setIsAddUserModalOpen(false);
@@ -510,13 +520,17 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
     setNewUser({
       fullName: '',
       email: '',
+      phone: '',
+      role: 'driver',
       password: '',
-      department: 'Logistik'
+      department: 'Logistik & Pengiriman'
     });
     showNotification(
-      'Akun Baru Terdaftar',
-      `Akun "${created.fullName}" berhasil dibuat dengan status Role: Perlu Diisi. Silakan klik tombol Edit Pengguna untuk memilih Role yang sesuai.`,
-      'info'
+      isCrewRole ? 'Akun Kru Terdaftar & Sinkron ke Jadwal' : 'Akun Baru Terdaftar',
+      isCrewRole
+        ? `Akun "${created.fullName}" (${ROLE_LABELS[chosenRole]}) berhasil dibuat dan otomatis masuk ke dalam daftar pilihan ${chosenRole === 'driver' ? 'Kru Supir Utama' : 'Kru Helper / Kernet'} pada menu Jadwal & Penugasan Pengiriman.`
+        : `Akun "${created.fullName}" berhasil dibuat dengan Role: ${ROLE_LABELS[chosenRole] || chosenRole}.`,
+      'success'
     );
   };
 
@@ -580,15 +594,15 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
   const activeDeptOption = DEPARTMENT_FILTER_OPTIONS.find(opt => opt.id === departmentFilter);
 
   return (
-    <div className="space-y-6">
-      {/* RBAC Header & Authorization Notice */}
-      <div className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs ${
+    <div className="space-y-5">
+      {/* RBAC Header & Schedule Integration Summary */}
+      <div className={`p-4 sm:p-5 rounded-2xl border flex flex-col lg:flex-row lg:items-center justify-between gap-4 shadow-md ${
         isSuperAdmin
-          ? 'bg-amber-500/10 border-amber-500/30 text-amber-200'
+          ? 'bg-gradient-to-r from-slate-900 via-slate-900 to-slate-950 border-amber-500/30 text-amber-200'
           : 'bg-slate-900 border-slate-800 text-slate-400'
       }`}>
-        <div className="flex items-center gap-3">
-          <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${
+        <div className="flex items-start sm:items-center gap-3.5">
+          <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${
             isSuperAdmin
               ? 'bg-amber-500/20 border-amber-500/40 text-amber-400 shadow-inner'
               : 'bg-slate-800 border-slate-700 text-slate-500'
@@ -596,19 +610,22 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
             <Shield className="w-5 h-5" />
           </div>
           <div>
-            <div className="font-bold text-white text-xs sm:text-sm flex items-center gap-2">
-              <span>{isSuperAdmin ? 'Manajemen User & Hak Akses Granular (Super Admin Mode)' : 'Hak Akses Pengguna Terbatas'}</span>
-              <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase border ${
+            <div className="font-extrabold text-white text-sm sm:text-base flex items-center gap-2 flex-wrap">
+              <span>{isSuperAdmin ? 'Manajemen User, Hak Akses & Integrasi Jadwal Kru' : 'Hak Akses Pengguna Terbatas'}</span>
+              <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase border ${
                 isSuperAdmin
                   ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
                   : 'bg-slate-800 text-slate-400 border-slate-700'
               }`}>
                 {isSuperAdmin ? '👑 Super Admin' : '🔒 Read Only'}
               </span>
+              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                🚚 Sinkron Jadwal Pengiriman ({users.filter(u => u.role === 'driver').length} Driver &bull; {users.filter(u => u.role === 'crew_helper').length} Helper)
+              </span>
             </div>
-            <p className="text-[11px] text-slate-400 mt-0.5">
+            <p className="text-[11px] sm:text-xs text-slate-400 mt-1 leading-relaxed">
               {isSuperAdmin
-                ? 'Pilih user di daftar sebelah kiri untuk melihat dan mengatur rincian menu, sub-menu, pembatasan input, copy akses, ubah password, dan kelola akun di sebelah kanan.'
+                ? 'Setiap pengguna dengan role Kru Supir / Driver atau Kru Helper / Kernet otomatis terintegrasi ke dalam daftar penugasan Jadwal Pengiriman.'
                 : `Manajemen user dan perubahan hak akses dikunci khusus untuk Super Admin. Anda login sebagai: ${currentUser.role === 'super_admin' ? 'Super Admin' : currentUser.fullName} (${currentUser.role}).`}
             </p>
           </div>
@@ -780,18 +797,19 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                             </span>
                           )}
                         </div>
-                        <div className="text-[11px] truncate mt-0.5 flex items-center gap-1.5">
+                        <div className="text-[11px] truncate mt-0.5 flex items-center gap-1.5 flex-wrap">
                           {user.role === 'unassigned' ? (
                             <span className="text-rose-400 font-bold text-[10px]">
                               ⚠️ Perlu Diisi Role
                             </span>
                           ) : (
-                            <span className="text-slate-400">{ROLE_LABELS[user.role] || user.role}</span>
+                            <span className="text-slate-300 font-medium">{ROLE_LABELS[user.role] || user.role}</span>
                           )}
-                          <span className="text-slate-600">&bull;</span>
-                          <span className="text-[10px] text-slate-500 truncate">
-                            {user.department || 'Perlu Diisi'}
-                          </span>
+                          {(user.role === 'driver' || user.role === 'crew_helper') && (
+                            <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-blue-500/15 text-blue-300 border border-blue-500/30">
+                              Terintegrasi Jadwal
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -829,11 +847,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
         </div>
 
         {/* RIGHT COLUMN: Selected User Details, Password & Menu/Submenu Granular Access */}
-        <div className="lg:col-span-8 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm flex flex-col">
+        <div className="lg:col-span-8 bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-md flex flex-col">
           {selectedUser ? (
             <>
               {/* Selected User Header Banner */}
-              <div className="p-4 bg-slate-950 border-b border-slate-800 space-y-3.5">
+              <div className="p-5 bg-gradient-to-b from-slate-950 to-slate-900 border-b border-slate-800 space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
                     <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-white font-bold text-sm shadow-sm shrink-0 ${
@@ -973,6 +991,28 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                     </button>
                   )}
                 </div>
+
+                {/* Live Schedule & Assignment Integration Banner for Driver & Helper Roles */}
+                {(selectedUser.role === 'driver' || selectedUser.role === 'crew_helper') && (
+                  <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-7 h-7 rounded-lg bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-blue-300 shrink-0">
+                        <CheckCircle2 className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="font-bold text-blue-200 flex items-center gap-2 flex-wrap">
+                          <span>Terintegrasi dengan Jadwal &amp; Penugasan Pengiriman</span>
+                          <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                            {selectedUser.role === 'driver' ? 'List: Kru Supir Utama' : 'List: Kru Helper / Kernet'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-300 mt-0.5">
+                          Akun <strong>{selectedUser.fullName}</strong> otomatis masuk ke daftar pilihan <strong>{selectedUser.role === 'driver' ? 'Kru Supir Utama' : 'Kru Helper 1 & Helper 2'}</strong> pada menu Jadwal Pengiriman &amp; Portal Driver Mobile.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Conditional Content: Hide Hak Akses if User is Inactive */}
@@ -1394,16 +1434,16 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
 
       {/* Manual Add User Modal */}
       {isAddUserModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl w-full max-w-md overflow-hidden shadow-2xl">
-            <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
+            <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
               <h3 className="text-sm font-bold text-white flex items-center gap-2">
                 <User className="w-4 h-4 text-amber-400" />
                 Tambah Pengguna Baru AKK
               </h3>
               <button
                 onClick={() => setIsAddUserModalOpen(false)}
-                className="text-slate-400 hover:text-white font-bold"
+                className="text-slate-400 hover:text-white font-bold cursor-pointer"
               >
                 &times;
               </button>
@@ -1411,69 +1451,117 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
 
             <form onSubmit={handleCreateUser} className="p-5 space-y-3.5 text-xs">
               <div>
-                <label className="text-slate-400 block mb-1">Nama Lengkap</label>
+                <label className="text-slate-300 font-bold block mb-1">Nama Lengkap *</label>
                 <input
                   type="text"
                   required
-                  placeholder="Nama Lengkap User"
+                  placeholder="Contoh: Hendra Wijaya"
                   value={newUser.fullName}
                   onChange={(e) => setNewUser({ ...newUser, fullName: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-amber-500"
                 />
               </div>
 
-              <div>
-                <label className="text-slate-400 block mb-1">Email / Username</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="nama@gmail.com atau username"
-                  value={newUser.email}
-                  onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-slate-300 font-bold block mb-1">Email / Username *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="nama@gmail.com"
+                    value={newUser.email}
+                    onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-slate-300 font-bold block mb-1">No. WhatsApp</label>
+                  <input
+                    type="text"
+                    placeholder="0812-xxxx-xxxx"
+                    value={newUser.phone}
+                    onChange={(e) => setNewUser({ ...newUser, phone: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-slate-300 font-bold block mb-1">Role Pengguna *</label>
+                  <select
+                    value={newUser.role}
+                    onChange={(e) => {
+                      const r = e.target.value as UserRole;
+                      setNewUser({
+                        ...newUser,
+                        role: r,
+                        department: (r === 'driver' || r === 'crew_helper' || r === 'spv_logistik' || r === 'operasional')
+                          ? 'Logistik & Pengiriman'
+                          : newUser.department
+                      });
+                    }}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold cursor-pointer focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="driver">🚚 Kru Supir / Driver</option>
+                    <option value="crew_helper">🤝 Kru Helper / Kernet</option>
+                    <option value="spv_logistik">🚛 SPV Logistik</option>
+                    <option value="operasional">📋 Operasional</option>
+                    <option value="security">🛡️ Security</option>
+                    <option value="sales_admin">💼 Adm. Penjualan</option>
+                    <option value="purchasing_admin">🛒 Adm. Pembelian</option>
+                    <option value="warehouse_admin">📦 Gudang</option>
+                    <option value="finance_tax_admin">💰 Finance &amp; Tax</option>
+                    <option value="hr_admin">👥 HR Admin</option>
+                    <option value="marketing_online">🌐 Marketing Online</option>
+                    <option value="marketing_offline">📣 Marketing Offline</option>
+                    <option value="super_admin">👑 Super Admin</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-slate-300 font-bold block mb-1">Departemen / Divisi</label>
+                  <select
+                    value={newUser.department}
+                    onChange={(e) => setNewUser({ ...newUser, department: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white cursor-pointer focus:outline-none focus:border-amber-500"
+                  >
+                    {OFFICIAL_DEPARTMENT_OPTIONS.map(dept => (
+                      <option key={dept} value={dept}>{dept}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               <div>
-                <label className="text-slate-400 block mb-1">Departemen / Divisi</label>
-                <select
-                  value={newUser.department}
-                  onChange={(e) => setNewUser({ ...newUser, department: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white cursor-pointer"
-                >
-                  {OFFICIAL_DEPARTMENT_OPTIONS.map(dept => (
-                    <option key={dept} value={dept}>{dept}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="text-slate-400 block mb-1">Password</label>
+                <label className="text-slate-300 font-bold block mb-1">Password *</label>
                 <input
                   type="text"
                   required
                   placeholder="Minimal 6 karakter"
                   value={newUser.password}
                   onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white focus:outline-none focus:border-amber-500"
                 />
               </div>
 
-              <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-300">
-                ℹ️ Akun baru otomatis diberi keterangan Role: <strong>Perlu Diisi</strong> (tidak langsung menjadi SPV Logistik).
-              </div>
+              {(newUser.role === 'driver' || newUser.role === 'crew_helper') && (
+                <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-[11px] text-emerald-300">
+                  ✅ User dengan role <strong>{newUser.role === 'driver' ? 'Kru Supir / Driver' : 'Kru Helper / Kernet'}</strong> otomatis masuk ke daftar penugasan <strong>Jadwal Pengiriman</strong>.
+                </div>
+              )}
 
               <div className="pt-2 flex justify-end gap-2 border-t border-slate-800">
                 <button
                   type="button"
                   onClick={() => setIsAddUserModalOpen(false)}
-                  className="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold"
+                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold cursor-pointer"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold shadow"
+                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold shadow cursor-pointer"
                 >
                   Simpan Akun Baru
                 </button>

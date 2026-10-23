@@ -296,6 +296,9 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     const monthPadded = String(month + 1).padStart(2, '0');
     const fleets = logisticsStore.getFleets();
     const crews = logisticsStore.getCrews();
+    const driverCrews = logisticsStore.getDriverCrews();
+    const helperCrews = logisticsStore.getHelperCrews();
+    const seededSchedules: Schedule[] = [];
 
     weeksToSeed.forEach(w => {
       w.days.forEach(d => {
@@ -309,15 +312,15 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             f.plateNumber.replace(/\s+/g, '').toUpperCase().includes(p.armada.replace(/\s+/g, '').toUpperCase())
           ) || fleets[pIdx % fleets.length] || fleets[0];
 
-          const matchedDriver = crews.find(c => 
+          const matchedDriver = driverCrews.find(c => 
             c.name.toLowerCase().includes(p.driver.toLowerCase()) || 
             p.driver.toLowerCase().includes(c.name.toLowerCase())
-          ) || crews[0];
+          ) || driverCrews[0] || crews[0];
 
-          const matchedHelper = p.helper && p.helper !== '-' ? crews.find(c =>
+          const matchedHelper = p.helper && p.helper !== '-' ? (helperCrews.find(c =>
             c.name.toLowerCase().includes(p.helper.toLowerCase()) ||
             p.helper.toLowerCase().includes(c.name.toLowerCase())
-          ) : undefined;
+          ) || helperCrews[0]) : undefined;
 
           const areaStd = standardizeAreaName(p.area);
           const isBali = areaStd.includes('DENPASAR') || areaStd.includes('SINGARAJA') || areaStd.includes('NEGARA') || areaStd.includes('BALI');
@@ -346,7 +349,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             areaName: areaStd,
             fleetId: matchedFleet ? matchedFleet.id : 'flt-01',
             fleet: matchedFleet,
-            crewId: matchedDriver ? matchedDriver.id : 'crw-01',
+            crewId: matchedDriver ? matchedDriver.id : 'crw-10',
             crew: matchedDriver,
             crewHelperId: matchedHelper ? matchedHelper.id : undefined,
             crewHelper: matchedHelper,
@@ -363,12 +366,16 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             isManuallyEdited: false
           };
 
-          try {
-            logisticsStore.addSchedule(newSch);
-          } catch {}
+          seededSchedules.push(newSch);
         });
       });
     });
+
+    if (seededSchedules.length > 0) {
+      try {
+        logisticsStore.batchSyncSchedules(seededSchedules, [], { isImport: false });
+      } catch {}
+    }
   };
 
   // Month-specific active schedule dataset: reactive state linked with logisticsStore
@@ -2549,18 +2556,18 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             <div className="space-y-3.5 text-xs">
               <div>
                 <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
-                  Driver / Pengemudi
+                  Driver / Pengemudi (Integrasi Manajemen User)
                 </label>
                 <input
                   type="text"
                   list="driver-options"
                   value={editingTripModal.driver}
                   onChange={(e) => setEditingTripModal({ ...editingTripModal, driver: e.target.value })}
-                  placeholder="Nama Supir"
+                  placeholder="Pilih / Ketik Nama Supir"
                   className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-emerald-500"
                 />
                 <datalist id="driver-options">
-                  {logisticsStore.getCrews().filter(c => c.name !== 'Super Admin').map(c => (
+                  {logisticsStore.getDriverCrews().map(c => (
                     <option key={c.id} value={c.name} />
                   ))}
                 </datalist>
@@ -2569,7 +2576,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
-                    Helper / Kernet 1 (Opsional)
+                    Helper / Kernet 1 (Integrasi Manajemen User)
                   </label>
                   <input
                     type="text"
@@ -2580,7 +2587,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-emerald-500"
                   />
                   <datalist id="helper1-options">
-                    {logisticsStore.getCrews().filter(c => c.name !== 'Super Admin').map(c => (
+                    {logisticsStore.getHelperCrews().map(c => (
                       <option key={c.id} value={c.name} />
                     ))}
                   </datalist>
@@ -2599,7 +2606,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-emerald-500"
                   />
                   <datalist id="helper2-options">
-                    {logisticsStore.getCrews().filter(c => c.name !== 'Super Admin').map(c => (
+                    {logisticsStore.getHelperCrews().map(c => (
                       <option key={c.id} value={c.name} />
                     ))}
                   </datalist>

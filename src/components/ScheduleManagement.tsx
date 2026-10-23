@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Calendar, Plus, Truck, Store, User, Users, Ship, Clock, CheckCircle2, AlertTriangle, FileText, Search, ChevronRight, ChevronDown, ChevronUp, CalendarDays, X, LayoutList, MapPin, Printer, ShieldAlert, Edit, Trash2, Sparkles, CalendarCheck, Repeat, Layers, Move, FileSpreadsheet, History, RefreshCw, Zap, Download, Loader2, Compass, Navigation, ArrowRightLeft, UserX } from 'lucide-react';
+import { Calendar, Plus, Truck, Store, User, Users, Ship, Clock, CheckCircle2, AlertTriangle, FileText, Search, ChevronRight, ChevronDown, ChevronUp, CalendarDays, X, XCircle, LayoutList, MapPin, Printer, ShieldAlert, Edit, Trash2, Sparkles, CalendarCheck, Repeat, Layers, Move, FileSpreadsheet, History, RefreshCw, Zap, Download, Loader2, Compass, Navigation, ArrowRightLeft, UserX } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Schedule, RetailStore, Fleet, Crew, ShipmentStatus, CrewDeliveryHistory } from '../types';
 import { logisticsStore } from '../services/store';
@@ -413,16 +413,19 @@ export const ScheduleManagement: React.FC<ScheduleManagementProps> = ({
       defaultBooking = 'KM-DHARMA-RORO-' + Math.floor(Math.random() * 90000 + 10000);
     }
 
-    // Auto-suggest suitable available fleet
+    // Auto-suggest suitable available fleet & integrated Driver/Helper from Manajemen User
     const suitableFleet = fleets.find(f => f.status === 'available') || fleets[0];
-    const suitableCrew = crews.find(c => c.status === 'available' && c.role === 'Driver Utama') || crews[0];
+    const driverList = logisticsStore.getDriverCrews();
+    const helperList = logisticsStore.getHelperCrews();
+    const suitableCrew = driverList.find(c => c.status === 'available') || driverList[0] || crews[0];
+    const suitableHelper = helperList.find(c => c.status === 'available' && c.id !== suitableCrew?.id) || helperList[0];
 
     setNewSchedule({
       trackingNumber: 'TRK-' + new Date().toISOString().substring(0, 10).replace(/-/g, '') + '-' + Math.floor(Math.random() * 900 + 100),
       storeId: store.id,
       fleetId: suitableFleet ? suitableFleet.id : '',
       crewId: suitableCrew ? suitableCrew.id : '',
-      crewHelperId: '',
+      crewHelperId: suitableHelper ? suitableHelper.id : '',
       crewHelper2Id: '',
       status: 'scheduled',
       departureDate: new Date().toISOString().substring(0, 16),
@@ -1007,30 +1010,36 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
       )}
 
       {/* Header */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-sm no-print">
+      <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-slate-950 border border-slate-800/90 rounded-2xl p-5 sm:p-6 shadow-lg no-print">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-indigo-500/10 text-indigo-400 text-xs font-semibold mb-2">
-              <Calendar className="w-3.5 h-3.5" />
-              <span>SPV Logistik & Route Planner Hub</span>
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-300 text-[11px] font-bold">
+                <Calendar className="w-3.5 h-3.5 text-blue-400" />
+                <span>Jadwal &amp; Penugasan Pengiriman</span>
+              </div>
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[11px] font-bold">
+                <User className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Terintegrasi Manajemen User ({logisticsStore.getDriverCrews().length} Driver &bull; {logisticsStore.getHelperCrews().length} Helper)</span>
+              </div>
             </div>
-            <h2 className="text-xl font-bold text-white tracking-tight">
-              Manajemen Jadwal Pengiriman & Penugasan Armada
+            <h2 className="text-lg sm:text-xl font-extrabold text-white tracking-tight">
+              Manajemen Jadwal Pengiriman &amp; Penugasan Armada
             </h2>
-            <p className="text-slate-400 text-sm mt-1 max-w-2xl">
-              Penjadwalan otomatis rute tetap mingguan (Senin s/d Sabtu) dari Gudang Pusat Banyuwangi DC, optimalisasi kru dan armada, serta tiket kapal penyeberangan.
+            <p className="text-slate-400 text-xs sm:text-sm max-w-2xl leading-relaxed">
+              Penjadwalan rute pengiriman mingguan (Senin s/d Sabtu) dari Gudang Pusat Banyuwangi DC. Daftar Kru Supir &amp; Helper otomatis tersinkronisasi dari akun ber-role Driver &amp; Helper pada Manajemen User.
             </p>
           </div>
 
-          <div className="flex items-center gap-2 self-start lg:self-center flex-wrap">
+          <div className="flex items-center gap-2.5 self-start lg:self-center flex-wrap">
             <button
               onClick={() => {
                 if (stores.length > 0) handleOpenCreateWithStore(stores[0]);
               }}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-md transition cursor-pointer"
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-lg shadow-blue-600/25 transition cursor-pointer active:scale-95"
             >
               <Plus className="w-4 h-4" />
-              <span>Jadwal Baru</span>
+              <span>+ Jadwal Baru</span>
             </button>
           </div>
         </div>
@@ -1053,272 +1062,319 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4"
+            className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4"
           >
             <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-slate-900 border border-slate-800 rounded-xl w-full max-w-2xl overflow-hidden shadow-2xl"
+              initial={{ scale: 0.96, opacity: 0, y: 8 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.96, opacity: 0, y: 8 }}
+              className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl"
             >
-              <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-                <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Calendar className="w-4 h-4 text-blue-400" />
-                  Buat Surat Perintah Jalan & Jadwal Pengiriman Baru
-                </h3>
+              {/* Modal Header */}
+              <div className="px-5 py-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-400 shrink-0">
+                    <Calendar className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-extrabold text-white flex items-center gap-2 flex-wrap">
+                      <span>Buat Surat Perintah Jalan &amp; Jadwal Pengiriman Baru</span>
+                    </h3>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Data Supir &amp; Helper terintegrasi otomatis dari akun Manajemen User
+                    </p>
+                  </div>
+                </div>
                 <button
                   onClick={() => setIsAddScheduleOpen(false)}
-                  className="text-slate-400 hover:text-white font-bold"
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
                 >
-                  &times;
+                  <XCircle className="w-5 h-5" />
                 </button>
               </div>
 
-            <form onSubmit={handleCreateSchedule} className="p-5 space-y-4 text-xs">
-              <div className="grid grid-cols-1 gap-3">
-                <div>
-                  <label className="text-slate-400 block mb-1">Area Kirim</label>
-                  <select
-                    required
-                    value={newSchedule.storeId}
-                    onChange={(e) => {
-                      const selectedVal = e.target.value;
-                      const baseDate = newSchedule.departureDate ? new Date(newSchedule.departureDate) : new Date();
-                      const timestamps = calculateScheduleTimestamps(baseDate, selectedVal);
-                      const isBaliIsland = selectedVal.includes('DENPASAR') || selectedVal.includes('SINGARAJA') || selectedVal.includes('NEGARA');
-                      setNewSchedule({
-                        ...newSchedule,
-                        storeId: selectedVal,
-                        departureDate: timestamps.departureDate,
-                        estimatedArrival: timestamps.estimatedArrival,
-                        isInterIsland: isBaliIsland
-                      });
-                    }}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white font-semibold"
-                  >
-                    <option value="">-- Pilih Area --</option>
-                    <option value="GROSIR1">GROSIR 1</option>
-                    <option value="RITEL_ROGOJAMPI">RITEL ROGOJAMPI</option>
-                    <option value="RITEL_SONGGON">RITEL SONGGON</option>
-                    <option value="SUSULAN_ROGOJAMPI_MUNCAR">SUSULAN ROGOJAMPI-MUNCAR</option>
-                    <option value="JAJAG_RETAIL">JAJAG RETAIL</option>
-                    <option value="DENPASAR2">DENPASAR 2 (Malam 21.00 WIB)</option>
-                    <option value="SUSULAN_SANGGAR_JAJAG">SUSULAN SANGGAR-JAJAG</option>
-                    <option value="DENPASAR1">DENPASAR 1 (Malam 21.00 WIB)</option>
-                    <option value="BWI_KOTA_SELATAN">BWI KOTA SELATAN</option>
-                    <option value="KETAPANG_WONGSOREJO">KETAPANG - WONGSOREJO</option>
-                    <option value="RITEL_SRONO">RITEL SRONO</option>
-                    <option value="GALEKAN">GALEKAN</option>
-                    <option value="JEMBER_BARAT">JEMBER BARAT (Malam 21.00 WIB)</option>
-                    <option value="RITEL_KALIBARU">RITEL KALIBARU</option>
-                    <option value="PURWO_DAMBUNTUNG">PURWO DAMBUNTUNG</option>
-                    <option value="PURWO_PASAR">PURWO PASAR</option>
-                    <option value="SUMBERAYU_RETAIL">SUMBERAYU RETAIL</option>
-                    <option value="SSLN_SINGARAJA">SSLN SINGARAJA (Malam 21.00 WIB)</option>
-                    <option value="SEMPU_KALISTAIL">SEMPU KALISTAIL</option>
-                    <option value="JEMBER_KOTA">JEMBER KOTA (Malam 21.00 WIB)</option>
-                    <option value="BONDOWOSO">BONDOWOSO (Malam 21.00 WIB)</option>
-                    <option value="SITUBONDO">SITUBONDO (Pagi 07.15 WIB)</option>
-                    <option value="SSLN_STB_BDWS">SSLN STB BDWS (Pagi 07.30 WIB)</option>
-                    <option value="RITEL_SANGGAR">RITEL SANGGAR</option>
-                    <option value="NEGARA">NEGARA (Pagi 07.15 WIB)</option>
-                    <option value="JEMBER_SELATAN">JEMBER SELATAN (Malam 21.00 WIB)</option>
-                    <option value="TOKO_DR_SOETOMO">TOKO DR. SOETOMO</option>
-                    <option value="NUSANTARA_EXPAND">NUSANTARA EXPAND</option>
-                  </select>
-
-                  {newSchedule.storeId && (
-                    <div className="mt-2 p-2 rounded-lg bg-slate-900 border border-slate-800 text-[11px] text-slate-300 flex items-center justify-between">
-                      {(() => {
-                        const timing = getAreaScheduleTiming(newSchedule.storeId);
-                        return (
-                          <>
-                            <div className="flex items-center gap-1.5 min-w-0">
-                              <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                              <span className="truncate">SOP: Berangkat <strong>{timing.departureLabel}</strong> • Kepulangan <strong>{timing.isNextDayReturn ? 'Besok ' : ''}{timing.returnLabel}</strong></span>
-                            </div>
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold shrink-0 ${timing.isNightDeparture ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'}`}>
-                              {timing.isNightDeparture ? '🌙 Berangkat Malam' : '☀️ Berangkat Pagi'}
-                            </span>
-                          </>
-                        );
-                      })()}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 gap-3">
-                <div>
-                  <label className="text-slate-400 block mb-1">Alokasi Armada Truk *</label>
-                  <select
-                    required
-                    value={newSchedule.fleetId}
-                    onChange={(e) => setNewSchedule({ ...newSchedule, fleetId: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white font-semibold"
-                  >
-                    <option value="">-- Pilih Truk Armada --</option>
-                    {fleets.map(fl => (
-                      <option key={fl.id} value={fl.id}>
-                        {fl.initialCode ? `[${fl.initialCode}] ` : ''}{fl.plateNumber}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div>
-                  <label className="text-slate-400 block mb-1 font-medium">Kru Supir Utama *</label>
-                  <select
-                    required
-                    value={newSchedule.crewId}
-                    onChange={(e) => setNewSchedule({ ...newSchedule, crewId: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white font-semibold"
-                  >
-                    <option value="">-- Pilih Supir Utama --</option>
-                    {crews
-                      .filter(cr => cr.name.trim().toLowerCase() !== 'super admin')
-                      .map(cr => (
-                        <option key={cr.id} value={cr.id}>
-                          {cr.name}
-                        </option>
-                      ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-slate-400 block mb-1">Kru Helper 1 / Kernet (Opsional)</label>
-                  <select
-                    value={newSchedule.crewHelperId || ''}
-                    onChange={(e) => setNewSchedule({ ...newSchedule, crewHelperId: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
-                  >
-                    <option value="">-- Pilih Helper 1 --</option>
-                    {crews
-                      .filter(c => c.name.trim().toLowerCase() !== 'super admin' && c.id !== newSchedule.crewId && c.id !== newSchedule.crewHelper2Id)
-                      .map(cr => (
-                        <option key={cr.id} value={cr.id}>
-                          {cr.name}
-                        </option>
-                      ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-slate-400 block mb-1">Kru Helper 2 / Kernet Tambahan (Opsional)</label>
-                  <select
-                    value={newSchedule.crewHelper2Id || ''}
-                    onChange={(e) => setNewSchedule({ ...newSchedule, crewHelper2Id: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
-                  >
-                    <option value="">-- Pilih Helper 2 (Tambahan) --</option>
-                    {crews
-                      .filter(c => c.name.trim().toLowerCase() !== 'super admin' && c.id !== newSchedule.crewId && c.id !== newSchedule.crewHelperId)
-                      .map(cr => (
-                        <option key={cr.id} value={cr.id}>
-                          {cr.name}
-                        </option>
-                      ))}
-                  </select>
-                </div>
-              </div>
-              {/* Area frequency & approval alert preview */}
-              {areaCheck && areaCheck.requiresApproval && (
-                <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-start gap-2">
-                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <form onSubmit={handleCreateSchedule} className="p-5 space-y-4 text-xs max-h-[82vh] overflow-y-auto">
+                {/* Section 1: Area & Armada */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   <div>
-                    <div className="font-bold">Batas Pengiriman Wilayah Tercapai ({areaCheck.tripCount}x Kirim)</div>
-                    <div className="text-[11px] text-slate-300 mt-0.5">
-                      Supir <strong className="text-white">{selectedCrewObj?.name}</strong> telah mengirim {areaCheck.tripCount} kali ke wilayah <strong className="text-white">{currentAreaName}</strong>.
-                      {areaCheck.isApproved ? (
-                        <span className="text-emerald-400 font-semibold block mt-0.5">✓ Otorisasi dispensasi rotasi wilayah telah disetujui.</span>
-                      ) : (
-                        <span className="text-amber-400 font-semibold block mt-0.5">Pop-up persetujuan otorisasi khusus akan otomatis muncul saat Anda mengklik "Rilis Jadwal".</span>
-                      )}
+                    <label className="text-slate-300 font-bold block mb-1.5 flex items-center gap-1.5">
+                      <MapPin className="w-3.5 h-3.5 text-blue-400" />
+                      <span>Area Kirim Tujuan *</span>
+                    </label>
+                    <select
+                      required
+                      value={newSchedule.storeId}
+                      onChange={(e) => {
+                        const selectedVal = e.target.value;
+                        const baseDate = newSchedule.departureDate ? new Date(newSchedule.departureDate) : new Date();
+                        const timestamps = calculateScheduleTimestamps(baseDate, selectedVal);
+                        const isBaliIsland = selectedVal.includes('DENPASAR') || selectedVal.includes('SINGARAJA') || selectedVal.includes('NEGARA');
+                        setNewSchedule({
+                          ...newSchedule,
+                          storeId: selectedVal,
+                          departureDate: timestamps.departureDate,
+                          estimatedArrival: timestamps.estimatedArrival,
+                          isInterIsland: isBaliIsland
+                        });
+                      }}
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold focus:outline-none focus:border-blue-500 transition cursor-pointer"
+                    >
+                      <option value="">-- Pilih Area --</option>
+                      <option value="GROSIR1">GROSIR 1</option>
+                      <option value="RITEL_ROGOJAMPI">RITEL ROGOJAMPI</option>
+                      <option value="RITEL_SONGGON">RITEL SONGGON</option>
+                      <option value="SUSULAN_ROGOJAMPI_MUNCAR">SUSULAN ROGOJAMPI-MUNCAR</option>
+                      <option value="JAJAG_RETAIL">JAJAG RETAIL</option>
+                      <option value="DENPASAR2">DENPASAR 2 (Malam 21.00 WIB)</option>
+                      <option value="SUSULAN_SANGGAR_JAJAG">SUSULAN SANGGAR-JAJAG</option>
+                      <option value="DENPASAR1">DENPASAR 1 (Malam 21.00 WIB)</option>
+                      <option value="BWI_KOTA_SELATAN">BWI KOTA SELATAN</option>
+                      <option value="KETAPANG_WONGSOREJO">KETAPANG - WONGSOREJO</option>
+                      <option value="RITEL_SRONO">RITEL SRONO</option>
+                      <option value="GALEKAN">GALEKAN</option>
+                      <option value="JEMBER_BARAT">JEMBER BARAT (Malam 21.00 WIB)</option>
+                      <option value="RITEL_KALIBARU">RITEL KALIBARU</option>
+                      <option value="PURWO_DAMBUNTUNG">PURWO DAMBUNTUNG</option>
+                      <option value="PURWO_PASAR">PURWO PASAR</option>
+                      <option value="SUMBERAYU_RETAIL">SUMBERAYU RETAIL</option>
+                      <option value="SSLN_SINGARAJA">SSLN SINGARAJA (Malam 21.00 WIB)</option>
+                      <option value="SEMPU_KALISTAIL">SEMPU KALISTAIL</option>
+                      <option value="JEMBER_KOTA">JEMBER KOTA (Malam 21.00 WIB)</option>
+                      <option value="BONDOWOSO">BONDOWOSO (Malam 21.00 WIB)</option>
+                      <option value="SITUBONDO">SITUBONDO (Pagi 07.15 WIB)</option>
+                      <option value="SSLN_STB_BDWS">SSLN STB BDWS (Pagi 07.30 WIB)</option>
+                      <option value="RITEL_SANGGAR">RITEL SANGGAR</option>
+                      <option value="NEGARA">NEGARA (Pagi 07.15 WIB)</option>
+                      <option value="JEMBER_SELATAN">JEMBER SELATAN (Malam 21.00 WIB)</option>
+                      <option value="TOKO_DR_SOETOMO">TOKO DR. SOETOMO</option>
+                      <option value="NUSANTARA_EXPAND">NUSANTARA EXPAND</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-slate-300 font-bold block mb-1.5 flex items-center gap-1.5">
+                      <Truck className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Alokasi Armada Truk *</span>
+                    </label>
+                    <select
+                      required
+                      value={newSchedule.fleetId}
+                      onChange={(e) => setNewSchedule({ ...newSchedule, fleetId: e.target.value })}
+                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold focus:outline-none focus:border-blue-500 transition cursor-pointer"
+                    >
+                      <option value="">-- Pilih Truk Armada --</option>
+                      {fleets.map(fl => (
+                        <option key={fl.id} value={fl.id}>
+                          {fl.initialCode ? `[${fl.initialCode}] ` : ''}{fl.plateNumber}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {newSchedule.storeId && (
+                  <div className="px-3.5 py-2.5 rounded-xl bg-slate-950/90 border border-slate-800 text-[11px] text-slate-300 flex items-center justify-between gap-2">
+                    {(() => {
+                      const timing = getAreaScheduleTiming(newSchedule.storeId);
+                      return (
+                        <>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                            <span className="truncate">
+                              SOP Rute: Berangkat DC <strong className="text-white">{timing.departureLabel}</strong> &bull; Estimasi Tiba di Gudang <strong className="text-amber-300">{timing.isNextDayReturn ? 'Besok ' : ''}{timing.returnLabel}</strong>
+                            </span>
+                          </div>
+                          <span className={`px-2.5 py-0.5 rounded-md text-[10px] font-bold shrink-0 ${timing.isNightDeparture ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'}`}>
+                            {timing.isNightDeparture ? '🌙 Berangkat Malam' : '☀️ Berangkat Pagi'}
+                          </span>
+                        </>
+                      );
+                    })()}
+                  </div>
+                )}
+
+                {/* Section 2: Penugasan Kru (Terintegrasi Manajemen User) */}
+                <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800/90 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
+                      <User className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Penugasan Kru Pengiriman (Sinkron Manajemen User)</span>
+                    </span>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                      Role: Driver &amp; Helper
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-slate-300 block mb-1 font-bold text-[11px]">
+                        Kru Supir Utama (Role: Driver) *
+                      </label>
+                      <select
+                        required
+                        value={newSchedule.crewId}
+                        onChange={(e) => setNewSchedule({ ...newSchedule, crewId: e.target.value })}
+                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white font-semibold focus:outline-none focus:border-blue-500 cursor-pointer"
+                      >
+                        <option value="">-- Pilih Supir Utama --</option>
+                        {logisticsStore.getDriverCrews().map(cr => (
+                          <option key={cr.id} value={cr.id}>
+                            {cr.name} {cr.status === 'off-duty' ? '(Nonaktif)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-slate-300 block mb-1 font-bold text-[11px]">
+                        Kru Helper 1 / Kernet (Opsional)
+                      </label>
+                      <select
+                        value={newSchedule.crewHelperId || ''}
+                        onChange={(e) => setNewSchedule({ ...newSchedule, crewHelperId: e.target.value })}
+                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-blue-500 cursor-pointer"
+                      >
+                        <option value="">-- Pilih Helper 1 --</option>
+                        {logisticsStore
+                          .getHelperCrews()
+                          .filter(c => c.id !== newSchedule.crewId && c.id !== newSchedule.crewHelper2Id)
+                          .map(cr => (
+                            <option key={cr.id} value={cr.id}>
+                              {cr.name} {cr.status === 'off-duty' ? '(Nonaktif)' : ''}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-slate-300 block mb-1 font-bold text-[11px]">
+                        Kru Helper 2 / Kernet (Opsional)
+                      </label>
+                      <select
+                        value={newSchedule.crewHelper2Id || ''}
+                        onChange={(e) => setNewSchedule({ ...newSchedule, crewHelper2Id: e.target.value })}
+                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-blue-500 cursor-pointer"
+                      >
+                        <option value="">-- Pilih Helper 2 --</option>
+                        {logisticsStore
+                          .getHelperCrews()
+                          .filter(c => c.id !== newSchedule.crewId && c.id !== newSchedule.crewHelperId)
+                          .map(cr => (
+                            <option key={cr.id} value={cr.id}>
+                              {cr.name} {cr.status === 'off-duty' ? '(Nonaktif)' : ''}
+                            </option>
+                          ))}
+                      </select>
                     </div>
                   </div>
                 </div>
-              )}
 
-              {/* Preset Tanggal Kirim: Hari Ini vs Jadwal H+1 (Besok) */}
-              <div className="flex items-center justify-between pb-1">
-                <span className="text-[11px] font-bold text-slate-400">Pilihan Waktu Kirim:</span>
-                <div className="flex items-center gap-1.5">
+                {/* Area frequency & approval alert preview */}
+                {areaCheck && areaCheck.requiresApproval && (
+                  <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-start gap-2.5">
+                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <div>
+                      <div className="font-bold">Batas Pengiriman Wilayah Tercapai ({areaCheck.tripCount}x Kirim)</div>
+                      <div className="text-[11px] text-slate-300 mt-0.5">
+                        Supir <strong className="text-white">{selectedCrewObj?.name}</strong> telah mengirim {areaCheck.tripCount} kali ke wilayah <strong className="text-white">{currentAreaName}</strong>.
+                        {areaCheck.isApproved ? (
+                          <span className="text-emerald-400 font-semibold block mt-0.5">✓ Otorisasi dispensasi rotasi wilayah telah disetujui.</span>
+                        ) : (
+                          <span className="text-amber-400 font-semibold block mt-0.5">Pop-up persetujuan otorisasi khusus akan otomatis muncul saat Anda mengklik "Simpan &amp; Rilis Penugasan".</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Section 3: Waktu Keberangkatan & Estimasi Tiba di Gudang */}
+                <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800/90 space-y-3">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <span className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5 text-cyan-400" />
+                      <span>Jadwal Keberangkatan &amp; Estimasi Tiba di Gudang</span>
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const now = new Date();
+                          const timestamps = calculateScheduleTimestamps(now, newSchedule.storeId || 'JAJAG_RETAIL');
+                          setNewSchedule({
+                            ...newSchedule,
+                            departureDate: timestamps.departureDate,
+                            estimatedArrival: timestamps.estimatedArrival
+                          });
+                        }}
+                        className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 cursor-pointer transition"
+                      >
+                        Hari Ini
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const tomorrow = new Date();
+                          tomorrow.setDate(tomorrow.getDate() + 1);
+                          const timestamps = calculateScheduleTimestamps(tomorrow, newSchedule.storeId || 'JAJAG_RETAIL');
+                          setNewSchedule({
+                            ...newSchedule,
+                            departureDate: timestamps.departureDate,
+                            estimatedArrival: timestamps.estimatedArrival
+                          });
+                        }}
+                        className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 cursor-pointer flex items-center gap-1 transition"
+                      >
+                        <span>📅 Jadwal H+1 (Besok)</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    <div>
+                      <label className="text-slate-300 font-bold block mb-1 text-[11px]">
+                        Estimasi Berangkat dari DC
+                      </label>
+                      <input
+                        type="datetime-local"
+                        required
+                        value={newSchedule.departureDate}
+                        onChange={(e) => setNewSchedule({ ...newSchedule, departureDate: e.target.value })}
+                        className="w-full px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white font-semibold text-xs focus:outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-slate-300 font-bold block mb-1 text-[11px]">
+                        Estimasi Tiba di Gudang
+                      </label>
+                      <input
+                        type="datetime-local"
+                        required
+                        value={newSchedule.estimatedArrival}
+                        onChange={(e) => setNewSchedule({ ...newSchedule, estimatedArrival: e.target.value })}
+                        className="w-full px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-800 text-amber-400 font-semibold text-xs focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Modal Footer */}
+                <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-800">
                   <button
                     type="button"
-                    onClick={() => {
-                      const now = new Date();
-                      const timestamps = calculateScheduleTimestamps(now, newSchedule.storeId || 'JAJAG_RETAIL');
-                      setNewSchedule({
-                        ...newSchedule,
-                        departureDate: timestamps.departureDate,
-                        estimatedArrival: timestamps.estimatedArrival
-                      });
-                    }}
-                    className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 cursor-pointer"
+                    onClick={() => setIsAddScheduleOpen(false)}
+                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold transition cursor-pointer"
                   >
-                    Hari Ini
+                    Batal
                   </button>
                   <button
-                    type="button"
-                    onClick={() => {
-                      const tomorrow = new Date();
-                      tomorrow.setDate(tomorrow.getDate() + 1);
-                      const timestamps = calculateScheduleTimestamps(tomorrow, newSchedule.storeId || 'JAJAG_RETAIL');
-                      setNewSchedule({
-                        ...newSchedule,
-                        departureDate: timestamps.departureDate,
-                        estimatedArrival: timestamps.estimatedArrival
-                      });
-                    }}
-                    className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 cursor-pointer flex items-center gap-1"
+                    type="submit"
+                    className="px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold shadow-lg shadow-blue-600/25 transition cursor-pointer active:scale-95"
                   >
-                    <span>📅 Jadwal H+1 (Besok)</span>
+                    Simpan &amp; Rilis Penugasan
                   </button>
                 </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-slate-400 block mb-1 text-xs">Estimasi Berangkat dari DC</label>
-                  <input
-                    type="datetime-local"
-                    required
-                    value={newSchedule.departureDate}
-                    onChange={(e) => setNewSchedule({ ...newSchedule, departureDate: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white text-xs"
-                  />
-                </div>
-                <div>
-                  <label className="text-slate-400 block mb-1 text-xs">Estimasi Tiba di Toko</label>
-                  <input
-                    type="datetime-local"
-                    required
-                    value={newSchedule.estimatedArrival}
-                    onChange={(e) => setNewSchedule({ ...newSchedule, estimatedArrival: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white font-semibold text-amber-400 text-xs"
-                  />
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setIsAddScheduleOpen(false)}
-                  className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow"
-                >
-                  Simpan & Rilis Penugasan
-                </button>
-              </div>
-            </form>
+              </form>
+            </motion.div>
           </motion.div>
-        </motion.div>
-      )}
+        )}
       </AnimatePresence>
 
       {/* Manifest / Surat Jalan Preview Modal */}
