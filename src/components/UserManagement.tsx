@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { UserProfile, UserRole, UserApprovalStatus, UserPermissions } from '../types';
 import { logisticsStore } from '../services/store';
+import { getDefaultPermissionsForRole } from '../utils/rbac';
 
 
 const MODULE_DEFINITIONS = [
@@ -229,31 +230,40 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
     });
   }, [selectedUserId]);
 
-  // Whenever selectedUser changes, initialize editingPermissions
+  // Whenever selectedUser changes, initialize editingPermissions from saved permissions or role defaults
   useEffect(() => {
     if (selectedUser) {
+      const roleDefaults = getDefaultPermissionsForRole(selectedUser.role);
       const initialPerms: UserPermissions['modules'] = {};
+      const nextExpanded: Record<string, boolean> = {};
+
       MODULE_DEFINITIONS.forEach(mod => {
         const userMod = selectedUser.permissions?.modules?.[mod.id];
+        const defaultMod = roleDefaults[mod.id];
         const subMenuPerms: Record<string, 'read_only' | 'full_access' | 'none'> = {};
         mod.subMenus.forEach(sub => {
-          subMenuPerms[sub.id] = userMod?.subMenus?.[sub.id] || (selectedUser.role === 'super_admin' ? 'full_access' : 'read_only');
+          subMenuPerms[sub.id] = userMod?.subMenus?.[sub.id] || defaultMod?.subMenus?.[sub.id] || 'read_only';
         });
+        const isEnabled = userMod !== undefined ? userMod.enabled : (defaultMod ? defaultMod.enabled : false);
         initialPerms[mod.id] = {
-          enabled: userMod ? userMod.enabled : (selectedUser.role === 'super_admin' || selectedUser.role === 'spv_logistik'),
+          enabled: isEnabled,
           subMenus: subMenuPerms
         };
+        if (isEnabled) {
+          nextExpanded[mod.id] = true;
+        }
       });
       setEditingPermissions(initialPerms);
+      setExpandedModules(nextExpanded);
     }
-  }, [selectedUser?.id]);
+  }, [selectedUser?.id, selectedUser?.role]);
 
   const ROLE_LABELS: Record<UserRole, string> = {
     super_admin: 'Super Admin / Manager',
     dispatcher: 'Dispatcher / SPV Logistik',
     spv_logistik: 'SPV Logistik',
-    operasional: 'Operasional',
-    security: 'Security / Keamanan',
+    operasional: 'Operasional (Operational Lead)',
+    security: 'Security (Pos Satpam & Keamanan)',
     sales_admin: 'Adm. Penjualan',
     purchasing_admin: 'Adm. Pembelian',
     hr_admin: 'HR Admin',
@@ -262,7 +272,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
     driver: 'Kru Supir / Driver',
     marketing_online: 'Marketing Online',
     marketing_offline: 'Marketing Offline',
-    crew_helper: 'Kru Helper',
+    crew_helper: 'Kru Helper / Kernet',
     unassigned: '⚠️ Perlu Diisi (Belum Ada Role)'
   };
 
@@ -521,7 +531,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
     const role = (u.role || '').toLowerCase();
     switch (filterKey) {
       case 'logistics':
-        return role === 'spv_logistik' || role === 'driver' || /logistik|pengiriman|distribusi|armada|supir/i.test(dept);
+        return role === 'spv_logistik' || role === 'operasional' || role === 'driver' || role === 'crew_helper' || /logistik|pengiriman|distribusi|armada|supir|operasional/i.test(dept);
       case 'sales':
         return role === 'sales_admin' || /sales|penjualan/i.test(dept);
       case 'warehouse':
@@ -533,7 +543,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       case 'finance':
         return role === 'finance_tax_admin' || /finance|tax|keuangan|pajak/i.test(dept);
       case 'hr':
-        return role === 'hr_admin' || /hr|human|ga|personalia|general affair/i.test(dept);
+        return role === 'hr_admin' || role === 'security' || /hr|human|ga|personalia|general affair|satpam|keamanan/i.test(dept);
       case 'super_admin':
         return role === 'super_admin' || /super|direksi|manajemen/i.test(dept);
       default:
@@ -868,8 +878,18 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                     </div>
                   </div>
 
-                  {/* User Actions in Detail View: Edit & Aktifkan/Nonaktifkan */}
+                  {/* User Actions in Detail View: Masuk Role, Edit & Aktifkan/Nonaktifkan */}
                   <div className="flex items-center gap-2 self-end sm:self-auto flex-wrap">
+                    {selectedUser.status === 'approved' && (
+                      <button
+                        onClick={() => logisticsStore.switchCurrentUser(selectedUser.id)}
+                        className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs active:scale-95"
+                        title={`Masuk sebagai ${selectedUser.fullName} dan buka menu ${ROLE_LABELS[selectedUser.role] || selectedUser.role}`}
+                      >
+                        <UserCheck className="w-3.5 h-3.5" />
+                        <span>Masuk & Buka Menu Role</span>
+                      </button>
+                    )}
                     {isSuperAdmin && (
                       <button
                         onClick={() => handleOpenEdit(selectedUser)}

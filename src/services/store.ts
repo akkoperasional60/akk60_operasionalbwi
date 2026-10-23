@@ -63,6 +63,7 @@ import {
   INITIAL_FUEL_LOGS,
   FUEL_TARGET_RATIOS
 } from '../data/fuelMockData';
+import { getDefaultPermissionsForRole } from '../utils/rbac';
 
 const STORAGE_KEYS = {
   FLEETS: 'akk_fleets_v1',
@@ -70,8 +71,8 @@ const STORAGE_KEYS = {
   STORES: 'akk_stores_v1',
   SCHEDULES: 'akk_schedules_v1',
   DEVICES: 'akk_devices_v1',
-  CURRENT_USER: 'akk_user_v1',
-  USERS: 'akk_users_list_v2',
+  CURRENT_USER: 'akk_user_v2',
+  USERS: 'akk_users_list_v4',
   SUPABASE_CONFIG: 'akk_supabase_config_v1',
   CREW_HISTORY: 'akk_crew_history_v1',
   AREA_APPROVALS: 'akk_area_approvals_v1',
@@ -569,108 +570,37 @@ class LogisticsStore {
       }
     }
 
-    // Auto-migrate user profiles if the user name was changed
-    let updatedUsers = false;
-
-    // Ensure Muhammad Syaiful Bahri exists as active spv_logistik
-    const hasBahri = this.users.some(u => 
-      u.email.toLowerCase() === 'bahri@gmail.com' || 
-      u.fullName.toLowerCase().includes('syaiful bahri')
-    );
-    if (!hasBahri) {
-      this.users.unshift({
-        id: 'usr-bahri',
-        email: 'bahri@gmail.com',
-        fullName: 'MUHAMMAD SYAIFUL BAHRI',
-        role: 'spv_logistik',
-        department: 'Operasional Distribusi Packaging Banyuwangi',
-        phone: '085257997040',
-        status: 'approved',
-        createdAt: '2026-10-08T08:00:00Z',
-        approvedAt: '2026-10-08T08:05:00Z',
-        approvedBy: 'MUHAMMAD SYAIFUL BAHRI',
-        notes: 'Diverifikasi langsung oleh Super Admin'
-      });
-      updatedUsers = true;
-    }
     this.runDataMigrations();
   }
 
   private runDataMigrations() {
+    // Ensure each user has default permissions initialized for their role if not already customized
     this.users = this.users.map(u => {
-      let updated = false;
-      let newName = u.fullName;
-      let newApprovedBy = u.approvedBy;
-      let newRole = u.role;
-
-      if (u.role === 'super_admin' || u.id === 'usr-001' || u.fullName.includes('Bayu Novianto') || u.fullName === 'Ir. Hendra Gunawan') {
-        newName = 'Super Admin';
-        newApprovedBy = 'Super Admin';
-        updated = true;
-      }
-      if (u.approvedBy && (u.approvedBy.includes('Bayu Novianto') || u.approvedBy === 'Ir. Hendra Gunawan')) {
-        newApprovedBy = 'Super Admin';
-        updated = true;
-      }
-      // Re-assign Dewi Anggraini to sales_admin if previously set as spv_logistik
-      if (u.fullName.toLowerCase().includes('dewi anggraini') && u.role === 'spv_logistik') {
-        newRole = 'sales_admin';
-        updated = true;
-      }
-      // Ensure Muhammad Syaiful Bahri is approved spv_logistik
-      if (u.fullName.toLowerCase().includes('syaiful bahri')) {
-        if (u.role !== 'spv_logistik' || u.status !== 'approved') {
-          newRole = 'spv_logistik';
-          updated = true;
-        }
-      }
-      // Ensure Budiono is recognized as driver (Kru Supir Utama)
-      if (u.fullName.toLowerCase().includes('budiono') || u.id === 'usr-budiono') {
-        if (u.role !== 'driver') {
-          newRole = 'driver';
-          updated = true;
-        }
-        if (!u.password) {
-          u.password = 'budiono';
-          updated = true;
-        }
-      }
-
-      if (updated) {
-        return { ...u, fullName: newName, approvedBy: newApprovedBy, role: newRole };
+      if (!u.permissions || !u.permissions.modules || Object.keys(u.permissions.modules).length === 0) {
+        return {
+          ...u,
+          permissions: {
+            modules: getDefaultPermissionsForRole(u.role)
+          }
+        };
       }
       return u;
     });
-    
-    // Note: updatedUsers logic needs to be handled if used
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
 
     if (this.currentUser) {
-      let currentUserChanged = false;
-      let curName = this.currentUser.fullName;
-      let curApprovedBy = this.currentUser.approvedBy;
-      let curRole = this.currentUser.role;
-
-      if (this.currentUser.role === 'super_admin' || this.currentUser.id === 'usr-001' || curName.includes('Bayu Novianto') || curName === 'Ir. Hendra Gunawan') {
-        curName = 'Super Admin';
-        curApprovedBy = 'Super Admin';
-        currentUserChanged = true;
-      }
-      if (curApprovedBy && (curApprovedBy.includes('Bayu Novianto') || curApprovedBy === 'Ir. Hendra Gunawan')) {
-        curApprovedBy = 'Super Admin';
-        currentUserChanged = true;
-      }
-      if (curName.toLowerCase().includes('dewi anggraini') && curRole === 'spv_logistik') {
-        curRole = 'sales_admin';
-        currentUserChanged = true;
-      }
-
-      if (currentUserChanged) {
+      const matchedUser = this.users.find(u => u.id === this.currentUser.id || u.role === this.currentUser.role);
+      if (matchedUser) {
+        this.currentUser = {
+          ...matchedUser
+        };
+        this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
+      } else if (!this.currentUser.permissions) {
         this.currentUser = {
           ...this.currentUser,
-          fullName: curName,
-          approvedBy: curApprovedBy,
-          role: curRole
+          permissions: {
+            modules: getDefaultPermissionsForRole(this.currentUser.role)
+          }
         };
         this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
       }
@@ -2175,16 +2105,23 @@ class LogisticsStore {
     const existing = this.users[userIndex];
     const oldName = existing.fullName;
 
+    const nextPermissions = data.permissions
+      ? data.permissions
+      : (data.role && data.role !== existing.role)
+      ? { modules: getDefaultPermissionsForRole(data.role) }
+      : existing.permissions || { modules: getDefaultPermissionsForRole(data.role || existing.role) };
+
     const updatedUser: UserProfile = {
       ...existing,
       ...data,
+      permissions: nextPermissions,
       id: userId
     };
 
     this.users[userIndex] = updatedUser;
 
     if (this.currentUser.id === userId) {
-      this.currentUser = { ...this.currentUser, ...data, id: userId };
+      this.currentUser = { ...updatedUser };
       this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
     }
 
@@ -2349,23 +2286,9 @@ class LogisticsStore {
       );
       if (crewUser) return crewUser;
 
-      const newDriverUser: UserProfile = {
-        id: `usr-${matchedCrew.id}`,
-        email: `${matchedCrew.name.toLowerCase().replace(/[^a-z0-9]/g, '')}@akk-packaging.co.id`,
-        password: matchedCrew.name.toLowerCase().replace(/[^a-z0-9]/g, ''),
-        fullName: matchedCrew.name,
-        role: matchedCrew.role.toLowerCase().includes('helper') ? 'crew_helper' : 'driver',
-        department: 'Operasional Distribusi Banyuwangi',
-        phone: matchedCrew.phone || '+62 812-3344-5566',
-        status: 'approved',
-        createdAt: new Date().toISOString(),
-        approvedAt: new Date().toISOString(),
-        approvedBy: 'Super Admin',
-        notes: 'Akun Pengemudi Resmi AKK'
-      };
-      this.users.push(newDriverUser);
-      this.saveToStorage(STORAGE_KEYS.USERS, this.users);
-      return newDriverUser;
+      const targetRole: UserRole = matchedCrew.role.toLowerCase().includes('helper') ? 'crew_helper' : 'driver';
+      const roleUser = this.users.find(u => u.role === targetRole);
+      if (roleUser) return roleUser;
     }
 
     // 7. Alias Super Admin khusus (hanya jika kata kunci admin/bayun)

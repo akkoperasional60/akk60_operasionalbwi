@@ -1680,7 +1680,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
   return (
     <div className="space-y-5">
-      {/* 1. Header Card: Google Sheets Integrated Banner */}
+      {/* 1. Header Card: Excel Delivery Schedule Integrated Banner */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg relative overflow-hidden">
         <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
 
@@ -1689,26 +1689,22 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             <div className="flex items-center gap-2 flex-wrap">
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
                 <FileSpreadsheet className="w-3.5 h-3.5" />
-                GOOGLE SHEETS &bull; SHEET: &quot;ALL&quot;
+                EXCEL SPREADSHEET &bull; JADWAL PENGIRIMAN
               </span>
-              <span className="text-xs text-slate-500 font-mono">Live Roster DC Banyuwangi</span>
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-xs text-slate-400 font-medium">Bulan Januari 2026 (5 Pekan Lengkap)</span>
-              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                Auto-Save Aktif
+              <span className="text-xs text-slate-400 font-medium">
+                {MONTH_NAMES[selectedMonth === -1 ? 0 : selectedMonth]} {selectedYear}
               </span>
             </div>
 
             <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight mt-2 flex items-center gap-2">
-              Jadwal Operasional Admin (Sheet ALL)
+              Jadwal Pengiriman &amp; Penugasan Armada
             </h2>
-            <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-3xl leading-relaxed">
-              Tabel jadwal terpadu formasi pengiriman armada, tim gudang, jadwal armada bebas/off, serta perizinan karyawan langsung dari spreadsheet Google Sheets Sheet &quot;ALL&quot;.
+            <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-2xl leading-relaxed">
+              Tabel jadwal pengiriman armada, penugasan kru supir &amp; helper, serta alokasi area distribusi berbasis Excel.
             </p>
           </div>
 
-          {/* Quick Header Actions */}
+          {/* Quick Header Actions (Excel & Mapping Only) */}
           <div className="flex items-center gap-2.5 flex-wrap">
             <input 
               type="file" 
@@ -1719,44 +1715,12 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             />
 
             <button
-              onClick={toggleAutoSync}
-              className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition cursor-pointer border shadow-md ${
-                isAutoSyncEnabled
-                  ? 'bg-emerald-700/80 hover:bg-emerald-600 text-white border-emerald-400/50'
-                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
-              }`}
-              title="Aktifkan/Nonaktifkan auto-save dan auto-sync otomatis antara Google Sheets dan Web"
-            >
-              <Zap className={`w-4 h-4 ${isAutoSyncEnabled ? 'text-amber-300 animate-pulse' : 'text-slate-400'}`} />
-              <span>Auto-Sync: {isAutoSyncEnabled ? 'AKTIF' : 'OFF'}</span>
-            </button>
-
-            <button
-              onClick={() => setIsApiSyncModalOpen(true)}
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold shadow-md transition cursor-pointer border border-emerald-400/30"
-              title="Hubungkan & Sinkronkan langsung dengan Google Sheets API v4"
-            >
-              <Sparkles className="w-4 h-4 text-emerald-200" />
-              <span>Live Sync Google Sheets API</span>
-            </button>
-
-            <button
-              onClick={handleLiveFetchFromSheets}
-              disabled={isLiveFetching}
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-amber-600/90 hover:bg-amber-500 text-white text-xs font-bold shadow-md transition cursor-pointer border border-amber-400/40"
-              title="Tarik langsung pembaruan baris & tanggal baru dari Google Sheets"
-            >
-              <RefreshCw className={`w-4 h-4 text-amber-200 ${isLiveFetching ? 'animate-spin' : ''}`} />
-              <span>{isLiveFetching ? 'Menarik Data...' : '🔄 Tarik Pembaruan Live Google Sheets'}</span>
-            </button>
-
-            <button
               onClick={() => {
                 setActiveMappingCategory('area');
                 setIsAreaMappingModalOpen(true);
               }}
               className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition cursor-pointer relative"
-              title="Kelola & tinjau pemetaan otomatis nama area spreadsheet ke Jadwal Pengiriman & Muat"
+              title="Kelola & tinjau pemetaan otomatis nama area spreadsheet ke Jadwal Pengiriman"
             >
               <MapPin className="w-4 h-4 text-rose-400" />
               <span>Pemetaan Area ({Object.keys(detectedAreaMappings).length})</span>
@@ -1780,24 +1744,13 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               )}
             </button>
 
-            {onNavigateToCrewHistory && (
-              <button
-                onClick={onNavigateToCrewHistory}
-                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-indigo-950/60 hover:bg-indigo-900/80 text-indigo-300 hover:text-white text-xs font-bold border border-indigo-500/40 transition cursor-pointer"
-                title="Buka submenu Histori & Otorisasi Kru"
-              >
-                <HistoryIcon className="w-4 h-4 text-indigo-400" />
-                <span>Histori &amp; Otorisasi Kru</span>
-              </button>
-            )}
-
             <button
               onClick={() => setIsUploadConfigModalOpen(true)}
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition cursor-pointer"
-              title="Unggah spreadsheet baru (.xlsx / .csv)"
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold border border-emerald-500/40 shadow-sm transition cursor-pointer"
+              title="Unggah spreadsheet Excel (.xlsx / .csv)"
             >
-              <Upload className="w-4 h-4 text-emerald-400" />
-              <span>Unggah Spreadsheet</span>
+              <Upload className="w-4 h-4 text-emerald-100" />
+              <span>Unggah Excel</span>
             </button>
 
             <button
@@ -1808,16 +1761,6 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               <Download className="w-4 h-4 text-blue-400" />
               <span>Ekspor Excel (.xlsx)</span>
             </button>
-
-            <button
-              onClick={handleSyncToOperationalSchedules}
-              disabled={isSyncing}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-800 text-white text-xs font-black shadow-md transition cursor-pointer"
-              title="Konversi baris pengiriman Sheet ALL menjadi jadwal resmi di menu Jadwal Pengiriman & Muat serta Histori Kru"
-            >
-              <Sparkles className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
-              <span>{isSyncing ? 'Menyinkronkan...' : '⚡ Sinkronkan ke Jadwal & Histori Kru'}</span>
-            </button>
           </div>
         </div>
 
@@ -1827,27 +1770,6 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             <div className="flex items-center gap-2.5">
               <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
               <span className="font-semibold">{syncSuccessMessage}</span>
-            </div>
-            <div className="flex items-center gap-2 self-end sm:self-auto">
-              {onNavigateToSchedules && (
-                <button
-                  onClick={onNavigateToSchedules}
-                  className="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
-                >
-                  <span>Daftar Jadwal</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-              )}
-              {onNavigateToCrewHistory && (
-                <button
-                  onClick={onNavigateToCrewHistory}
-                  className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap shadow-xs"
-                >
-                  <HistoryIcon className="w-3.5 h-3.5" />
-                  <span>Buka Histori &amp; Otorisasi Kru</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-              )}
             </div>
           </div>
         )}
@@ -1860,7 +1782,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             </div>
             <div>
               <span className="text-[10px] uppercase font-black text-emerald-600 dark:text-emerald-400 tracking-wider block">
-                Keterangan Periode Jadwal Operasional
+                Keterangan Periode Jadwal Pengiriman
               </span>
               <h4 className="text-sm sm:text-base font-black text-slate-900 dark:text-white flex items-center gap-2 mt-0.5 flex-wrap">
                 <span>{MONTH_NAMES[selectedMonth === -1 ? 0 : selectedMonth]} {selectedYear}</span>

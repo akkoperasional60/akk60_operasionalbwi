@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Sidebar, NavTab } from './components/Sidebar';
 import { ExecutiveDashboard } from './components/ExecutiveDashboard';
 import { DashboardOverview } from './components/DashboardOverview';
@@ -32,7 +32,7 @@ import { RetailStore } from './types';
 import { logisticsStore } from './services/store';
 import { ShieldCheck, Clock, AlertTriangle, LogIn, ChevronLeft, ChevronRight, Bell, Smartphone, Lock } from 'lucide-react';
 import { useToast } from './context/ToastContext';
-import { canAccess } from './utils/rbac';
+import { canAccess, getDefaultTabForRole } from './utils/rbac';
 import { useRoleAccess } from './hooks/useRoleAccess';
 
 const FLEET_MANAGEMENT_TABS: NavTab[] = [
@@ -124,18 +124,27 @@ export default function App() {
     } catch {}
   }, [isDriver]);
 
+  const prevUserRef = useRef<{ id: string; role: string }>({
+    id: currentUser.id,
+    role: currentUser.role
+  });
+
   useEffect(() => {
-    const isFleetTabBlocked = FLEET_MANAGEMENT_TABS.includes(currentTab) && !canManageFleet(currentUser);
+    const userOrRoleChanged =
+      prevUserRef.current.id !== currentUser.id ||
+      prevUserRef.current.role !== currentUser.role;
+
+    if (userOrRoleChanged) {
+      prevUserRef.current = { id: currentUser.id, role: currentUser.role };
+      setCurrentTab(getDefaultTabForRole(currentUser.role) as NavTab);
+      return;
+    }
+
+    const isFleetTabBlocked = FLEET_MANAGEMENT_TABS.includes(currentTab) && !canManageFleet(currentUser) && !canAccess(currentUser, currentTab);
     const isAdminTabBlocked = currentTab === 'users' && !isAdmin(currentUser) && !canAccess(currentUser, 'users');
 
     if (isFleetTabBlocked || isAdminTabBlocked || !canAccess(currentUser, currentTab)) {
-      if (isDriver(currentUser)) {
-        setCurrentTab('driver_portal');
-      } else if (isAdmin(currentUser)) {
-        setCurrentTab('dashboard');
-      } else {
-        setCurrentTab('operational_dashboard');
-      }
+      setCurrentTab(getDefaultTabForRole(currentUser.role) as NavTab);
     }
   }, [currentUser, currentTab, canManageFleet, isDriver, isAdmin]);
 
@@ -367,14 +376,14 @@ export default function App() {
             <AnalyticsReportingModule />
           )}
 
-          {currentTab === 'schedules' && canManageFleet() && (
+          {currentTab === 'schedules' && (canManageFleet() || canAccess(currentUser, 'schedules')) && (
             <ScheduleManagement
               preselectedStore={preselectedStore}
               onClearPreselectedStore={() => setPreselectedStore(null)}
             />
           )}
 
-          {currentTab === 'fleets' && canManageFleet() && (
+          {currentTab === 'fleets' && (canManageFleet() || canAccess(currentUser, 'fleets')) && (
             <FleetCrewManagement
               onNavigateToSpareParts={() => setCurrentTab('spareparts')}
               onNavigateToFuelEfficiency={() => setCurrentTab('fuel_efficiency')}
@@ -382,11 +391,11 @@ export default function App() {
             />
           )}
 
-          {currentTab === 'spareparts' && canManageFleet() && (
+          {currentTab === 'spareparts' && (canManageFleet() || canAccess(currentUser, 'spareparts')) && (
             <SparePartManagement onNavigateToFleets={() => setCurrentTab('fleets')} />
           )}
 
-          {currentTab === 'fuel_efficiency' && canManageFleet() && (
+          {currentTab === 'fuel_efficiency' && (canManageFleet() || canAccess(currentUser, 'fuel_efficiency')) && (
             <FuelEfficiencyManagement onNavigateToFleets={() => setCurrentTab('fleets')} />
           )}
 
@@ -408,11 +417,11 @@ export default function App() {
             <CustomerMapping onScheduleForStore={handleScheduleForStore} />
           )}
 
-          {currentTab === 'tracksolid' && canManageFleet() && (
+          {currentTab === 'tracksolid' && (canManageFleet() || canAccess(currentUser, 'tracksolid')) && (
             <TracksolidGateway />
           )}
 
-          {currentTab === 'fleet_forms' && canManageFleet() && (
+          {currentTab === 'fleet_forms' && (canManageFleet() || canAccess(currentUser, 'fleet_forms')) && (
             <FleetFormCenter />
           )}
 
