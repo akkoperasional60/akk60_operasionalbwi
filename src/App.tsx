@@ -253,8 +253,8 @@ export default function App() {
               <span>{currentTab === 'driver_portal' ? 'Portal Admin' : 'Mode Driver Mobile'}</span>
             </button>
 
-            {/* Clean Segmented Theme Switcher */}
-            <ThemeSwitcher variant="segmented" />
+            {/* Clean Icon-Only Theme Switcher */}
+            <ThemeSwitcher variant="icon-only" />
 
             {/* Live Time */}
             <LiveClockBadge />

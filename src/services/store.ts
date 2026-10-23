@@ -1502,6 +1502,38 @@ class LogisticsStore {
   }
 
   public emitNotification(type: 'delivery' | 'checker' | 'schedule' | 'sla_warning' | 'geofence', title: string, message: string, urgent?: boolean, data?: any) {
+    // Jika pengguna aktif adalah Driver atau Helper dan notifikasi terkait jadwal tertentu,
+    // pastikan hanya driver yang ditugaskan pada jadwal tersebut yang menerima notifikasi.
+    if (data?.schedule) {
+      const role = String(this.currentUser?.role || '').toLowerCase();
+      if (role === 'driver' || role === 'crew_helper') {
+        const activeCrew = this.getActiveDriverCrew();
+        const targetId = (activeCrew?.id || this.currentUser?.id || '').trim().toLowerCase();
+        const targetName = (activeCrew?.name || this.currentUser?.fullName || '').trim().toLowerCase();
+        const sch = data.schedule as Schedule;
+        const crewIds = [sch.crewId, sch.crewHelperId, sch.crewHelper2Id, sch.crew?.id]
+          .filter(Boolean)
+          .map(x => String(x).trim().toLowerCase());
+        const crewNames = [sch.crew?.name, sch.crewHelper?.name, sch.crewHelper2?.name]
+          .filter(Boolean)
+          .map(x => String(x).trim().toLowerCase());
+
+        const strippedTargetId = targetId.replace(/^(usr-|crw-)/, '');
+        const idMatched = Boolean(
+          targetId &&
+            crewIds.some(cid => cid === targetId || (strippedTargetId.length >= 3 && cid.replace(/^(usr-|crw-)/, '') === strippedTargetId))
+        );
+        const nameMatched = Boolean(
+          targetName &&
+            targetName.length >= 3 &&
+            crewNames.some(cname => cname === targetName || cname.includes(targetName) || targetName.includes(cname))
+        );
+
+        if (!idMatched && !nameMatched) {
+          return;
+        }
+      }
+    }
     this.notificationListeners.forEach(l => l({ type, title, message, urgent, data }));
   }
 
@@ -2620,16 +2652,29 @@ class LogisticsStore {
     this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
     this.syncSchedulesToCrewHistory(this.schedules);
 
+    const hydratedNewSchedule: Schedule = {
+      ...newSchedule,
+      fleet: this.fleets.find(f => f.id === newSchedule.fleetId) || newSchedule.fleet,
+      crew: this.crews.find(c => c.id === newSchedule.crewId) || newSchedule.crew,
+      crewHelper: newSchedule.crewHelperId ? (this.crews.find(c => c.id === newSchedule.crewHelperId) || newSchedule.crewHelper) : undefined,
+      crewHelper2: newSchedule.crewHelper2Id ? (this.crews.find(c => c.id === newSchedule.crewHelper2Id) || newSchedule.crewHelper2) : undefined
+    };
+
     // Trigger auto-write middleware
     this.dispatchMiddleware({
       entityType: 'schedule',
       action: 'create',
       id: newSchedule.id,
-      data: newSchedule,
+      data: hydratedNewSchedule,
       timestamp: new Date().toISOString()
     });
 
-    return newSchedule;
+    // Publish real-time assignment notification via Supabase Realtime (filtered to assigned driver)
+    import('./supabaseRealtimeSync').then(({ supabaseRealtimeSync }) => {
+      supabaseRealtimeSync.publishScheduleChange('INSERT', hydratedNewSchedule, null);
+    }).catch(() => {});
+
+    return hydratedNewSchedule;
   }
 
   public updateSchedule(id: string, updatedSchedule: Partial<Omit<Schedule, 'id' | 'createdAt'>>) {
@@ -2649,25 +2694,26 @@ class LogisticsStore {
     this.syncSchedulesToCrewHistory(this.schedules);
 
     if (newSch) {
+      const hydratedUpdated: Schedule = {
+        ...(newSch as Schedule),
+        fleet: this.fleets.find(f => f.id === (newSch as Schedule).fleetId) || (newSch as Schedule).fleet,
+        crew: this.crews.find(c => c.id === (newSch as Schedule).crewId) || (newSch as Schedule).crew,
+        crewHelper: (newSch as Schedule).crewHelperId ? (this.crews.find(c => c.id === (newSch as Schedule).crewHelperId) || (newSch as Schedule).crewHelper) : undefined,
+        crewHelper2: (newSch as Schedule).crewHelper2Id ? (this.crews.find(c => c.id === (newSch as Schedule).crewHelper2Id) || (newSch as Schedule).crewHelper2) : undefined
+      };
+
       this.dispatchMiddleware({
         entityType: 'schedule',
         action: 'update',
         id,
-        data: newSch,
+        data: hydratedUpdated,
         previousData: oldSch || undefined,
         timestamp: new Date().toISOString()
       });
-    }
 
-    if (oldSch && newSch) {
-      const isUrgent = (newSch as Schedule).isInterIsland || (newSch as Schedule).status === 'delayed';
-      const storeName = this.stores.find(s => s.id === (newSch as Schedule).storeId)?.storeName || 'Store';
-      this.emitNotification(
-        'schedule',
-        isUrgent ? '⚠️ Perubahan Jadwal Muat MENDESAK' : 'Perubahan Jadwal Muat',
-        `Jadwal armada ${(newSch as Schedule).trackingNumber} rute ke ${storeName} diperbarui.`,
-        isUrgent
-      );
+      import('./supabaseRealtimeSync').then(({ supabaseRealtimeSync }) => {
+        supabaseRealtimeSync.publishScheduleChange('UPDATE', hydratedUpdated, oldSch);
+      }).catch(() => {});
     }
 
     this.notify();
@@ -2910,21 +2956,20 @@ class LogisticsStore {
     this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
 
     if (targetSch) {
-      const statusTexts: Record<ShipmentStatus, string> = {
-        scheduled: 'Terjadwal',
-        picked_up: 'Telah Dimuat (Picked Up)',
-        in_transit: 'Dalam Perjalanan (Transit)',
-        delivered: 'Telah Sampai (Delivered)',
-        delayed: 'Mengalami Keterlambatan (Delayed)'
-      };
-      this.emitNotification(
-        'delivery',
-        'Pembaruan Status Pengiriman',
-        `Armada ${(targetSch as Schedule).trackingNumber} kini berstatus: ${statusTexts[status] || status}.`,
-        status === 'delayed'
-      );
-
       const sch = targetSch as Schedule;
+      const hydratedStatusSch: Schedule = {
+        ...sch,
+        status,
+        fleet: this.fleets.find(f => f.id === sch.fleetId) || sch.fleet,
+        crew: this.crews.find(c => c.id === sch.crewId) || sch.crew,
+        crewHelper: sch.crewHelperId ? (this.crews.find(c => c.id === sch.crewHelperId) || sch.crewHelper) : undefined,
+        crewHelper2: sch.crewHelper2Id ? (this.crews.find(c => c.id === sch.crewHelper2Id) || sch.crewHelper2) : undefined
+      };
+
+      import('./supabaseRealtimeSync').then(({ supabaseRealtimeSync }) => {
+        supabaseRealtimeSync.publishScheduleChange('UPDATE', hydratedStatusSch, sch);
+      }).catch(() => {});
+
       const updateItem: OfflineScheduleStatusUpdate = {
         id: 'off-upd-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
         scheduleId: sch.id,

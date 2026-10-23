@@ -46,11 +46,48 @@ export const DriverSuratJalanModal: React.FC<DriverSuratJalanModalProps> = ({
     setCurrentWaybill(waybill);
   }, [waybill]);
 
+  const formatConcisePerson = (rawName?: string): string => {
+    if (!rawName) return '-';
+    const cleaned = rawName
+      .replace(/\s*\([^)]*\)/g, '')
+      .replace(/^Super\s+Admin$/i, 'Admin')
+      .replace(/^(MUHAMMAD|MOHAMAD|MOCHAMAD|MUH\.?)\s+/i, 'M. ')
+      .replace(/^ACHMAD\s+|^ACH\.?\s+/i, 'A. ')
+      .trim();
+    const parts = cleaned.split(/\s+/).filter(Boolean);
+    if (parts.length <= 2) return parts.join(' ');
+    if (parts[0] === 'M.' || parts[0] === 'A.') {
+      return `${parts[0]} ${parts[1]} ${parts[2].charAt(0)}.`;
+    }
+    return `${parts[0]} ${parts[1].charAt(0)}.`;
+  };
+
+  const formatConciseCrewPair = (driverRaw?: string, helperRaw?: string): string => {
+    const dShort = formatConcisePerson(driverRaw || 'Driver').split(/\s+/).slice(0, 2).join(' ');
+    if (!helperRaw || helperRaw === '-' || helperRaw.toLowerCase() === 'tanpa helper') {
+      return dShort;
+    }
+    const hCleaned = helperRaw
+      .replace(/\s*\([^)]*\)/g, '')
+      .replace(/^(MUHAMMAD|MOHAMAD|MOCHAMAD|MUH\.?)\s+/i, '')
+      .trim();
+    const dFirst = (driverRaw || 'Driver')
+      .replace(/^Super\s+Admin$/i, 'Admin')
+      .replace(/^(MUHAMMAD|MOHAMAD|MOCHAMAD|MUH\.?)\s+/i, '')
+      .trim()
+      .split(/\s+/)[0];
+    const hFirst = hCleaned.split(/\s+/)[0] || '';
+    return hFirst ? `${dFirst} / ${hFirst}` : dShort;
+  };
+
   const allUsers = logisticsStore.getUsers();
-  const spvUser = allUsers.find(u => u.role === 'spv_logistik' && u.status === 'approved') || { fullName: 'MUHAMMAD SYAIFUL BAHRI', role: 'spv_logistik' };
+  const spvUser = allUsers.find(u => u.role === 'spv_logistik' && u.status === 'approved') || { fullName: 'M. Syaiful B.', role: 'spv_logistik' };
   const operasionalUser = allUsers.find(u => u.role === 'operasional' && u.status === 'approved') || { fullName: 'Hadi Purnomo', role: 'operasional' };
-  const securityUser = allUsers.find(u => u.role === 'security' && u.status === 'approved') || { fullName: 'Slamet Riyadi (Security)', role: 'security' };
-  const driverHelperName = `${currentWaybill?.crew.driverName || 'Driver'}${currentWaybill?.crew.helperName ? ` / ${currentWaybill.crew.helperName}` : ''}`;
+  const securityUser = allUsers.find(u => u.role === 'security' && u.status === 'approved') || { fullName: 'Slamet Riyadi', role: 'security' };
+  const spvConciseName = formatConcisePerson(currentWaybill?.preparedByName || spvUser.fullName);
+  const operasionalConciseName = formatConcisePerson(currentWaybill?.acknowledgedByName || operasionalUser.fullName);
+  const securityConciseName = formatConcisePerson(currentWaybill?.securityOfficerName || securityUser.fullName);
+  const driverHelperName = formatConciseCrewPair(currentWaybill?.crew.driverName, currentWaybill?.crew.helperName);
 
   const handleToggleSignRole = (roleKey: 'preparedBy' | 'acknowledgedBy' | 'security' | 'driver') => {
     if (!currentWaybill) return;
@@ -64,17 +101,17 @@ export const DriverSuratJalanModal: React.FC<DriverSuratJalanModalProps> = ({
       const nextState = !(updated.preparedBySigned === true);
       updated.preparedBySigned = nextState;
       updated.preparedBySignedAt = nextState ? timestampStr : '';
-      updated.preparedByName = spvUser.fullName;
+      updated.preparedByName = spvConciseName;
     } else if (roleKey === 'acknowledgedBy') {
       const nextState = !(updated.acknowledgedBySigned === true);
       updated.acknowledgedBySigned = nextState;
       updated.acknowledgedBySignedAt = nextState ? timestampStr : '';
-      updated.acknowledgedByName = operasionalUser.fullName;
+      updated.acknowledgedByName = operasionalConciseName;
     } else if (roleKey === 'security') {
       const nextState = !(updated.securitySigned === true);
       updated.securitySigned = nextState;
       updated.securitySignedAt = nextState ? timestampStr : '';
-      updated.securityOfficerName = securityUser.fullName;
+      updated.securityOfficerName = securityConciseName;
     } else if (roleKey === 'driver') {
       const nextState = !(updated.driverSigned === true);
       updated.driverSigned = nextState;
@@ -221,7 +258,7 @@ export const DriverSuratJalanModal: React.FC<DriverSuratJalanModalProps> = ({
         {/* Scrollable Printable 57-58mm Thermal Paper Preview */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs bg-slate-950 flex flex-col items-center">
           <div className="text-[10px] text-amber-400 font-bold bg-amber-500/10 border border-amber-500/30 px-3 py-1 rounded-full">
-            Pratinjau Kertas Thermal 57-58 mm • Kolom TTD Dikosongi Terlebih Dahulu
+            Pratinjau Kertas Thermal 57-58 mm • Kolom TTD Siap Cetak
           </div>
 
           {/* 58mm Thermal Receipt Sheet */}
@@ -313,7 +350,7 @@ export const DriverSuratJalanModal: React.FC<DriverSuratJalanModalProps> = ({
               </div>
             </div>
 
-            {/* Kolom Tanda Tangan (TTD Dikosongi Terlebih Dahulu) */}
+            {/* Kolom Tanda Tangan (Tanpa Tulisan Kosong & Nama Ringkas) */}
             <div className="pt-1 space-y-2">
               <div className="text-center font-bold text-[8.5px] text-slate-900 font-sans uppercase">
                 KOLOM TANDA TANGAN (TTD)
@@ -330,12 +367,10 @@ export const DriverSuratJalanModal: React.FC<DriverSuratJalanModalProps> = ({
                   >
                     {currentWaybill.preparedBySigned === true ? (
                       <span className="text-[7.5px] font-bold text-blue-700">✓ TTD Terisi</span>
-                    ) : (
-                      <span className="text-[7px] text-slate-400 italic">( Kosong )</span>
-                    )}
+                    ) : null}
                   </div>
                   <div className="font-bold text-slate-900 text-[7.5px] truncate">
-                    {currentWaybill.preparedByName || spvUser.fullName}
+                    {spvConciseName}
                   </div>
                 </div>
 
@@ -349,12 +384,10 @@ export const DriverSuratJalanModal: React.FC<DriverSuratJalanModalProps> = ({
                   >
                     {currentWaybill.acknowledgedBySigned === true ? (
                       <span className="text-[7.5px] font-bold text-indigo-700">✓ TTD Terisi</span>
-                    ) : (
-                      <span className="text-[7px] text-slate-400 italic">( Kosong )</span>
-                    )}
+                    ) : null}
                   </div>
                   <div className="font-bold text-slate-900 text-[7.5px] truncate">
-                    {currentWaybill.acknowledgedByName || operasionalUser.fullName}
+                    {operasionalConciseName}
                   </div>
                 </div>
 
@@ -368,12 +401,10 @@ export const DriverSuratJalanModal: React.FC<DriverSuratJalanModalProps> = ({
                   >
                     {currentWaybill.securitySigned === true ? (
                       <span className="text-[7.5px] font-bold text-emerald-700">✓ TTD Terisi</span>
-                    ) : (
-                      <span className="text-[7px] text-slate-400 italic">( Kosong )</span>
-                    )}
+                    ) : null}
                   </div>
                   <div className="font-bold text-slate-900 text-[7.5px] truncate">
-                    {currentWaybill.securityOfficerName || securityUser.fullName}
+                    {securityConciseName}
                   </div>
                 </div>
 
@@ -387,9 +418,7 @@ export const DriverSuratJalanModal: React.FC<DriverSuratJalanModalProps> = ({
                   >
                     {currentWaybill.driverSigned === true ? (
                       <span className="text-[7.5px] font-bold text-amber-700">✓ TTD Terisi</span>
-                    ) : (
-                      <span className="text-[7px] text-slate-400 italic">( Kosong )</span>
-                    )}
+                    ) : null}
                   </div>
                   <div className="font-bold text-slate-900 text-[7.5px] truncate">
                     {driverHelperName}

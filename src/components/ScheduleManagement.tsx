@@ -70,6 +70,8 @@ export const ScheduleManagement: React.FC<ScheduleManagementProps> = ({
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [selectedDayFilter, setSelectedDayFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [selectedStoreFilter, setSelectedStoreFilter] = useState<string>('all');
+  const [departureDateFilter, setDepartureDateFilter] = useState<string>('');
   const [selectedMonth, setSelectedMonth] = useState<string>('Semua Bulan');
   const [selectedYear, setSelectedYear] = useState<string>('2026');
   const [selectedFleetId, setSelectedFleetId] = useState<string>('all');
@@ -746,15 +748,75 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
     return Array.from(map.values()).sort((a, b) => a.rawDate.getTime() - b.rawDate.getTime());
   }, [schedules]);
 
+  // Unique list of Store Names / Area Destinations for the Store Filter dropdown
+  const availableStoreNames = useMemo(() => {
+    const storeNameSet = new Set<string>();
+    schedules.forEach(sch => {
+      const sName = (sch.store?.storeName || sch.areaName || AREA_MAP[sch.storeId] || '').trim();
+      if (sName) storeNameSet.add(sName);
+      const linkedRetailStore = stores.find(st => st.id === sch.storeId);
+      if (linkedRetailStore?.storeName) {
+        storeNameSet.add(linkedRetailStore.storeName.trim());
+      }
+    });
+    stores.forEach(st => {
+      if (st.storeName) storeNameSet.add(st.storeName.trim());
+    });
+    return Array.from(storeNameSet).sort((a, b) => a.localeCompare(b));
+  }, [schedules, stores]);
+
   const filteredSchedules = schedules.filter(sch => {
+    // 1. Filter Status Pengiriman (scheduled, in_transit, delivered, delayed)
     const matchesStatus = statusFilter === 'all' || sch.status === statusFilter;
+
+    // 2. Kolom Pencarian: Nomor Pelacakan (trackingNumber) & Nama Toko (storeName / areaName)
+    const q = searchQuery.trim().toLowerCase();
+    const linkedRetailStore = stores.find(st => st.id === sch.storeId);
+    const resolvedStoreName = (
+      sch.store?.storeName ||
+      linkedRetailStore?.storeName ||
+      sch.areaName ||
+      AREA_MAP[sch.storeId] ||
+      ''
+    ).toLowerCase();
     const matchesQuery =
-      sch.trackingNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (sch.areaName && sch.areaName.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      sch.store?.storeName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      sch.fleet?.plateNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (sch.fleet?.initialCode && sch.fleet.initialCode.toLowerCase().includes(searchQuery.toLowerCase()));
-    
+      !q ||
+      sch.trackingNumber.toLowerCase().includes(q) ||
+      resolvedStoreName.includes(q) ||
+      (sch.areaName && sch.areaName.toLowerCase().includes(q)) ||
+      (sch.store?.storeName && sch.store.storeName.toLowerCase().includes(q)) ||
+      (linkedRetailStore?.storeName && linkedRetailStore.storeName.toLowerCase().includes(q)) ||
+      (sch.fleet?.plateNumber && sch.fleet.plateNumber.toLowerCase().includes(q)) ||
+      (sch.fleet?.initialCode && sch.fleet.initialCode.toLowerCase().includes(q)) ||
+      (sch.crew?.name && sch.crew.name.toLowerCase().includes(q));
+
+    // 3. Filter Nama Toko
+    let matchesStore = true;
+    if (selectedStoreFilter !== 'all') {
+      const targetStoreLower = selectedStoreFilter.toLowerCase();
+      matchesStore =
+        resolvedStoreName === targetStoreLower ||
+        resolvedStoreName.includes(targetStoreLower) ||
+        (sch.areaName || '').toLowerCase() === targetStoreLower ||
+        (sch.store?.storeName || '').toLowerCase() === targetStoreLower ||
+        (linkedRetailStore?.storeName || '').toLowerCase() === targetStoreLower;
+    }
+
+    // 4. Filter Tanggal Keberangkatan (departureDateFilter & selectedSpecificDate)
+    const details = getScheduleDateDetails(sch);
+    if (departureDateFilter) {
+      const rawDepSlice = (sch.departureDate || '').slice(0, 10);
+      if (details.dateKey !== departureDateFilter && rawDepSlice !== departureDateFilter) {
+        return false;
+      }
+    }
+
+    if (selectedSpecificDate !== 'all') {
+      if (details.dateKey !== selectedSpecificDate) {
+        return false;
+      }
+    }
+
     // Fleet filter
     const matchesFleet = selectedFleetId === 'all' || sch.fleetId === selectedFleetId;
 
@@ -765,18 +827,10 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
       matchesDay = schDay === selectedDayFilter;
     }
 
-    // Specific Date filter
-    if (selectedSpecificDate !== 'all') {
-      const details = getScheduleDateDetails(sch);
-      if (details.dateKey !== selectedSpecificDate) {
-        return false;
-      }
-    }
-
     // Month & Year Date filter
     let matchesDate = true;
     const dateStr = sch.departureDate || sch.createdAt;
-    if (dateStr) {
+    if (dateStr && !departureDateFilter) {
       const d = new Date(dateStr);
       if (!isNaN(d.getTime())) {
         if (selectedYear !== 'Semua Tahun' && d.getFullYear().toString() !== selectedYear) {
@@ -791,7 +845,7 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
       }
     }
 
-    return matchesStatus && matchesQuery && matchesFleet && matchesDay && matchesDate;
+    return matchesStatus && matchesQuery && matchesStore && matchesFleet && matchesDay && matchesDate;
   });
 
   // Chronologically sorted filtered schedules
@@ -1003,39 +1057,152 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
           </div>
         </div>
 
-        {/* Filter Bar: Status & Search (Only shown in schedules_list mode) */}
+        {/* Filter Bar: Status Pengiriman, Tanggal Keberangkatan, Nama Toko & Pencarian Nomor Pelacakan / Nama Toko */}
         {activeMainTab === 'schedules_list' && (
           <>
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mt-4 pt-4 border-t border-slate-800/80">
-          <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-lg border border-slate-800 overflow-x-auto max-w-full">
-            {['all', 'in_transit', 'scheduled', 'delivered', 'delayed'].map(st => (
-              <button
-                key={st}
-                onClick={() => setStatusFilter(st)}
-                className={`px-3 py-1 rounded-md text-xs font-semibold capitalize transition cursor-pointer whitespace-nowrap ${
-                  statusFilter === st ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {st === 'all' && 'Semua Status'}
-                {st === 'in_transit' && 'Dalam Perjalanan'}
-                {st === 'scheduled' && 'Terjadwal'}
-                {st === 'delivered' && 'Selesai'}
-                {st === 'delayed' && 'Tertunda'}
-              </button>
-            ))}
-          </div>
+            <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4 mt-4 pt-4 border-t border-slate-800/80">
+              {/* Status Pengiriman Pills (scheduled, in_transit, delivered, delayed) */}
+              <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 overflow-x-auto max-w-full">
+                {[
+                  { id: 'all', label: 'Semua Status', count: schedules.length },
+                  { id: 'scheduled', label: 'Terjadwal (Scheduled)', count: schedules.filter(s => s.status === 'scheduled').length },
+                  { id: 'in_transit', label: 'Dalam Perjalanan (In Transit)', count: schedules.filter(s => s.status === 'in_transit').length },
+                  { id: 'delivered', label: 'Terkirim (Delivered)', count: schedules.filter(s => s.status === 'delivered').length },
+                  { id: 'delayed', label: 'Tertunda (Delayed)', count: schedules.filter(s => s.status === 'delayed').length }
+                ].map(st => (
+                  <button
+                    key={st.id}
+                    onClick={() => setStatusFilter(st.id)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+                      statusFilter === st.id ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <span>{st.label}</span>
+                    <span
+                      className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                        statusFilter === st.id ? 'bg-blue-800 text-blue-100' : 'bg-slate-800 text-slate-400'
+                      }`}
+                    >
+                      {st.count}
+                    </span>
+                  </button>
+                ))}
+              </div>
 
-          <div className="relative w-full sm:w-72">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-            <input
-              type="text"
-              placeholder="Cari no resi, toko, atau plat truk..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-            />
-          </div>
-        </div>
+              {/* Kolom Pencarian Nomor Pelacakan (Tracking Number) & Nama Toko */}
+              <div className="relative w-full lg:w-96">
+                <Search className="w-4 h-4 text-blue-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Cari nomor pelacakan (tracking number) atau nama toko..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-8 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-blue-500 shadow-xs"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-0.5 rounded cursor-pointer"
+                    title="Bersihkan pencarian"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Dedicated Filter Row: Status Pengiriman Dropdown, Tanggal Keberangkatan, dan Nama Toko */}
+            <div className="mt-3 pt-3 border-t border-slate-800/60 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+              {/* 1. Filter Status Pengiriman */}
+              <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-2.5 flex flex-col gap-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                  <Clock className="w-3 h-3 text-blue-400" />
+                  <span>Filter Status Pengiriman</span>
+                </label>
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-white focus:outline-none focus:border-blue-500 cursor-pointer"
+                >
+                  <option value="all">Semua Status ({schedules.length})</option>
+                  <option value="scheduled">Scheduled / Terjadwal</option>
+                  <option value="in_transit">In Transit / Dalam Perjalanan</option>
+                  <option value="delivered">Delivered / Terkirim</option>
+                  <option value="delayed">Delayed / Tertunda</option>
+                </select>
+              </div>
+
+              {/* 2. Filter Tanggal Keberangkatan */}
+              <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-2.5 flex flex-col gap-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between gap-1.5">
+                  <span className="flex items-center gap-1.5">
+                    <Calendar className="w-3 h-3 text-emerald-400" />
+                    <span>Tanggal Keberangkatan</span>
+                  </span>
+                  {departureDateFilter && (
+                    <button
+                      type="button"
+                      onClick={() => setDepartureDateFilter('')}
+                      className="text-[10px] text-amber-400 hover:underline font-bold cursor-pointer"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </label>
+                <input
+                  type="date"
+                  value={departureDateFilter}
+                  onChange={(e) => {
+                    setDepartureDateFilter(e.target.value);
+                    if (e.target.value) {
+                      setSelectedSpecificDate('all');
+                    }
+                  }}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-white focus:outline-none focus:border-emerald-500 cursor-pointer"
+                />
+              </div>
+
+              {/* 3. Filter Nama Toko / Tujuan */}
+              <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-2.5 flex flex-col gap-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                  <Store className="w-3 h-3 text-amber-400" />
+                  <span>Filter Nama Toko / Tujuan</span>
+                </label>
+                <select
+                  value={selectedStoreFilter}
+                  onChange={(e) => setSelectedStoreFilter(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-white focus:outline-none focus:border-amber-500 cursor-pointer truncate"
+                >
+                  <option value="all">Semua Toko &amp; Area Tujuan ({availableStoreNames.length})</option>
+                  {availableStoreNames.map(storeName => (
+                    <option key={storeName} value={storeName}>
+                      {storeName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 4. Filter Armada Truk */}
+              <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-2.5 flex flex-col gap-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                  <Truck className="w-3 h-3 text-indigo-400" />
+                  <span>Filter Armada Truk</span>
+                </label>
+                <select
+                  value={selectedFleetId}
+                  onChange={(e) => setSelectedFleetId(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-white focus:outline-none focus:border-indigo-500 cursor-pointer truncate"
+                >
+                  <option value="all">Semua Armada ({fleets.length} Truk)</option>
+                  {fleets.map(f => (
+                    <option key={f.id} value={f.id}>
+                      {f.initialCode ? `[${f.initialCode}] ` : ''}{f.plateNumber} - {f.vehicleType}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
 
         {/* Day-of-Week Filter Row (Senin - Sabtu) */}
         <div className="mt-3 pt-3 border-t border-slate-800/60 flex flex-wrap items-center justify-between gap-3">
@@ -1076,7 +1243,7 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
           </div>
         </div>
 
-        {/* Secondary Filter Row: Bulan, Tahun, Pilih Armada */}
+        {/* Secondary Filter Row: Bulan, Tahun, Ekspor & Reset */}
         <div className="mt-3 pt-3 border-t border-slate-800/60 flex flex-wrap items-center justify-between gap-3 text-xs">
           <div className="flex flex-wrap items-center gap-3">
             {/* Bulan */}
@@ -1111,31 +1278,12 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
               </select>
             </div>
 
-            {/* Pilih Armada */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-slate-400 text-[11px] font-medium">Armada:</span>
-              <select
-                value={selectedFleetId}
-                onChange={(e) => setSelectedFleetId(e.target.value)}
-                className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-xs font-semibold text-white focus:outline-none focus:border-emerald-500 cursor-pointer max-w-[220px] truncate"
-              >
-                <option value="all" className="bg-slate-900 text-white">
-                  Semua Armada ({fleets.length} Truk)
-                </option>
-                {fleets.map(f => (
-                  <option key={f.id} value={f.id} className="bg-slate-900 text-white">
-                    {f.initialCode ? `[${f.initialCode}] ` : ''}{f.plateNumber} - {f.vehicleType}
-                  </option>
-                ))}
-              </select>
-            </div>
-            
             {/* Tombol Ekspor CSV */}
             <button
               onClick={() => {
                 const csvContent = "data:text/csv;charset=utf-8," + 
-                  ["Area Kirim,Armada,Supir,Status,Keberangkatan"].concat(
-                    filteredSchedules.map(s => `"${s.areaName || s.store?.storeName || AREA_MAP[s.storeId] || 'Area'}","${s.fleet?.plateNumber}","${s.crew?.name}","${s.status}","${new Date(s.departureDate).toLocaleString()}"`)
+                  ["No Pelacakan,Nama Toko / Area Kirim,Armada,Supir,Status,Keberangkatan"].concat(
+                    filteredSchedules.map(s => `"${s.trackingNumber}","${s.areaName || s.store?.storeName || AREA_MAP[s.storeId] || 'Area'}","${s.fleet?.plateNumber}","${s.crew?.name}","${s.status}","${new Date(s.departureDate).toLocaleString()}"`)
                   ).join("\n");
                 const encodedUri = encodeURI(csvContent);
                 const link = document.createElement("a");
@@ -1145,24 +1293,38 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                 link.click();
                 document.body.removeChild(link);
               }}
-              className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-900/30 hover:bg-emerald-800/40 text-emerald-400 border border-emerald-800 text-xs font-semibold transition"
+              className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-900/30 hover:bg-emerald-800/40 text-emerald-400 border border-emerald-800 text-xs font-semibold transition cursor-pointer"
             >
               <FileText className="w-3.5 h-3.5" />
               Ekspor CSV
             </button>
           </div>
 
-          <div className="flex items-center gap-2">
-            {(selectedMonth !== 'Semua Bulan' || selectedYear !== 'Semua Tahun' || selectedFleetId !== 'all') && (
+          <div className="flex items-center gap-3">
+            {(statusFilter !== 'all' ||
+              searchQuery !== '' ||
+              selectedStoreFilter !== 'all' ||
+              departureDateFilter !== '' ||
+              selectedSpecificDate !== 'all' ||
+              selectedDayFilter !== 'all' ||
+              selectedMonth !== 'Semua Bulan' ||
+              selectedYear !== 'Semua Tahun' ||
+              selectedFleetId !== 'all') && (
               <button
                 onClick={() => {
+                  setStatusFilter('all');
+                  setSearchQuery('');
+                  setSelectedStoreFilter('all');
+                  setDepartureDateFilter('');
+                  setSelectedSpecificDate('all');
+                  setSelectedDayFilter('all');
                   setSelectedMonth('Semua Bulan');
                   setSelectedYear('Semua Tahun');
                   setSelectedFleetId('all');
                 }}
-                className="text-[11px] text-slate-400 hover:text-white underline cursor-pointer"
+                className="text-[11px] text-amber-400 hover:text-white underline font-bold cursor-pointer"
               >
-                Reset Filter
+                Reset Semua Filter
               </button>
             )}
             <span className="text-[11px] text-slate-400">
@@ -1478,10 +1640,15 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                                   </span>
                                 </td>
 
-                                {/* Kolom Kirim Area (Tujuan) */}
+                                {/* Kolom Kirim Area (Tujuan) / Nama Toko & No. Pelacakan */}
                                 <td className="p-4">
                                   <div className="font-extrabold text-white text-xs uppercase tracking-wide">
                                     {sch.areaName || sch.store?.storeName || AREA_MAP[sch.storeId] || 'Area Pengiriman'}
+                                  </div>
+                                  <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-slate-400 font-mono">
+                                    <span className="px-1.5 py-0.2 rounded bg-slate-800 text-blue-300 border border-slate-700">
+                                      {sch.trackingNumber}
+                                    </span>
                                   </div>
                                 </td>
 
@@ -1668,10 +1835,15 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                         </span>
                       </td>
 
-                      {/* Kolom Kirim Area (Tujuan) */}
+                      {/* Kolom Kirim Area (Tujuan) / Nama Toko & No. Pelacakan */}
                       <td className="p-4">
                         <div className="font-extrabold text-white text-xs uppercase tracking-wide">
                           {sch.areaName || sch.store?.storeName || AREA_MAP[sch.storeId] || 'Area Pengiriman'}
+                        </div>
+                        <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-slate-400 font-mono">
+                          <span className="px-1.5 py-0.2 rounded bg-slate-800 text-blue-300 border border-slate-700">
+                            {sch.trackingNumber}
+                          </span>
                         </div>
                       </td>
 

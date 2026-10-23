@@ -147,11 +147,26 @@ export async function downloadSuratJalanPdf(
     doc.text('KOLOM TANDA TANGAN (TTD):', paperWidth / 2, y, { align: 'center' });
     y += 3.5;
 
+    const formatConcisePdfName = (raw?: string) => {
+      if (!raw) return '-';
+      const cleaned = raw
+        .replace(/\s*\([^)]*\)/g, '')
+        .replace(/^Super\s+Admin$/i, 'Admin')
+        .replace(/^(MUHAMMAD|MOHAMAD|MOCHAMAD|MUH\.?)\s+/i, 'M. ')
+        .trim();
+      const parts = cleaned.split(/\s+/).filter(Boolean);
+      if (parts.length <= 2) return parts.join(' ');
+      if (parts[0] === 'M.') return `M. ${parts[1]} ${parts[2].charAt(0)}.`;
+      return `${parts[0]} ${parts[1].charAt(0)}.`;
+    };
+
     const allUsers = logisticsStore.getUsers();
-    const spvName = waybill.preparedByName || allUsers.find(u => u.role === 'spv_logistik')?.fullName || 'M. SYAIFUL BAHRI';
-    const operasionalName = waybill.acknowledgedByName || allUsers.find(u => u.role === 'operasional')?.fullName || 'Hadi Purnomo';
-    const secName = waybill.securityOfficerName || allUsers.find(u => u.role === 'security')?.fullName || 'Slamet Riyadi';
-    const crewName = waybill.crew?.driverName || 'Driver / Helper';
+    const spvName = formatConcisePdfName(waybill.preparedByName || allUsers.find(u => u.role === 'spv_logistik')?.fullName || 'M. Syaiful B.');
+    const operasionalName = formatConcisePdfName(waybill.acknowledgedByName || allUsers.find(u => u.role === 'operasional')?.fullName || 'Hadi Purnomo');
+    const secName = formatConcisePdfName(waybill.securityOfficerName || allUsers.find(u => u.role === 'security')?.fullName || 'Slamet Riyadi');
+    const dFirst = (waybill.crew?.driverName || 'Driver').replace(/^Super\s+Admin$/i, 'Admin').replace(/^(MUHAMMAD|MOHAMAD|MOCHAMAD)\s+/i, '').trim().split(/\s+/)[0];
+    const hFirst = (waybill.crew?.helperName || '').replace(/^(MUHAMMAD|MOHAMAD|MOCHAMAD)\s+/i, '').trim().split(/\s+/)[0];
+    const crewName = hFirst && hFirst !== '-' ? `${dFirst} / ${hFirst}` : dFirst;
 
     const colW = contentWidth / 2;
     const leftX = margin + colW / 2;

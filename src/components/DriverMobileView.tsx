@@ -57,7 +57,8 @@ import {
   UserPlus,
   Mail,
   EyeOff,
-  Moon
+  Moon,
+  Bell
 } from 'lucide-react';
 import {
   Schedule,
@@ -837,16 +838,135 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     return unsub;
   }, []);
 
-  // ⚡ Supabase Realtime Live Synchronization Layer
+  // 🔔 Driver-Specific Supabase Realtime Push Notifications State
+  const [driverPushNotifs, setDriverPushNotifs] = useState<
+    Array<{
+      id: string;
+      eventType: 'INSERT' | 'UPDATE';
+      notificationCategory: 'new_assignment' | 'schedule_updated' | 'status_changed';
+      scheduleId: string;
+      trackingNumber: string;
+      storeName: string;
+      plateNumber?: string;
+      status: string;
+      title: string;
+      message: string;
+      urgent: boolean;
+      timestamp: string;
+      read: boolean;
+    }>
+  >(() => {
+    try {
+      const saved = localStorage.getItem(`akk_driver_rt_notifs_${selectedDriverId}`);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [latestLiveBannerNotif, setLatestLiveBannerNotif] = useState<{
+    id: string;
+    title: string;
+    message: string;
+    urgent: boolean;
+    category: 'new_assignment' | 'schedule_updated' | 'status_changed';
+  } | null>(null);
+  const [isDriverNotifDrawerOpen, setIsDriverNotifDrawerOpen] = useState<boolean>(false);
+  const [pushPermissionStatus, setPushPermissionStatus] = useState<string>(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      return Notification.permission;
+    }
+    return 'unsupported';
+  });
+
   useEffect(() => {
-    import('../services/supabaseRealtimeSync').then(({ supabaseRealtimeSync }) => {
-      supabaseRealtimeSync.subscribe((event) => {
-        console.log('[DriverMobileView] Realtime sync event received:', event);
-        setCrews(logisticsStore.getCrews());
-        setFleets(logisticsStore.getFleets());
-        loadDeliveries(true);
-      });
-    }).catch(() => {});
+    try {
+      const saved = localStorage.getItem(`akk_driver_rt_notifs_${selectedDriverId}`);
+      setDriverPushNotifs(saved ? JSON.parse(saved) : []);
+    } catch {
+      setDriverPushNotifs([]);
+    }
+  }, [selectedDriverId]);
+
+  const saveDriverPushNotifs = (
+    updater: (prev: typeof driverPushNotifs) => typeof driverPushNotifs
+  ) => {
+    setDriverPushNotifs(prev => {
+      const next = updater(prev).slice(0, 30);
+      try {
+        localStorage.setItem(`akk_driver_rt_notifs_${selectedDriverId}`, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  const handleRequestBrowserPushPermission = async () => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    try {
+      const perm = await Notification.requestPermission();
+      setPushPermissionStatus(perm);
+      if (perm === 'granted') {
+        addNotification(
+          'delivery',
+          'Push Notifikasi Diaktifkan',
+          `Notifikasi push real-time aktif untuk tugas pengiriman ${portalDisplayName}.`
+        );
+      }
+    } catch {}
+  };
+
+  // ⚡ Supabase Realtime Live Synchronization Layer (Strictly Filtered for Active Driver)
+  useEffect(() => {
+    let unsubscribeDriverRealtime: (() => void) | null = null;
+    const activeDriverName = currentDriver?.name || portalDisplayName;
+
+    import('../services/supabaseRealtimeSync')
+      .then(({ supabaseRealtimeSync }) => {
+        unsubscribeDriverRealtime = supabaseRealtimeSync.subscribeForDriver({
+          driverId: selectedDriverId,
+          driverName: activeDriverName,
+          onNotification: (notif) => {
+            saveDriverPushNotifs(prev => [
+              {
+                id: notif.id,
+                eventType: notif.eventType,
+                notificationCategory: notif.notificationCategory,
+                scheduleId: notif.scheduleId,
+                trackingNumber: notif.trackingNumber,
+                storeName: notif.storeName,
+                plateNumber: notif.plateNumber,
+                status: String(notif.status),
+                title: notif.title,
+                message: notif.message,
+                urgent: notif.urgent,
+                timestamp: notif.timestamp,
+                read: false
+              },
+              ...prev.filter(item => item.id !== notif.id)
+            ]);
+
+            setLatestLiveBannerNotif({
+              id: notif.id,
+              title: notif.title,
+              message: notif.message,
+              urgent: notif.urgent,
+              category: notif.notificationCategory
+            });
+
+            addNotification(
+              notif.notificationCategory === 'new_assignment' ? 'schedule' : 'delivery',
+              notif.title,
+              notif.message,
+              notif.urgent
+            );
+          },
+          onScheduleSync: () => {
+            setCrews(logisticsStore.getCrews());
+            setFleets(logisticsStore.getFleets());
+            loadDeliveries(true);
+          }
+        });
+      })
+      .catch(() => {});
 
     const handleRealtimeSynced = () => {
       setCrews(logisticsStore.getCrews());
@@ -858,11 +978,11 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
     return () => {
       window.removeEventListener('akk-realtime-synced', handleRealtimeSynced);
-      import('../services/supabaseRealtimeSync').then(({ supabaseRealtimeSync }) => {
-        supabaseRealtimeSync.unsubscribe();
-      }).catch(() => {});
+      if (unsubscribeDriverRealtime) {
+        unsubscribeDriverRealtime();
+      }
     };
-  }, [selectedDriverId]);
+  }, [selectedDriverId, currentDriver?.name, portalDisplayName]);
 
   // Cek peran user saat ini untuk hak akses khusus Super Admin (Hanya Super Admin yang melihat tombol Hapus Riwayat Selesai)
   const isSuperAdmin =
@@ -1084,9 +1204,68 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     setIsRefreshing(false);
   };
 
-  // Saat klik Mulai Berangkat pada jadwal hari ini, langsung masuk alur ke SJ Keluar
-  const handleStartDepartureToSjKeluar = async (delivery: Schedule) => {
-    await handleUpdateStatus(delivery, 'in_transit');
+  // Status Pra-Keberangkatan pada Tab Aktif: 1. Keluar Argo -> 2. SJ Keluar dari Sistem -> 3. Tiba di Gudang
+  const [keluarArgoMap, setKeluarArgoMap] = useState<Record<string, string>>(() => {
+    try {
+      const saved = localStorage.getItem('akk_driver_keluar_argo_v1');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const [sjKeluarSistemMap, setSjKeluarSistemMap] = useState<Record<string, string>>(() => {
+    try {
+      const saved = localStorage.getItem('akk_driver_sj_sistem_v1');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const handleConfirmKeluarArgo = (delivery: Schedule) => {
+    const nowTime =
+      new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
+    setKeluarArgoMap(prev => {
+      const next = { ...prev, [delivery.id]: nowTime };
+      try {
+        localStorage.setItem('akk_driver_keluar_argo_v1', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+    if (delivery.fleetId) {
+      logisticsStore.updateFleetStatus(delivery.fleetId, 'on-duty');
+    }
+    addNotification(
+      'delivery',
+      '1. Keluar Argo Tercatat',
+      `Armada ${assignedFleet?.plateNumber || delivery.fleet?.plateNumber || ''} tercatat Keluar Argo (${nowTime}). Silakan lanjutkan buka SJ Keluar dari Sistem.`
+    );
+  };
+
+  const handleIssueSjKeluarDariSistem = async (delivery: Schedule) => {
+    const nowTime =
+      new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
+    if (!keluarArgoMap[delivery.id]) {
+      setKeluarArgoMap(prev => {
+        const next = { ...prev, [delivery.id]: nowTime };
+        try {
+          localStorage.setItem('akk_driver_keluar_argo_v1', JSON.stringify(next));
+        } catch {}
+        return next;
+      });
+    }
+    setSjKeluarSistemMap(prev => {
+      const next = { ...prev, [delivery.id]: nowTime };
+      try {
+        localStorage.setItem('akk_driver_sj_sistem_v1', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+
+    if (delivery.status !== 'in_transit') {
+      await handleUpdateStatus(delivery, 'in_transit');
+    }
     const updatedSchedule: Schedule = {
       ...delivery,
       status: 'in_transit',
@@ -1095,15 +1274,18 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     };
     const wb = driverWaybillService.getWaybillForSchedule(updatedSchedule);
     driverWaybillService.updateWaybillStatus(wb.id, 'in_transit');
-    setWaybillStatusFilter('all');
-    setBottomNav('surat_jalan');
     setActiveWaybillToView(driverWaybillService.getWaybillForSchedule(updatedSchedule));
     setIsWaybillModalOpen(true);
     addNotification(
       'delivery',
-      'Berangkat Dimulai • Masuk Alur SJ Keluar',
-      `Rute ${delivery.areaName || delivery.store?.storeName || 'Pengiriman'} telah berangkat dan diarahkan langsung ke Surat Jalan Keluar (SJ Keluar).`
+      '2. SJ Keluar dari Sistem Diterbitkan',
+      `Surat Jalan Keluar (${wb.waybillNumber}) untuk rute ${delivery.areaName || delivery.store?.storeName || 'Pengiriman'} telah keluar dari sistem.`
     );
+  };
+
+  // Saat klik Mulai Berangkat pada jadwal hari ini, masuk ke tahapan Keluar Argo -> SJ Keluar dari Sistem
+  const handleStartDepartureToSjKeluar = async (delivery: Schedule) => {
+    await handleIssueSjKeluarDariSistem(delivery);
   };
 
   // Submit delay report (Lapor Kendala Pengiriman)
@@ -1581,7 +1763,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                 </span>
               </div>
               <h1 className="text-sm font-bold text-white truncate">
-                {portalDisplayName}
+                Portal Operasional Kru
               </h1>
             </div>
           </div>
@@ -1617,6 +1799,20 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               )}
             </button>
 
+            {/* Real-Time Driver Push Notifications Bell */}
+            <button
+              onClick={() => setIsDriverNotifDrawerOpen(prev => !prev)}
+              className="relative p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-400 transition active:scale-95 cursor-pointer border border-slate-700/80"
+              title="Notifikasi Real-Time Tugas Pengiriman Saya"
+            >
+              <Bell className="w-4 h-4" />
+              {driverPushNotifs.filter(n => !n.read).length > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] font-black flex items-center justify-center animate-pulse">
+                  {driverPushNotifs.filter(n => !n.read).length}
+                </span>
+              )}
+            </button>
+
             <button
               onClick={() => {
                 setIsRefreshing(true);
@@ -1642,60 +1838,150 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
             <span>{realtimeTimeStr}</span>
           </div>
         </div>
+      </header>
 
-        {/* Driver/Helper Account Display Integrated with User Management & Assigned Truck Bar */}
-        <div className="mt-2.5 pt-2.5 border-t border-slate-800/80 flex items-center justify-between gap-2 text-xs">
-          <div className="flex items-center gap-1.5 text-slate-300 min-w-0">
-            <span className="text-[10px] text-slate-400 font-semibold uppercase">{syncedUserRoleInfo.roleLabel}:</span>
-            <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg px-2.5 py-1 font-bold truncate">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0"></span>
-              <span className="truncate">{portalDisplayName}</span>
-              <span className={`text-[9px] px-1.5 py-0.5 rounded border shrink-0 font-mono font-bold ${
-                syncedUserRoleInfo.roleLabel === 'Helper'
-                  ? 'text-cyan-400 bg-cyan-500/10 border-cyan-500/30'
-                  : 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'
-              }`}>
-                Role: {syncedUserRoleInfo.roleLabel}
-              </span>
+      {/* 🔔 REAL-TIME PUSH NOTIFICATION BANNER FOR ASSIGNED DRIVER TASKS */}
+      {latestLiveBannerNotif && (
+        <div
+          className={`px-4 py-3 border-b text-xs flex items-start justify-between gap-3 animate-fadeIn shrink-0 ${
+            latestLiveBannerNotif.urgent
+              ? 'bg-rose-950/90 border-rose-500/50 text-rose-100'
+              : latestLiveBannerNotif.category === 'new_assignment'
+              ? 'bg-indigo-950/90 border-indigo-500/50 text-indigo-100'
+              : 'bg-emerald-950/90 border-emerald-500/50 text-emerald-100'
+          }`}
+        >
+          <div className="flex items-start gap-2.5 min-w-0">
+            <div
+              className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5 ${
+                latestLiveBannerNotif.urgent
+                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                  : latestLiveBannerNotif.category === 'new_assignment'
+                  ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40'
+                  : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+              }`}
+            >
+              <Bell className="w-4 h-4 animate-bounce" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5 font-black text-xs">
+                <span>{latestLiveBannerNotif.title}</span>
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-white/10 font-mono uppercase">
+                  Realtime Push
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-200 mt-0.5 leading-relaxed">
+                {latestLiveBannerNotif.message}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setLatestLiveBannerNotif(null)}
+            className="p-1 rounded-lg hover:bg-white/10 text-slate-300 hover:text-white shrink-0 cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* 🔔 DRIVER REAL-TIME NOTIFICATION POPOVER DRAWER */}
+      {isDriverNotifDrawerOpen && (
+        <div className="bg-slate-900 border-b border-slate-800 px-4 py-3.5 space-y-3 text-xs shadow-xl animate-fadeIn shrink-0">
+          <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-800">
+            <div className="flex items-center gap-2">
+              <Bell className="w-4 h-4 text-amber-400" />
+              <div>
+                <div className="font-black text-white text-xs">
+                  Notifikasi Real-Time Tugas ({portalDisplayName})
+                </div>
+                <div className="text-[10px] text-slate-400">
+                  Hanya menampilkan jadwal pengiriman yang ditugaskan kepada Anda
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5">
+              {driverPushNotifs.length > 0 && (
+                <button
+                  onClick={() =>
+                    saveDriverPushNotifs(prev => prev.map(item => ({ ...item, read: true })))
+                  }
+                  className="text-[10px] text-amber-400 hover:underline font-bold cursor-pointer"
+                >
+                  Tandai Dibaca
+                </button>
+              )}
+              <button
+                onClick={() => setIsDriverNotifDrawerOpen(false)}
+                className="p-1 rounded-lg bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
-            <span className="text-[10px] text-slate-400 font-semibold uppercase">Armada:</span>
-            {activeShift || isFleetLockedAfterCheckin ? (
-              <div
-                className="bg-slate-950 border border-emerald-500/50 text-emerald-400 font-mono font-bold text-xs rounded-lg px-2.5 py-1 flex items-center gap-1.5 select-none"
-              >
-                <Lock className="w-3 h-3 text-emerald-400 shrink-0" />
-                <span>
-                  {assignedFleet?.plateNumber} {assignedFleet?.initialCode ? `(${assignedFleet.initialCode})` : ''}
-                </span>
-              </div>
-            ) : (
-              <select
-                value={assignedFleet?.id || ''}
-                onChange={(e) => {
-                  const locked = lockSelectedFleetForDriver(e.target.value);
-                  if (locked) {
-                    addNotification(
-                      'delivery',
-                      'Armada Terkunci',
-                      `Armada ${locked.plateNumber} (${locked.initialCode || locked.vehicleType}) dikunci untuk pengiriman ini.`
-                    );
-                  }
-                }}
-                className="bg-slate-950 border border-slate-800 text-emerald-400 font-mono font-bold text-xs rounded-lg px-2 py-1 focus:outline-none focus:border-emerald-500"
-              >
-                {fleets.map(f => (
-                  <option key={f.id} value={f.id}>
-                    {f.plateNumber} {f.initialCode ? `(${f.initialCode})` : ''}
-                  </option>
-                ))}
-              </select>
-            )}
+          <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+            <div className="flex items-center gap-2 text-[11px]">
+              <Radio className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+              <span className="text-slate-300 font-semibold">
+                Filter Khusus Kru: <strong className="text-white">{portalDisplayName}</strong>
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              {pushPermissionStatus !== 'granted' && pushPermissionStatus !== 'unsupported' && (
+                <button
+                  onClick={handleRequestBrowserPushPermission}
+                  className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[10px] font-bold cursor-pointer"
+                >
+                  Aktifkan Web Push
+                </button>
+              )}
+              {driverPushNotifs.length > 0 && (
+                <button
+                  onClick={() => saveDriverPushNotifs(() => [])}
+                  className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-rose-400 text-[10px] font-bold cursor-pointer"
+                >
+                  Bersihkan
+                </button>
+              )}
+            </div>
           </div>
+
+          {driverPushNotifs.length === 0 ? (
+            <div className="py-5 text-center text-slate-400 text-[11px] bg-slate-950/60 rounded-xl border border-slate-800/80">
+              Belum ada notifikasi jadwal baru atau perubahan jadwal yang ditugaskan kepada Anda.
+            </div>
+          ) : (
+            <div className="max-h-60 overflow-y-auto space-y-2 pr-1">
+              {driverPushNotifs.map(n => (
+                <div
+                  key={n.id}
+                  onClick={() =>
+                    saveDriverPushNotifs(prev =>
+                      prev.map(item => (item.id === n.id ? { ...item, read: true } : item))
+                    )
+                  }
+                  className={`p-2.5 rounded-xl border transition cursor-pointer ${
+                    !n.read
+                      ? 'bg-slate-950 border-amber-500/40 text-white'
+                      : 'bg-slate-950/50 border-slate-800 text-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-bold text-[11px] text-amber-300">{n.title}</span>
+                    <span className="text-[9px] text-slate-500 font-mono">
+                      {new Date(n.timestamp).toLocaleTimeString('id-ID', {
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-300 mt-1 leading-relaxed">{n.message}</p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-      </header>
+      )}
 
       {/* 📶 PERSISTENT OFFLINE MODE BANNER */}
       {(!syncState.isOnline || syncState.isSimulatedOffline) && (
@@ -1775,25 +2061,29 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           <>
             {/* 🕒 DRIVER SHIFT CHECK-IN & NEU-FLAT PERFORMANCE SUMMARY DASHBOARD */}
             <div className="neu-flat rounded-2xl p-4 space-y-3.5 shadow-xl border border-slate-800">
-              {/* Header Profile & Shift Status Bar */}
+              {/* Header Profile & Shift Status Bar (Satu Nama Akun + Keterangan Role) */}
               <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className="w-10 h-10 rounded-xl neu-flat-sm flex items-center justify-center text-amber-400 shrink-0 font-black">
                     {portalInitials}
                   </div>
                   <div className="min-w-0">
-                    <div className="font-black text-xs text-white truncate">
-                      {portalDisplayName}
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-black text-xs text-white truncate">
+                        {portalDisplayName}
+                      </span>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded border shrink-0 font-mono font-bold ${
+                        syncedUserRoleInfo.roleLabel === 'Helper'
+                          ? 'text-cyan-400 bg-cyan-500/10 border-cyan-500/30'
+                          : 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'
+                      }`}>
+                        Role: {syncedUserRoleInfo.roleLabel}
+                      </span>
                     </div>
-                    <div className="text-[10px] text-slate-400 truncate flex items-center gap-1">
+                    <div className="text-[10px] text-slate-400 truncate flex items-center gap-1 mt-0.5">
                       <span>Armada:</span>
                       <span className="text-amber-400 font-bold">{assignedFleet?.plateNumber || 'P 8509 VQ'}</span>
                       <span>· {assignedFleet?.vehicleType || 'Pick Up Box'}</span>
-                      {activeShift && isFleetLockedAfterCheckin && (
-                        <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-bold">
-                          Terkunci
-                        </span>
-                      )}
                     </div>
                   </div>
                 </div>
@@ -2037,7 +2327,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               )}
             </div>
 
-            {/* Fitur Kalender / Filter Rentang Tanggal Kirim (Dari Tanggal s/d Sampai Tanggal) */}
+            {/* Fitur Kalender / Filter Rentang Tanggal Kirim (Hanya Dari Tanggal s/d Sampai Tanggal) */}
             <div className="p-3.5 bg-gradient-to-b from-slate-900 to-slate-950 rounded-2xl border border-slate-800/90 shadow-lg space-y-3 text-xs">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
@@ -2049,7 +2339,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                     <span className="text-[10px] text-slate-400 block">
                       {dateFilterStart || dateFilterEnd
                         ? `Rentang Aktif: ${dateFilterStart || 'Awal'} s/d ${dateFilterEnd || 'Akhir'}`
-                        : 'Default Semua: Jadwal Bulan Berjalan (1 Bulan)'}
+                        : 'Pilih Dari Tanggal dan Sampai Tanggal'}
                     </span>
                   </div>
                 </div>
@@ -2067,52 +2357,6 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                     <span>Reset</span>
                   </button>
                 )}
-              </div>
-
-              {/* Quick Preset Chips untuk Pergantian Bulan / Rentang Cepat */}
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-none">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const today = new Date().toISOString().slice(0, 10);
-                    setDateFilterStart(today);
-                    setDateFilterEnd(today);
-                  }}
-                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition whitespace-nowrap cursor-pointer ${
-                    dateFilterStart === new Date().toISOString().slice(0, 10) && dateFilterEnd === new Date().toISOString().slice(0, 10)
-                      ? 'bg-amber-500 text-slate-950 border-amber-400'
-                      : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
-                  }`}
-                >
-                  Hari Ini
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const now = new Date();
-                    const first = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10);
-                    const last = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().slice(0, 10);
-                    setDateFilterStart(first);
-                    setDateFilterEnd(last);
-                  }}
-                  className="px-2.5 py-1 rounded-lg text-[10px] font-bold border bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800 transition whitespace-nowrap cursor-pointer"
-                >
-                  Bulan Ini
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const now = new Date();
-                    const firstPrev = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 10);
-                    const lastPrev = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().slice(0, 10);
-                    setDateFilterStart(firstPrev);
-                    setDateFilterEnd(lastPrev);
-                    setActiveTab('all');
-                  }}
-                  className="px-2.5 py-1 rounded-lg text-[10px] font-bold border bg-slate-900 hover:bg-slate-800 text-amber-300 border-amber-500/30 transition whitespace-nowrap cursor-pointer"
-                >
-                  Bulan Lalu
-                </button>
               </div>
 
               {/* Input Dari Tanggal & Sampai Tanggal */}
@@ -2453,12 +2697,14 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                       )}
 
                       {/* Driver Status Action Workflow Buttons:
-                          Alur: Check-In -> Isi Armada -> Isi Checklist -> Simpan -> Klik Mulai Berangkat -> Konfirmasi Tiba di Gudang */}
+                          Alur Sebelum Berangkat di Tampilan Aktif: 1. Keluar Argo -> 2. SJ Keluar dari Sistem -> 3. Konfirmasi Tiba di Gudang */}
                       <div className="pt-2 border-t border-slate-200 dark:border-slate-800/80">
                         {delivery.status === 'scheduled' && (() => {
                           const todayIso = new Date().toISOString().slice(0, 10);
                           const depDate = (delivery.departureDate || '').slice(0, 10);
                           const isDueToday = Boolean(depDate && depDate <= todayIso);
+                          const isKeluarArgoDone = Boolean(keluarArgoMap[delivery.id]);
+                          const isSjKeluarDone = Boolean(sjKeluarSistemMap[delivery.id]);
 
                           return (
                             <div className="space-y-2">
@@ -2504,6 +2750,24 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                                         <span>Lewati Isi Armada &amp; Checklist (Posisi Helper)</span>
                                       </button>
                                     </div>
+                                  ) : !isKeluarArgoDone ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleConfirmKeluarArgo(delivery)}
+                                      className="w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
+                                    >
+                                      <Truck className="w-4 h-4" />
+                                      <span>Keluar Argo</span>
+                                    </button>
+                                  ) : !isSjKeluarDone ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleIssueSjKeluarDariSistem(delivery)}
+                                      className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-black text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
+                                    >
+                                      <FileText className="w-4 h-4" />
+                                      <span>SJ Keluar dari Sistem</span>
+                                    </button>
                                   ) : (
                                     <button
                                       type="button"
@@ -2511,7 +2775,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                                       className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
                                     >
                                       <Truck className="w-4 h-4" />
-                                      <span>Mulai Berangkat (Masuk ke SJ Keluar)</span>
+                                      <span>Mulai Berangkat</span>
                                     </button>
                                   )}
                                 </>
@@ -2544,38 +2808,86 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                           );
                         })()}
 
-                        {delivery.status === 'picked_up' && (
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => handleStartDepartureToSjKeluar(delivery)}
-                              className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
-                            >
-                              <Truck className="w-4 h-4" />
-                              <span>Mulai Berangkat (Masuk ke SJ Keluar)</span>
-                            </button>
-                          </div>
-                        )}
+                        {(delivery.status === 'picked_up' || delivery.status === 'in_transit') && (() => {
+                          const isKeluarArgoDone = Boolean(keluarArgoMap[delivery.id]);
+                          const isSjKeluarDone = Boolean(sjKeluarSistemMap[delivery.id]);
 
-                        {delivery.status === 'in_transit' && (
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => setPodModal({
-                                isOpen: true,
-                                delivery,
-                                conditionNote: '',
-                                serviceNote: '',
-                                hasSignature: true,
-                                photoUrl: delivery.podPhotoUrl || null,
-                                photoTimestamp: delivery.podPhotoTimestamp || null,
-                                postTripFleetStatus: 'available'
-                              })}
-                              className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
-                            >
-                              <CheckCircle2 className="w-4 h-4" />
-                              <span>Konfirmasi Tiba di Gudang</span>
-                            </button>
-                          </div>
-                        )}
+                          return (
+                            <div className="space-y-2">
+                              {/* Alur Sebelum Berangkat: 1. Keluar Argo -> 2. SJ Keluar dari Sistem */}
+                              <div className="grid grid-cols-2 gap-1.5 text-[10px]">
+                                <div
+                                  className={`px-2.5 py-1.5 rounded-xl border flex items-center gap-1.5 font-bold ${
+                                    isKeluarArgoDone
+                                      ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                                      : 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                                  }`}
+                                >
+                                  <CheckCircle2 className={`w-3.5 h-3.5 shrink-0 ${isKeluarArgoDone ? 'text-emerald-400' : 'text-amber-400'}`} />
+                                  <span className="truncate">1. Keluar Argo {isKeluarArgoDone ? '✓' : ''}</span>
+                                </div>
+                                <div
+                                  className={`px-2.5 py-1.5 rounded-xl border flex items-center gap-1.5 font-bold ${
+                                    isSjKeluarDone
+                                      ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                                      : 'bg-slate-950 border-slate-800 text-slate-400'
+                                  }`}
+                                >
+                                  <FileText className={`w-3.5 h-3.5 shrink-0 ${isSjKeluarDone ? 'text-emerald-400' : 'text-blue-400'}`} />
+                                  <span className="truncate">2. SJ Keluar Sistem {isSjKeluarDone ? '✓' : ''}</span>
+                                </div>
+                              </div>
+
+                              {!isKeluarArgoDone ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleConfirmKeluarArgo(delivery)}
+                                  className="w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
+                                >
+                                  <Truck className="w-4 h-4" />
+                                  <span>Keluar Argo</span>
+                                </button>
+                              ) : !isSjKeluarDone ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleIssueSjKeluarDariSistem(delivery)}
+                                  className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-black text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
+                                >
+                                  <FileText className="w-4 h-4" />
+                                  <span>SJ Keluar dari Sistem</span>
+                                </button>
+                              ) : (
+                                <div className="space-y-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => setPodModal({
+                                      isOpen: true,
+                                      delivery,
+                                      conditionNote: '',
+                                      serviceNote: '',
+                                      hasSignature: true,
+                                      photoUrl: delivery.podPhotoUrl || null,
+                                      photoTimestamp: delivery.podPhotoTimestamp || null,
+                                      postTripFleetStatus: 'available'
+                                    })}
+                                    className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
+                                  >
+                                    <CheckCircle2 className="w-4 h-4" />
+                                    <span>Konfirmasi Tiba di Gudang</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleIssueSjKeluarDariSistem(delivery)}
+                                    className="w-full py-2 px-3 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-800 text-blue-300 font-bold text-[11px] flex items-center justify-center gap-1.5 transition cursor-pointer"
+                                  >
+                                    <FileText className="w-3.5 h-3.5 text-blue-400" />
+                                    <span>Lihat / Cetak SJ Keluar dari Sistem</span>
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
 
                         {delivery.status === 'delayed' && (
                           <div className="space-y-2">
