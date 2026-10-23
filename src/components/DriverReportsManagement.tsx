@@ -116,8 +116,32 @@ export const DriverReportsManagement: React.FC = () => {
   const [solutionText, setSolutionText] = useState<string>('');
   const [solutionStatus, setSolutionStatus] = useState<'follow_up' | 'verified' | 'resolved'>('follow_up');
 
+  // Notifikasi Perubahan Jadwal (Hanya muncul di Laporan Kiriman Kru)
+  const [scheduleChangeNotifs, setScheduleChangeNotifs] = useState<
+    Array<{
+      id: string;
+      title: string;
+      message: string;
+      trackingNumber: string;
+      storeName: string;
+      plateNumber?: string;
+      timestamp: string;
+    }>
+  >(() => {
+    try {
+      const raw = localStorage.getItem('akk_schedule_change_notifs_v1');
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+
   const loadReports = () => {
     setReports(driverReportService.getReports());
+    try {
+      const raw = localStorage.getItem('akk_schedule_change_notifs_v1');
+      setScheduleChangeNotifs(raw ? JSON.parse(raw) : []);
+    } catch {}
   };
 
   useEffect(() => {
@@ -127,9 +151,18 @@ export const DriverReportsManagement: React.FC = () => {
       loadReports();
     };
 
+    const handleScheduleRealtime = () => {
+      try {
+        const raw = localStorage.getItem('akk_schedule_change_notifs_v1');
+        setScheduleChangeNotifs(raw ? JSON.parse(raw) : []);
+      } catch {}
+    };
+
     window.addEventListener('driver-report-updated', handleReportUpdate);
+    window.addEventListener('akk-driver-schedule-realtime', handleScheduleRealtime);
     return () => {
       window.removeEventListener('driver-report-updated', handleReportUpdate);
+      window.removeEventListener('akk-driver-schedule-realtime', handleScheduleRealtime);
     };
   }, []);
 
@@ -427,6 +460,46 @@ export const DriverReportsManagement: React.FC = () => {
               </button>
             </div>
           </div>
+
+          {/* 🔔 NOTIFIKASI PERUBAHAN JADWAL PENGIRIMAN (HANYA MUNCUL DI LAPORAN KIRIMAN KRU) */}
+          {scheduleChangeNotifs.length > 0 && (
+            <div className="bg-emerald-950/50 border border-emerald-500/40 rounded-2xl p-4 space-y-2.5 shadow-sm">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-xs font-black text-emerald-300">
+                  <RefreshCw className="w-4 h-4 text-emerald-400" />
+                  <span>Notifikasi Perubahan Jadwal Pengiriman ({scheduleChangeNotifs.length})</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setScheduleChangeNotifs([]);
+                    try {
+                      localStorage.removeItem('akk_schedule_change_notifs_v1');
+                    } catch {}
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white text-[10px] font-bold border border-slate-700 cursor-pointer"
+                >
+                  Bersihkan Notifikasi
+                </button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-40 overflow-y-auto pr-1">
+                {scheduleChangeNotifs.slice(0, 6).map(notif => (
+                  <div
+                    key={notif.id}
+                    className="p-2.5 rounded-xl bg-slate-950/90 border border-emerald-500/30 text-xs flex items-start justify-between gap-2"
+                  >
+                    <div className="min-w-0">
+                      <div className="font-bold text-emerald-300 text-[11px] truncate">{notif.title}</div>
+                      <p className="text-[11px] text-slate-300 mt-0.5 leading-snug">{notif.message}</p>
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-mono shrink-0">
+                      {new Date(notif.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* 📅 RINCIAN KALENDER: Navigasi Pertanggal & Filter Cepat Rentang Waktu (Minggu Ini & Bulan Ini) */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm space-y-3">

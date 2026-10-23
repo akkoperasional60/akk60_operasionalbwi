@@ -52,9 +52,7 @@ class DriverWaybillService {
     let status: OutboundWaybillStatus = 'checker_verified';
     if (schedule.status === 'scheduled') {
       status = 'checker_verified';
-    } else if (schedule.status === 'picked_up') {
-      status = 'gate_out';
-    } else if (schedule.status === 'in_transit') {
+    } else if (schedule.status === 'picked_up' || schedule.status === 'in_transit' || schedule.status === 'delayed') {
       status = 'in_transit';
     } else if (schedule.status === 'delivered') {
       status = 'delivered';
@@ -64,10 +62,10 @@ class DriverWaybillService {
       draft: 'Draft Manifest',
       loading: 'Proses Pemuatan (Loading Bay)',
       sealed: 'Segel Terpasang',
-      checker_verified: 'Diverifikasi Checker Gudang',
-      gate_out: 'Gate-Out Gerbang DC (Berangkat)',
-      in_transit: 'Dalam Perjalanan Pengantaran',
-      delivered: 'Diterima Toko (Selesai)'
+      checker_verified: 'Siap Out (Persiapan Keluar)',
+      gate_out: 'Di Jalan (Keluar Gudang)',
+      in_transit: 'Di Jalan (Keluar Gudang)',
+      delivered: 'Selesai (Tiba di Gudang)'
     };
 
     const crewName = schedule.crew?.name || 'Ach Taufiq';
@@ -178,14 +176,28 @@ class DriverWaybillService {
         };
         changed = true;
       }
-      if (schedule.status === 'delivered' && existing.status !== 'delivered') {
-        existing.status = 'delivered';
-        existing.statusLabel = 'Diterima Toko (Selesai)';
-        changed = true;
-      } else if (schedule.status === 'in_transit' && existing.status === 'checker_verified') {
-        existing.status = 'in_transit';
-        existing.statusLabel = 'Dalam Perjalanan Pengantaran';
-        changed = true;
+      if (schedule.status === 'delivered') {
+        if (existing.status !== 'delivered' || existing.statusLabel !== 'Selesai (Tiba di Gudang)') {
+          existing.status = 'delivered';
+          existing.statusLabel = 'Selesai (Tiba di Gudang)';
+          changed = true;
+        }
+      } else if (
+        schedule.status === 'in_transit' ||
+        schedule.status === 'picked_up' ||
+        schedule.status === 'delayed'
+      ) {
+        if (existing.status !== 'in_transit' || existing.statusLabel !== 'Di Jalan (Keluar Gudang)') {
+          existing.status = 'in_transit';
+          existing.statusLabel = 'Di Jalan (Keluar Gudang)';
+          changed = true;
+        }
+      } else if (schedule.status === 'scheduled') {
+        if (existing.status !== 'checker_verified' || existing.statusLabel !== 'Siap Out (Persiapan Keluar)') {
+          existing.status = 'checker_verified';
+          existing.statusLabel = 'Siap Out (Persiapan Keluar)';
+          changed = true;
+        }
       }
       if (changed) {
         this.saveWaybill(existing);
@@ -198,17 +210,8 @@ class DriverWaybillService {
     return generated;
   }
 
-  public getWaybillsForDriver(driverId: string, schedules: Schedule[]): OutboundWaybill[] {
-    const driverSchedules = schedules.filter(
-      s =>
-        s.crewId === driverId ||
-        (s.crew && s.crew.id === driverId) ||
-        s.crewHelperId === driverId ||
-        s.crewHelper2Id === driverId
-    );
-
-    const targetSchedules = driverSchedules.length > 0 ? driverSchedules : schedules;
-    return targetSchedules.map(sch => this.getWaybillForSchedule(sch));
+  public getWaybillsForDriver(_driverId: string, schedules: Schedule[]): OutboundWaybill[] {
+    return schedules.map(sch => this.getWaybillForSchedule(sch));
   }
 
   public updateWaybillStatus(
@@ -224,18 +227,19 @@ class DriverWaybillService {
         draft: 'Draft Manifest',
         loading: 'Proses Pemuatan (Loading Bay)',
         sealed: 'Segel Terpasang',
-        checker_verified: 'Diverifikasi Checker Gudang',
-        gate_out: 'Gate-Out Gerbang DC (Berangkat)',
-        in_transit: 'Dalam Perjalanan Pengantaran',
-        delivered: 'Diterima Toko (Selesai)'
+        checker_verified: 'Siap Out (Persiapan Keluar)',
+        gate_out: 'Di Jalan (Keluar Gudang)',
+        in_transit: 'Di Jalan (Keluar Gudang)',
+        delivered: 'Selesai (Tiba di Gudang)'
       };
 
-      stored[waybillId].status = status;
-      stored[waybillId].statusLabel = statusLabels[status];
+      const normalizedStatus: OutboundWaybillStatus = status === 'gate_out' ? 'in_transit' : status;
+      stored[waybillId].status = normalizedStatus;
+      stored[waybillId].statusLabel = statusLabels[normalizedStatus];
       if (notes) {
         stored[waybillId].driverNotes = notes;
       }
-      if (status === 'gate_out') {
+      if (status === 'gate_out' || status === 'in_transit') {
         const now = new Date();
         stored[waybillId].gateOutTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')} WIB`;
         try {

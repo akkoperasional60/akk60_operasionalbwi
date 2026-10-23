@@ -29,7 +29,9 @@ export const STANDARD_AREAS = [
   'SSLN STB BDWS',
   'RITEL SANGGAR',
   'NEGARA',
-  'JEMBER SELATAN'
+  'JEMBER SELATAN',
+  'TOKO DR. SOETOMO',
+  'NUSANTARA EXPAND'
 ] as const;
 
 export type StandardAreaName = typeof STANDARD_AREAS[number];
@@ -59,7 +61,9 @@ export const AREA_CODE_MAP: Record<string, StandardAreaName> = {
   'SSLN_STB_BDWS': 'SSLN STB BDWS',
   'RITEL_SANGGAR': 'RITEL SANGGAR',
   'NEGARA': 'NEGARA',
-  'JEMBER_SELATAN': 'JEMBER SELATAN'
+  'JEMBER_SELATAN': 'JEMBER SELATAN',
+  'TOKO_DR_SOETOMO': 'TOKO DR. SOETOMO',
+  'NUSANTARA_EXPAND': 'NUSANTARA EXPAND'
 };
 
 /**
@@ -78,6 +82,8 @@ export function standardizeAreaName(rawArea: string | undefined | null): string 
   if (clean === 'NEGARA') return 'NEGARA';
   if (clean === 'GALEKAN') return 'GALEKAN';
   if (clean === 'BWI KOTA SELATAN' || clean === 'BANYUWANGI KOTA') return 'BWI KOTA SELATAN';
+  if (clean.includes('SOETOMO') || clean.includes('SUTOMO') || clean === 'TOKO_DR_SOETOMO') return 'TOKO DR. SOETOMO';
+  if (clean.includes('NUSANTARA') || clean === 'NUSANTARA_EXPAND') return 'NUSANTARA EXPAND';
 
   // 2. Situbondo / Bondowoso Susulan -> SSLN STB BDWS
   if (

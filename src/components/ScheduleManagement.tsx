@@ -54,7 +54,9 @@ const AREA_MAP: Record<string, string> = {
   'SSLN_STB_BDWS': 'SSLN STB BDWS',
   'RITEL_SANGGAR': 'RITEL SANGGAR',
   'NEGARA': 'NEGARA',
-  'JEMBER_SELATAN': 'JEMBER SELATAN'
+  'JEMBER_SELATAN': 'JEMBER SELATAN',
+  'TOKO_DR_SOETOMO': 'TOKO DR. SOETOMO',
+  'NUSANTARA_EXPAND': 'NUSANTARA EXPAND'
 };
 
 export const ScheduleManagement: React.FC<ScheduleManagementProps> = ({
@@ -511,7 +513,8 @@ export const ScheduleManagement: React.FC<ScheduleManagementProps> = ({
   const selectedStoreObj = stores.find(s => s.id === newSchedule.storeId);
   const selectedCrewObj = crews.find(c => c.id === newSchedule.crewId);
   const selectedFleetObj = fleets.find(f => f.id === newSchedule.fleetId);
-  const currentAreaName = selectedStoreObj ? `${selectedStoreObj.island} (${selectedStoreObj.city})` : '';
+  const resolvedSelectedAreaName = AREA_MAP[newSchedule.storeId] || selectedStoreObj?.storeName || newSchedule.storeId || '';
+  const currentAreaName = selectedStoreObj ? `${selectedStoreObj.island} (${selectedStoreObj.city})` : resolvedSelectedAreaName;
   const areaCheck = (selectedCrewObj && currentAreaName)
     ? logisticsStore.checkCrewAreaThreshold(selectedCrewObj.id, currentAreaName)
     : null;
@@ -531,23 +534,25 @@ export const ScheduleManagement: React.FC<ScheduleManagementProps> = ({
   const handleCreateSchedule = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSchedule.storeId || !newSchedule.fleetId || !newSchedule.crewId) {
-      alert('Harap pilih Toko Tujuan, Armada Truk, dan Kru Supir.');
+      addNotification('sla_warning', 'Data Belum Lengkap', 'Harap pilih Area Kirim, Armada Truk, dan Kru Supir Utama.');
       return;
     }
 
+    const targetAreaLabel = AREA_MAP[newSchedule.storeId] || selectedStoreObj?.storeName || newSchedule.storeId;
+
     // New validation check
     const conflict = checkConsecutiveWeekConflict(
-        newSchedule.departureDate,
-        selectedStoreObj?.storeName || '',
-        newSchedule.crewId,
-        'driverId',
-        schedules,
-        crews
+      newSchedule.departureDate,
+      targetAreaLabel,
+      newSchedule.crewId,
+      'driverId',
+      schedules,
+      crews
     );
-    
+
     if (conflict) {
-        setConsecutiveConflict(conflict);
-        return;
+      setConsecutiveConflict(conflict);
+      return;
     }
 
     // Intercept with area threshold approval if required and not yet approved
@@ -557,7 +562,7 @@ export const ScheduleManagement: React.FC<ScheduleManagementProps> = ({
         crewName: selectedCrewObj!.name,
         crewId: selectedCrewObj!.id,
         areaName: currentAreaName,
-        storeName: selectedStoreObj!.storeName,
+        storeName: targetAreaLabel,
         plateNumber: selectedFleetObj?.plateNumber || '-',
         tripCount: areaCheck.tripCount,
         threshold: areaCheck.threshold,
@@ -568,6 +573,8 @@ export const ScheduleManagement: React.FC<ScheduleManagementProps> = ({
 
     const scheduleData = {
       ...newSchedule,
+      areaName: targetAreaLabel,
+      cargoDescription: `Karton Box & Sheet Kemasan - Area ${targetAreaLabel}`,
       originName: CENTRAL_WAREHOUSE.name,
       originCoords: CENTRAL_WAREHOUSE.coordinates,
       departureDate: new Date(newSchedule.departureDate).toISOString(),
@@ -577,44 +584,97 @@ export const ScheduleManagement: React.FC<ScheduleManagementProps> = ({
       isManuallyEdited: true
     };
 
+    const crew = crews.find(c => c.id === scheduleData.crewId);
+    const helper1 = crews.find(c => c.id === scheduleData.crewHelperId);
+    const helper2 = crews.find(c => c.id === scheduleData.crewHelper2Id);
+    const fleetLabel = selectedFleetObj
+      ? `${selectedFleetObj.initialCode ? `[${selectedFleetObj.initialCode}] ` : ''}${selectedFleetObj.plateNumber}`
+      : scheduleData.fleetId;
+    const depFormatted = new Date(scheduleData.departureDate).toLocaleString('id-ID', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+
     if ((newSchedule as any).id) {
       logisticsStore.updateSchedule((newSchedule as any).id, scheduleData);
+      logisticsStore.addScheduleChangeLog({
+        fileName: `Edit Jadwal Manual (${targetAreaLabel})`,
+        actionType: 'edit_jadwal',
+        summary: `Memperbarui jadwal pengiriman area ${targetAreaLabel}`,
+        changes: [
+          `Area Kirim: ${targetAreaLabel}`,
+          `Armada Truk: ${fleetLabel}`,
+          `Kru Supir Utama: ${crew?.name || '-'}`,
+          `Kru Helper: ${[helper1?.name, helper2?.name].filter(Boolean).join(', ') || '-'}`,
+          `Estimasi Berangkat: ${depFormatted} WIB`
+        ],
+        status: 'Sukses'
+      });
     } else {
-      logisticsStore.addSchedule(scheduleData);
-      
-      // Notify crew
-      const crew = crews.find(c => c.id === scheduleData.crewId);
-      const helper1 = crews.find(c => c.id === scheduleData.crewHelperId);
-      const helper2 = crews.find(c => c.id === scheduleData.crewHelper2Id);
-      const msg = `Halo, Anda ditugaskan untuk pengiriman baru ke ${selectedStoreObj?.storeName}. Armada: ${selectedFleetObj?.plateNumber}. Berangkat: ${new Date(scheduleData.departureDate).toLocaleString()}`;
-      
+      const created = logisticsStore.addSchedule(scheduleData);
+
+      logisticsStore.addScheduleChangeLog({
+        fileName: `Input Jadwal Baru (+ Jadwal Baru)`,
+        actionType: 'tambah_jadwal',
+        summary: `Menambahkan jadwal pengiriman baru ke ${targetAreaLabel}`,
+        changes: [
+          `Area Kirim: ${targetAreaLabel}`,
+          `Armada Truk: ${fleetLabel}`,
+          `Kru Supir Utama: ${crew?.name || '-'}`,
+          `Kru Helper: ${[helper1?.name, helper2?.name].filter(Boolean).join(', ') || '-'}`,
+          `Estimasi Berangkat: ${depFormatted} WIB`,
+          `Nomor Tracking / SJ: ${created.trackingNumber}`
+        ],
+        status: 'Sukses'
+      });
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('akk-new-schedule-added', { detail: created }));
+      }
+
+      const msg = `Halo, Anda ditugaskan untuk pengiriman baru ke ${targetAreaLabel}. Armada: ${selectedFleetObj?.plateNumber || '-'}. Berangkat: ${depFormatted}`;
       if (crew) sendWhatsAppNotification(crew, msg);
       if (helper1) sendWhatsAppNotification(helper1, msg);
       if (helper2) sendWhatsAppNotification(helper2, msg);
+
+      addNotification(
+        'schedule',
+        'Jadwal Baru Berhasil Dirilis',
+        `Penugasan ke ${targetAreaLabel} (${crew?.name || 'Driver'} • ${fleetLabel}) otomatis masuk ke Jadwal & Penugasan serta Portal Driver Mobile.`
+      );
+      setAutoInitMessage(`✅ Jadwal pengiriman baru ke ${targetAreaLabel} (${crew?.name || 'Driver'} • ${fleetLabel}) berhasil ditambahkan dan langsung terbaca di Jadwal & Penugasan serta Portal Driver Mobile!`);
+      setTimeout(() => setAutoInitMessage(null), 6000);
     }
 
+    setSchedules(logisticsStore.getSchedules());
     setIsAddScheduleOpen(false);
   };
 
   const handleApproveAreaAndSaveSchedule = (notes: string) => {
-    if (!selectedStoreObj || !selectedCrewObj) return;
+    if (!selectedCrewObj) return;
+    const targetAreaLabel = AREA_MAP[newSchedule.storeId] || selectedStoreObj?.storeName || newSchedule.storeId;
 
     logisticsStore.createAreaApprovalRequest({
       crewId: selectedCrewObj.id,
       crewName: selectedCrewObj.name,
-      targetArea: currentAreaName,
+      targetArea: currentAreaName || targetAreaLabel,
       currentTripsInArea: areaCheck?.tripCount || 0,
       thresholdLimit: areaCheck?.threshold || 3,
-      storeName: selectedStoreObj.storeName,
+      storeName: targetAreaLabel,
       plateNumber: selectedFleetObj?.plateNumber || '-',
       departureDate: new Date(newSchedule.departureDate).toISOString(),
       status: 'approved',
-      reasonPolicy: `Otorisasi khusus penugasan pengiriman ke-${(areaCheck?.tripCount || 0) + 1} di area ${currentAreaName}.`,
+      reasonPolicy: `Otorisasi khusus penugasan pengiriman ke-${(areaCheck?.tripCount || 0) + 1} di area ${targetAreaLabel}.`,
       notes
     });
 
-    logisticsStore.addSchedule({
+    const created = logisticsStore.addSchedule({
       ...newSchedule,
+      areaName: targetAreaLabel,
+      cargoDescription: `Karton Box & Sheet Kemasan - Area ${targetAreaLabel}`,
       originName: CENTRAL_WAREHOUSE.name,
       originCoords: CENTRAL_WAREHOUSE.coordinates,
       departureDate: new Date(newSchedule.departureDate).toISOString(),
@@ -624,16 +684,37 @@ export const ScheduleManagement: React.FC<ScheduleManagementProps> = ({
       isManuallyEdited: true
     });
 
-    // Notify crew
     const crew = crews.find(c => c.id === newSchedule.crewId);
     const helper1 = crews.find(c => c.id === newSchedule.crewHelperId);
     const helper2 = crews.find(c => c.id === newSchedule.crewHelper2Id);
-    const msg = `Halo, Anda ditugaskan untuk pengiriman baru ke ${selectedStoreObj?.storeName}. Armada: ${selectedFleetObj?.plateNumber}. Berangkat: ${new Date(newSchedule.departureDate).toLocaleString()}`;
-    
+    const fleetLabel = selectedFleetObj
+      ? `${selectedFleetObj.initialCode ? `[${selectedFleetObj.initialCode}] ` : ''}${selectedFleetObj.plateNumber}`
+      : newSchedule.fleetId;
+
+    logisticsStore.addScheduleChangeLog({
+      fileName: `Input Jadwal Baru (+ Otorisasi Area)`,
+      actionType: 'tambah_jadwal',
+      summary: `Menambahkan jadwal pengiriman baru ke ${targetAreaLabel} (Dispensasi Rotasi)`,
+      changes: [
+        `Area Kirim: ${targetAreaLabel}`,
+        `Armada Truk: ${fleetLabel}`,
+        `Kru Supir Utama: ${crew?.name || '-'}`,
+        `Kru Helper: ${[helper1?.name, helper2?.name].filter(Boolean).join(', ') || '-'}`,
+        `Catatan Otorisasi: ${notes || 'Disetujui'}`
+      ],
+      status: 'Sukses'
+    });
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('akk-new-schedule-added', { detail: created }));
+    }
+
+    const msg = `Halo, Anda ditugaskan untuk pengiriman baru ke ${targetAreaLabel}. Armada: ${selectedFleetObj?.plateNumber}. Berangkat: ${new Date(newSchedule.departureDate).toLocaleString()}`;
     if (crew) sendWhatsAppNotification(crew, msg);
     if (helper1) sendWhatsAppNotification(helper1, msg);
     if (helper2) sendWhatsAppNotification(helper2, msg);
 
+    setSchedules(logisticsStore.getSchedules());
     setAreaApprovalModalData(prev => ({ ...prev, isOpen: false }));
     setIsAddScheduleOpen(false);
   };
@@ -1042,6 +1123,8 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                     <option value="RITEL_SANGGAR">RITEL SANGGAR</option>
                     <option value="NEGARA">NEGARA (Pagi 07.15 WIB)</option>
                     <option value="JEMBER_SELATAN">JEMBER SELATAN (Malam 21.00 WIB)</option>
+                    <option value="TOKO_DR_SOETOMO">TOKO DR. SOETOMO</option>
+                    <option value="NUSANTARA_EXPAND">NUSANTARA EXPAND</option>
                   </select>
 
                   {newSchedule.storeId && (
@@ -1075,14 +1158,11 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                     className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white font-semibold"
                   >
                     <option value="">-- Pilih Truk Armada --</option>
-                    {fleets.map(fl => {
-                      const boxVol = fl.boxCapacityM3 || (fl.vehicleType.includes('Pick Up') ? 5.5 : fl.vehicleType.includes('Long') ? 14 : fl.vehicleType.includes('Engkel') ? 9 : 17.5);
-                      return (
-                        <option key={fl.id} value={fl.id}>
-                          {fl.initialCode ? `[${fl.initialCode}] ` : ''}{fl.plateNumber} - {fl.vehicleType} ({boxVol} m³) [{fl.status}]
-                        </option>
-                      );
-                    })}
+                    {fleets.map(fl => (
+                      <option key={fl.id} value={fl.id}>
+                        {fl.initialCode ? `[${fl.initialCode}] ` : ''}{fl.plateNumber}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>
@@ -1097,11 +1177,13 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                     className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white font-semibold"
                   >
                     <option value="">-- Pilih Supir Utama --</option>
-                    {crews.map(cr => (
-                      <option key={cr.id} value={cr.id}>
-                        {cr.name} ({cr.licenseType}) [{cr.status}]
-                      </option>
-                    ))}
+                    {crews
+                      .filter(cr => cr.name.trim().toLowerCase() !== 'super admin')
+                      .map(cr => (
+                        <option key={cr.id} value={cr.id}>
+                          {cr.name}
+                        </option>
+                      ))}
                   </select>
                 </div>
                 <div>
@@ -1112,11 +1194,13 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                     className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
                   >
                     <option value="">-- Pilih Helper 1 --</option>
-                    {crews.filter(c => c.id !== newSchedule.crewId && c.id !== newSchedule.crewHelper2Id).map(cr => (
-                      <option key={cr.id} value={cr.id}>
-                        {cr.name} [{cr.status}]
-                      </option>
-                    ))}
+                    {crews
+                      .filter(c => c.name.trim().toLowerCase() !== 'super admin' && c.id !== newSchedule.crewId && c.id !== newSchedule.crewHelper2Id)
+                      .map(cr => (
+                        <option key={cr.id} value={cr.id}>
+                          {cr.name}
+                        </option>
+                      ))}
                   </select>
                 </div>
                 <div>
@@ -1127,11 +1211,13 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                     className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
                   >
                     <option value="">-- Pilih Helper 2 (Tambahan) --</option>
-                    {crews.filter(c => c.id !== newSchedule.crewId && c.id !== newSchedule.crewHelperId).map(cr => (
-                      <option key={cr.id} value={cr.id}>
-                        {cr.name} [{cr.status}]
-                      </option>
-                    ))}
+                    {crews
+                      .filter(c => c.name.trim().toLowerCase() !== 'super admin' && c.id !== newSchedule.crewId && c.id !== newSchedule.crewHelperId)
+                      .map(cr => (
+                        <option key={cr.id} value={cr.id}>
+                          {cr.name}
+                        </option>
+                      ))}
                   </select>
                 </div>
               </div>
@@ -1152,22 +1238,6 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                   </div>
                 </div>
               )}
-
-              {/* Inter-island logistics configuration */}
-              <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-3">
-                <div className="flex items-center justify-between">
-                  <label className="flex items-center gap-2 cursor-pointer font-semibold text-white">
-                    <input
-                      type="checkbox"
-                      checked={newSchedule.isInterIsland}
-                      onChange={(e) => setNewSchedule({ ...newSchedule, isInterIsland: e.target.checked })}
-                      className="rounded bg-slate-900 border-slate-700 text-blue-500"
-                    />
-                    <Ship className="w-4 h-4 text-emerald-400" />
-                    Penjadwalan Kapal Penyeberangan / Ro-Ro (Luar Pulau)
-                  </label>
-                </div>
-              </div>
 
               {/* Preset Tanggal Kirim: Hari Ini vs Jadwal H+1 (Besok) */}
               <div className="flex items-center justify-between pb-1">
@@ -1228,17 +1298,6 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                     className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white font-semibold text-amber-400 text-xs"
                   />
                 </div>
-              </div>
-
-              <div>
-                <label className="text-slate-400 block mb-1">Kendala</label>
-                <textarea
-                  placeholder="Masukkan kendala pengiriman jika ada..."
-                  value={newSchedule.notes || ''}
-                  onChange={(e) => setNewSchedule({ ...newSchedule, notes: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white"
-                  rows={2}
-                />
               </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">

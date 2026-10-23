@@ -49,7 +49,7 @@ import {
   buildMonthSpecificSchedule,
   convertSchedulesToAdminWeeks
 } from '../data/adminSchedule';
-import { logisticsStore } from '../services/store';
+import { logisticsStore, ScheduleChangeLogEntry } from '../services/store';
 import { Schedule, ShipmentStatus, RetailStore, Fleet, Crew } from '../types';
 import { GoogleSheetsApiSyncModal } from './GoogleSheetsApiSyncModal';
 import { 
@@ -156,6 +156,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
   const [importMode, setImportMode] = useState<'tambahkan' | 'ganti'>('tambahkan');
   const [selectedUploadFile, setSelectedUploadFile] = useState<File | null>(null);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState<boolean>(false);
+  const [scheduleChangeLogs, setScheduleChangeLogs] = useState<ScheduleChangeLogEntry[]>(() => logisticsStore.getScheduleChangeLogs());
   const [schemaValidationError, setSchemaValidationError] = useState<any | null>(null);
   const [uploadToast, setUploadToast] = useState<{
     message: string;
@@ -454,10 +455,13 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
     // Subscribe to store updates (from manual edits in ScheduleManagement or modals)
     const unsubscribe = logisticsStore.subscribe(() => {
+      setOfficialCrewsList(crewAutoMapper.getOfficialCrewList());
+      setOfficialAreasList(areaAutoMapper.getOfficialAreaList());
+      setScheduleChangeLogs(logisticsStore.getScheduleChangeLogs());
+
       const curSchedules = logisticsStore.getSchedules();
       const updatedWeeks = convertSchedulesToAdminWeeks(curSchedules, selectedYear, effectiveMonth);
       if (updatedWeeks.length > 0 && updatedWeeks[0]?.days?.length > 0) {
-        // Protect active weeks: only update if store has at least as many trips, or if weeks was empty
         const curTrips = weeksRef.current.flatMap(w => w.days).reduce((acc, d) => acc + (d.pengiriman?.length || 0), 0);
         const newTrips = updatedWeeks.flatMap(w => w.days).reduce((acc, d) => acc + (d.pengiriman?.length || 0), 0);
         if (newTrips >= curTrips || curTrips === 0) {
@@ -467,6 +471,111 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     });
 
     return unsubscribe;
+  }, [selectedYear, selectedMonth]);
+
+  // Listen for "+ Jadwal Baru" created in ScheduleManagement so it immediately reflects in Jadwal & Penugasan
+  useEffect(() => {
+    const handleNewScheduleAdded = (evt: Event) => {
+      const customEvt = evt as CustomEvent<Schedule>;
+      const created = customEvt.detail;
+      if (!created || !created.departureDate) return;
+
+      const d = new Date(created.departureDate);
+      if (isNaN(d.getTime())) return;
+
+      const yr = d.getFullYear();
+      const mo = d.getMonth();
+      const dayNum = d.getDate();
+      const DAY_NAMES_ID = ['MINGGU', 'SENIN', 'SELASA', 'RABU', 'KAMIS', 'JUMAT', 'SABTU'];
+      const dayName = DAY_NAMES_ID[d.getDay()];
+      const dateStr = `${String(dayNum).padStart(2, '0')} ${MONTH_NAMES[mo]} ${yr}`;
+
+      const stdArea = standardizeAreaName(created.areaName || created.store?.storeName || '');
+      const armadaCode = created.fleet?.initialCode || created.fleet?.plateNumber || 'DS1';
+      const newTrip: DeliveryAssignment = {
+        id: created.id,
+        driver: created.crew?.name || '-',
+        helper: created.crewHelper?.name || '-',
+        helper2: created.crewHelper2?.name || '-',
+        area: stdArea,
+        armada: armadaCode,
+        target: created.notes || `Rute ${stdArea}`,
+        isManuallyEdited: true
+      };
+
+      const cacheKey = `akk_admin_schedule_cache_${yr}_${mo}`;
+      let targetWeeks: AdminScheduleWeek[] = [];
+      const curEffectiveMonth = selectedMonth === -1 ? 0 : selectedMonth;
+
+      if (yr === selectedYear && mo === curEffectiveMonth) {
+        targetWeeks = [...weeksRef.current];
+      } else {
+        try {
+          const cached = localStorage.getItem(cacheKey);
+          if (cached) targetWeeks = JSON.parse(cached);
+        } catch {}
+        if (!targetWeeks || targetWeeks.length === 0) {
+          targetWeeks = buildMonthSpecificSchedule(yr, mo);
+        }
+      }
+
+      let foundDay = false;
+      const updatedWeeks = targetWeeks.map((w, wIdx) => {
+        const hasDay = w.days.some(dayObj => dayObj.dayNumber === dayNum);
+        if (hasDay) {
+          foundDay = true;
+          return {
+            ...w,
+            days: w.days.map(dayObj => {
+              if (dayObj.dayNumber === dayNum) {
+                const exists = dayObj.pengiriman.some(p => p.id === created.id);
+                return {
+                  ...dayObj,
+                  pengiriman: exists
+                    ? dayObj.pengiriman.map(p => (p.id === created.id ? newTrip : p))
+                    : [...dayObj.pengiriman, newTrip]
+                };
+              }
+              return dayObj;
+            })
+          };
+        }
+        if (wIdx === targetWeeks.length - 1 && !foundDay) {
+          foundDay = true;
+          const newDays = [
+            ...w.days,
+            {
+              dayName,
+              dayNumber: dayNum,
+              dateString: dateStr,
+              pengiriman: [newTrip],
+              gudang: [],
+              pengirimanOff: [],
+              karyawanIzin: []
+            }
+          ].sort((a, b) => a.dayNumber - b.dayNumber);
+          return { ...w, days: newDays };
+        }
+        return w;
+      });
+
+      try {
+        localStorage.setItem(cacheKey, JSON.stringify(updatedWeeks));
+        localStorage.setItem('akk_admin_schedule_weeks_cache', JSON.stringify(updatedWeeks));
+      } catch {}
+
+      if (selectedYear !== yr) setSelectedYear(yr);
+      if (selectedMonth !== -1 && selectedMonth !== mo) setSelectedMonth(mo);
+      setWeeks(updatedWeeks);
+      setSelectedCalendarDate(dateStr);
+      setSelectedDayFilter(dateStr);
+      setScheduleChangeLogs(logisticsStore.getScheduleChangeLogs());
+      setSyncSuccessMessage(`✅ Jadwal baru (${newTrip.driver} • ${stdArea} • ${armadaCode}) otomatis masuk ke Jadwal & Penugasan dan Portal Driver!`);
+      setTimeout(() => setSyncSuccessMessage(null), 6000);
+    };
+
+    window.addEventListener('akk-new-schedule-added', handleNewScheduleAdded);
+    return () => window.removeEventListener('akk-new-schedule-added', handleNewScheduleAdded);
   }, [selectedYear, selectedMonth]);
 
   // Background Auto-Sync Timer: keeps cache updated and only syncs Google Sheets if explicitly requested
@@ -587,6 +696,17 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
       logisticsStore.addSchedule(newSch);
       logisticsStore.syncSchedulesToCrewHistory();
+      logisticsStore.addScheduleChangeLog({
+        fileName: `Tambah Ritase (${dateString})`,
+        actionType: 'manual_create',
+        summary: `Penambahan ritase baru pada ${dateString}: ${driver} menuju ${stdArea}`,
+        rowCount: 1,
+        changes: [
+          `Tanggal Kirim: ${dateString}`,
+          `Driver: ${driver} | Helper 1: ${helper || '-'} | Helper 2: ${helper2 || '-'}`,
+          `Area Kirim: ${stdArea} | Armada: ${armada}`
+        ]
+      });
 
       // Update weeks state directly
       const newWeeks = weeks.map(w => ({
@@ -619,6 +739,10 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       // Editing existing
       let targetId = scheduleId;
       const storeSchedules = logisticsStore.getSchedules();
+
+      const prevTrip = weeks
+        .flatMap(w => w.days)
+        .find(d => d.dayNumber === dayNumber)?.pengiriman[tripIndex];
 
       if (!targetId) {
         const found = storeSchedules.find(s => {
@@ -699,6 +823,26 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       }
       logisticsStore.syncSchedulesToCrewHistory();
 
+      const editDiffs: string[] = [];
+      if (prevTrip) {
+        if (prevTrip.driver !== driver) editDiffs.push(`Driver: ${prevTrip.driver} → ${driver}`);
+        if ((prevTrip.helper || '-') !== (helper || '-')) editDiffs.push(`Helper 1: ${prevTrip.helper || '-'} → ${helper || '-'}`);
+        if ((prevTrip.helper2 || '-') !== (helper2 || '-')) editDiffs.push(`Helper 2: ${prevTrip.helper2 || '-'} → ${helper2 || '-'}`);
+        if (standardizeAreaName(prevTrip.area) !== stdArea) editDiffs.push(`Area Kirim: ${prevTrip.area} → ${stdArea}`);
+        if (prevTrip.armada !== armada) editDiffs.push(`Armada: ${prevTrip.armada} → ${armada}`);
+      }
+      if (editDiffs.length === 0) {
+        editDiffs.push(`Pembaruan ritase ${dateString}: Driver ${driver}, Area ${stdArea}, Armada ${armada}`);
+      }
+
+      logisticsStore.addScheduleChangeLog({
+        fileName: `Edit Ritase (${dateString})`,
+        actionType: 'manual_edit',
+        summary: `Perubahan jadwal pengiriman pada ${dateString} (${stdArea})`,
+        rowCount: 1,
+        changes: editDiffs
+      });
+
       // Update weeks state directly
       const newWeeks = weeks.map(w => ({
         ...w,
@@ -727,18 +871,15 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         })
       }));
       updateWeeks(newWeeks);
-      setSyncSuccessMessage(`✅ Perubahan jadwal pengiriman ${dateString} berhasil disimpan permanen! Data tidak akan kembali seperti awal.`);
+      setSyncSuccessMessage(`✅ Perubahan jadwal pengiriman ${dateString} berhasil disimpan permanen!`);
     }
 
+    setScheduleChangeLogs(logisticsStore.getScheduleChangeLogs());
     setEditingTripModal(null);
     setTimeout(() => setSyncSuccessMessage(null), 6000);
   };
 
   const handleDeleteTrip = (p: DeliveryAssignment, dayNumber: number, tripIndex: number) => {
-    if (!confirm(`Apakah Anda yakin ingin menghapus ritase ${p.driver} (${p.area} - ${p.armada})?`)) {
-      return;
-    }
-
     if (p.id) {
       logisticsStore.deleteSchedule(p.id);
     } else {
@@ -755,6 +896,16 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       }
     }
     logisticsStore.syncSchedulesToCrewHistory();
+    logisticsStore.addScheduleChangeLog({
+      fileName: `Hapus Ritase (Tgl ${dayNumber})`,
+      actionType: 'delete_schedule',
+      summary: `Penghapusan ritase pengiriman ${p.driver} (${p.area} - ${p.armada})`,
+      rowCount: 1,
+      changes: [
+        `Dihapus: Driver ${p.driver}, Helper ${p.helper || '-'}, Area ${p.area}, Armada ${p.armada}`
+      ]
+    });
+    setScheduleChangeLogs(logisticsStore.getScheduleChangeLogs());
 
     const newWeeks = weeks.map(w => ({
       ...w,
@@ -1126,10 +1277,11 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     try {
       const rows: any[][] = [];
       
+      const periodLabel = selectedMonth === -1 ? `Semua Bulan ${selectedYear}` : `${MONTH_NAMES[selectedMonth]} ${selectedYear}`;
       // Header metadata
       rows.push(['PT ANUGRAH KEMASAN KREATIF - BANYUWANGI CENTRAL HUB']);
-      rows.push(['JADWAL OPERASIONAL & PENUGASAN (SHEET: ALL)']);
-      rows.push(['Periode: Januari 2026', 'Total Pengiriman: ' + stats.totalTrips]);
+      rows.push(['JADWAL PENGIRIMAN & PENUGASAN ARMADA']);
+      rows.push([`Periode: ${periodLabel}`, 'Total Pengiriman: ' + stats.totalTrips]);
       rows.push([]);
 
       filteredWeeks.forEach(week => {
@@ -1692,7 +1844,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 EXCEL SPREADSHEET &bull; JADWAL PENGIRIMAN
               </span>
               <span className="text-xs text-slate-400 font-medium">
-                {MONTH_NAMES[selectedMonth === -1 ? 0 : selectedMonth]} {selectedYear}
+                {selectedMonth === -1 ? `Semua Bulan ${selectedYear}` : `${MONTH_NAMES[selectedMonth]} ${selectedYear}`}
               </span>
             </div>
 
@@ -1704,8 +1856,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             </p>
           </div>
 
-          {/* Quick Header Actions (Excel & Mapping Only) */}
-          <div className="flex items-center gap-2.5 flex-wrap">
+          {/* Simplified Header Actions */}
+          <div className="flex items-center gap-2 flex-wrap">
             <input 
               type="file" 
               ref={fileInputRef}
@@ -1719,14 +1871,11 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 setActiveMappingCategory('area');
                 setIsAreaMappingModalOpen(true);
               }}
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition cursor-pointer relative"
-              title="Kelola & tinjau pemetaan otomatis nama area spreadsheet ke Jadwal Pengiriman"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition cursor-pointer relative"
+              title="Pemetaan Area Kirim"
             >
-              <MapPin className="w-4 h-4 text-rose-400" />
-              <span>Pemetaan Area ({Object.keys(detectedAreaMappings).length})</span>
-              {Object.values(detectedAreaMappings).some(m => m.confidence === 'unmapped') && (
-                <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping absolute top-1.5 right-1.5" />
-              )}
+              <MapPin className="w-3.5 h-3.5 text-rose-400" />
+              <span>Area ({Object.keys(detectedAreaMappings).length})</span>
             </button>
 
             <button
@@ -1734,32 +1883,41 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 setActiveMappingCategory('crew');
                 setIsAreaMappingModalOpen(true);
               }}
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition cursor-pointer relative"
-              title="Kelola & tinjau pemetaan otomatis nama supir/helper spreadsheet ke database resmi AKK"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition cursor-pointer relative"
+              title="Pemetaan Kru (Driver & Helper)"
             >
-              <Users className="w-4 h-4 text-blue-400" />
-              <span>Pemetaan Kru ({Object.keys(detectedCrewMappings).length})</span>
-              {Object.values(detectedCrewMappings).some(m => m.confidence === 'unmapped') && (
-                <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping absolute top-1.5 right-1.5" />
-              )}
+              <Users className="w-3.5 h-3.5 text-blue-400" />
+              <span>Kru ({Object.keys(detectedCrewMappings).length})</span>
             </button>
 
             <button
               onClick={() => setIsUploadConfigModalOpen(true)}
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold border border-emerald-500/40 shadow-sm transition cursor-pointer"
-              title="Unggah spreadsheet Excel (.xlsx / .csv)"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold border border-emerald-500/40 shadow-sm transition cursor-pointer"
+              title="Unggah Excel (.xlsx / .csv)"
             >
-              <Upload className="w-4 h-4 text-emerald-100" />
-              <span>Unggah Excel</span>
+              <Upload className="w-3.5 h-3.5" />
+              <span>Unggah</span>
             </button>
 
             <button
               onClick={handleExportXLSX}
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition cursor-pointer"
-              title="Unduh data sebagai file Excel .xlsx"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition cursor-pointer"
+              title="Ekspor ke Excel (.xlsx)"
             >
-              <Download className="w-4 h-4 text-blue-400" />
-              <span>Ekspor Excel (.xlsx)</span>
+              <Download className="w-3.5 h-3.5 text-blue-400" />
+              <span>Ekspor</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setScheduleChangeLogs(logisticsStore.getScheduleChangeLogs());
+                setIsHistoryModalOpen(true);
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs font-bold border border-slate-700 transition cursor-pointer"
+              title="Riwayat / Log Unggah & Perubahan Jadwal"
+            >
+              <HistoryIcon className="w-3.5 h-3.5 text-amber-400" />
+              <span>Riwayat ({scheduleChangeLogs.length})</span>
             </button>
           </div>
         </div>
@@ -1774,7 +1932,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
           </div>
         )}
 
-        {/* 1. Keterangan Periode Selection Bar - POSITIONED ABOVE TOTAL RITASE KIRIM STATS */}
+        {/* 1. Keterangan Periode Selection Bar */}
         <div className="mt-5 p-4 rounded-2xl bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold text-sm shadow-2xs">
@@ -1785,7 +1943,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 Keterangan Periode Jadwal Pengiriman
               </span>
               <h4 className="text-sm sm:text-base font-black text-slate-900 dark:text-white flex items-center gap-2 mt-0.5 flex-wrap">
-                <span>{MONTH_NAMES[selectedMonth === -1 ? 0 : selectedMonth]} {selectedYear}</span>
+                <span>{selectedMonth === -1 ? `Semua Bulan ${selectedYear}` : `${MONTH_NAMES[selectedMonth]} ${selectedYear}`}</span>
                 <span className="text-xs font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/80 px-2.5 py-0.5 rounded-full border border-emerald-300 dark:border-emerald-800">
                   {stats.totalTrips} Ritase Total
                 </span>
@@ -1821,7 +1979,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
           </div>
         </div>
 
-        {/* Aggregate KPI Chips (Positioned DIRECTLY BELOW Periode Selection) */}
+        {/* Aggregate KPI Chips */}
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-4">
           <div className="bg-slate-50 dark:bg-slate-950/60 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs">
             <div className="flex items-center justify-between">
@@ -1839,7 +1997,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               <MapPin className="w-4 h-4 text-rose-600 dark:text-rose-400" />
             </div>
             <div className="text-xl font-black text-slate-900 dark:text-white mt-1">
-              {stats.totalUniqueAreas} <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Area ({MONTH_NAMES[selectedMonth === -1 ? 0 : selectedMonth]})</span>
+              {stats.totalUniqueAreas} <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Area ({selectedMonth === -1 ? 'Semua Bulan' : MONTH_NAMES[selectedMonth]})</span>
             </div>
           </div>
 
@@ -1869,7 +2027,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               <Users className="w-4 h-4 text-amber-600 dark:text-amber-400" />
             </div>
             <div className="text-xl font-black text-slate-900 dark:text-white mt-1">
-              17 <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">On-Duty</span>
+              {officialCrewsList.length} <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Terdaftar</span>
             </div>
           </div>
         </div>
@@ -2033,7 +2191,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 </div>
                 <div>
                   <h3 className="text-base font-black text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
-                    <span>KALENDER PENGIRIMAN - {calendarGridData.monthName.toUpperCase()} {calendarGridData.year}</span>
+                    <span>KALENDER PENGIRIMAN - {selectedMonth === -1 ? `SEMUA BULAN (${calendarGridData.monthName.toUpperCase()})` : calendarGridData.monthName.toUpperCase()} {calendarGridData.year}</span>
                   </h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                     Klik pada salah satu tanggal untuk melihat rincian supir, helper, area kirim, dan armada.
@@ -2402,7 +2560,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-emerald-500"
                 />
                 <datalist id="driver-options">
-                  {logisticsStore.getCrews().map(c => (
+                  {logisticsStore.getCrews().filter(c => c.name !== 'Super Admin').map(c => (
                     <option key={c.id} value={c.name} />
                   ))}
                 </datalist>
@@ -2422,7 +2580,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-emerald-500"
                   />
                   <datalist id="helper1-options">
-                    {logisticsStore.getCrews().map(c => (
+                    {logisticsStore.getCrews().filter(c => c.name !== 'Super Admin').map(c => (
                       <option key={c.id} value={c.name} />
                     ))}
                   </datalist>
@@ -2441,7 +2599,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-emerald-500"
                   />
                   <datalist id="helper2-options">
-                    {logisticsStore.getCrews().map(c => (
+                    {logisticsStore.getCrews().filter(c => c.name !== 'Super Admin').map(c => (
                       <option key={c.id} value={c.name} />
                     ))}
                   </datalist>
@@ -2457,7 +2615,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   list="area-options"
                   value={editingTripModal.area}
                   onChange={(e) => setEditingTripModal({ ...editingTripModal, area: e.target.value })}
-                  placeholder="e.g. DENPASAR 1, SITUBONDO, JAJAG RETAIL"
+                  placeholder="e.g. DENPASAR 1, SITUBONDO, TOKO DR. SOETOMO, NUSANTARA EXPAND"
                   className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-medium uppercase focus:outline-none focus:border-emerald-500"
                 />
                 <datalist id="area-options">
@@ -2473,14 +2631,16 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   <option value="GALEKAN" />
                   <option value="SUSULAN GENTENG - ROGOJAMPI" />
                   <option value="SUSULAN SANGGAR JAJAG" />
-                  <option value="SUMBERAYUY RETAIL" />
+                  <option value="SUMBERAYU RETAIL" />
                   <option value="GROSIR BWI - ROGOJAMPI" />
+                  <option value="TOKO DR. SOETOMO" />
+                  <option value="NUSANTARA EXPAND" />
                 </datalist>
               </div>
 
               <div>
                 <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
-                  Armada Truk (Inisial / Plat)
+                  Armada Truk (Inisial &amp; Plat Nomor)
                 </label>
                 <select
                   value={editingTripModal.armada}
@@ -2489,20 +2649,9 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 >
                   {logisticsStore.getFleets().map(f => (
                     <option key={f.id} value={f.initialCode || f.plateNumber}>
-                      {f.initialCode ? `[${f.initialCode}] ` : ''}{f.plateNumber} ({f.vehicleType})
+                      {f.initialCode ? `[${f.initialCode}] ` : ''}{f.plateNumber}
                     </option>
                   ))}
-                  <option value="DS1">DS1 - Isuzu Giga CDD Long (Bali)</option>
-                  <option value="DS2">DS2 - Mitsubishi Canter HDX</option>
-                  <option value="DS3">DS3 - Hino Dutro 130 HD (Bali)</option>
-                  <option value="DS4">DS4 - Truk Box Reguler</option>
-                  <option value="DS5">DS5 - Isuzu Giga (Bali)</option>
-                  <option value="NS1">NS1 - Engkel Box</option>
-                  <option value="NS2">NS2 - Engkel Box</option>
-                  <option value="NS3">NS3 - Canter Box</option>
-                  <option value="NL1">NL1 - Engkel Long</option>
-                  <option value="NL2">NL2 - Engkel Long</option>
-                  <option value="N20">N20 - Engkel Box</option>
                 </select>
               </div>
 
@@ -2541,18 +2690,18 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         </div>
       )}
 
-      {/* Upload Configuration Modal (Image 2 Style) */}
+      {/* Simplified Upload Configuration Modal */}
       {isUploadConfigModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-2xl w-full shadow-2xl space-y-5 my-6">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-lg w-full shadow-2xl space-y-4 my-6">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-500/15 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
-                  <Upload className="w-5 h-5" />
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-emerald-500/15 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
+                  <Upload className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-white">Konfigurasi Impor &amp; Pembaruan Jadwal Spreadsheet</h3>
-                  <p className="text-xs text-slate-400">Pilih periode data, mode impor, dan file spreadsheet resmi AKK</p>
+                  <h3 className="text-sm font-bold text-white">Unggah Spreadsheet Jadwal (.xlsx / .csv)</h3>
+                  <p className="text-[11px] text-slate-400">Pilih periode dan file Excel jadwal pengiriman</p>
                 </div>
               </div>
               <button
@@ -2563,88 +2712,69 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-300 block uppercase tracking-wider">Bulan Data</label>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] font-bold text-slate-300 block mb-1">Bulan</label>
                 <select
                   value={importMonth}
                   onChange={(e) => setImportMonth(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl p-2.5 focus:outline-none focus:border-emerald-500"
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl p-2 focus:outline-none focus:border-emerald-500"
                 >
-                  {['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'].map(m => (
+                  {MONTH_NAMES.map(m => (
                     <option key={m} value={m}>{m}</option>
                   ))}
                 </select>
               </div>
 
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-300 block uppercase tracking-wider">Tahun Data</label>
+              <div>
+                <label className="text-[11px] font-bold text-slate-300 block mb-1">Tahun</label>
                 <input
                   type="text"
                   value={importYear}
                   onChange={(e) => setImportYear(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl p-2.5 focus:outline-none focus:border-emerald-500 font-mono"
+                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl p-2 focus:outline-none focus:border-emerald-500 font-mono"
                 />
               </div>
             </div>
 
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-300 block uppercase tracking-wider">Mode Import</label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <label
-                  onClick={() => setImportMode('tambahkan')}
-                  className={`flex items-start gap-3 p-3 rounded-xl border text-xs cursor-pointer transition ${
-                    importMode === 'tambahkan'
-                      ? 'bg-emerald-500/10 border-emerald-500/50 text-white font-bold'
-                      : 'bg-slate-950 border-slate-800 text-slate-400'
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="importMode"
-                    checked={importMode === 'tambahkan'}
-                    onChange={() => setImportMode('tambahkan')}
-                    className="text-emerald-500 mt-0.5"
-                  />
-                  <div>
-                    <span className="block font-bold text-slate-200">Tambahkan data</span>
-                    <span className="text-[10px] text-slate-400 font-normal">Data bulan yang sama tidak dihapus.</span>
-                  </div>
-                </label>
+            <div className="grid grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                onClick={() => setImportMode('tambahkan')}
+                className={`p-2.5 rounded-xl border text-left text-xs cursor-pointer transition ${
+                  importMode === 'tambahkan'
+                    ? 'bg-emerald-500/15 border-emerald-500 text-white font-bold'
+                    : 'bg-slate-950 border-slate-800 text-slate-400'
+                }`}
+              >
+                <span className="block font-bold">Tambahkan Data</span>
+                <span className="text-[10px] text-slate-400 font-normal">Gabung ke jadwal aktif</span>
+              </button>
 
-                <label
-                  onClick={() => setImportMode('ganti')}
-                  className={`flex items-start gap-3 p-3 rounded-xl border text-xs cursor-pointer transition ${
-                    importMode === 'ganti'
-                      ? 'bg-amber-500/10 border-amber-500/50 text-white font-bold'
-                      : 'bg-slate-950 border-slate-800 text-slate-400'
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="importMode"
-                    checked={importMode === 'ganti'}
-                    onChange={() => setImportMode('ganti')}
-                    className="text-amber-500 mt-0.5"
-                  />
-                  <div>
-                    <span className="block font-bold text-amber-300">Ganti data bulan ini</span>
-                    <span className="text-[10px] text-slate-400 font-normal">Data lama periode sama dihapus lalu diimport ulang.</span>
-                  </div>
-                </label>
-              </div>
+              <button
+                type="button"
+                onClick={() => setImportMode('ganti')}
+                className={`p-2.5 rounded-xl border text-left text-xs cursor-pointer transition ${
+                  importMode === 'ganti'
+                    ? 'bg-amber-500/15 border-amber-500 text-white font-bold'
+                    : 'bg-slate-950 border-slate-800 text-slate-400'
+                }`}
+              >
+                <span className="block font-bold text-amber-300">Ganti Data Bulan Ini</span>
+                <span className="text-[10px] text-slate-400 font-normal">Timpa jadwal periode sama</span>
+              </button>
             </div>
 
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-slate-300 block uppercase tracking-wider">File Spreadsheet / Penjualan</label>
+                <label className="text-[11px] font-bold text-slate-300">File Excel</label>
                 <button
                   type="button"
                   onClick={downloadScheduleTemplate}
-                  className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-400 hover:text-emerald-300 transition cursor-pointer bg-emerald-500/10 hover:bg-emerald-500/20 px-3 py-1 rounded-lg border border-emerald-500/30 shadow-xs"
+                  className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-400 hover:text-emerald-300 transition cursor-pointer"
                 >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Download Template Excel</span>
+                  <Download className="w-3 h-3" />
+                  <span>Unduh Template</span>
                 </button>
               </div>
               <input
@@ -2657,42 +2787,19 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   if (f) setSelectedUploadFile(f);
                 }}
               />
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2.5 min-w-0">
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
                   <button
                     type="button"
                     onClick={() => modalFileInputRef.current?.click()}
-                    className="px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shrink-0 cursor-pointer transition shadow-sm"
+                    className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shrink-0 cursor-pointer transition"
                   >
-                    Choose File
+                    Pilih File
                   </button>
                   <span className="text-xs text-slate-300 truncate font-mono">
-                    {selectedUploadFile ? selectedUploadFile.name : 'No file chosen'}
+                    {selectedUploadFile ? selectedUploadFile.name : 'Belum ada file dipilih'}
                   </span>
                 </div>
-                {selectedUploadFile && (
-                  <span className="text-[10px] font-bold text-emerald-400 shrink-0">Siap Proses</span>
-                )}
-              </div>
-              <p className="text-[11px] text-slate-400 leading-relaxed">
-                Format didukung: .xls, .xlsx, .csv. Maksimal 10MB. Sistem akan menampilkan pratinjau template terbaca sebelum memperbarui jadwal.
-              </p>
-            </div>
-
-            {/* Template Terbaca Info Card */}
-            <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-2 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-emerald-400 flex items-center gap-1.5">
-                  <FileSpreadsheet className="w-4 h-4" />
-                  <span>Struktur Template Terbaca Otomatis:</span>
-                </span>
-                <span className="text-[10px] text-slate-400 font-mono">Sheet "ALL" / Roster DC</span>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px] text-slate-300">
-                <div className="bg-slate-900 p-2 rounded border border-slate-800">✅ Kolom Tanggal / Hari</div>
-                <div className="bg-slate-900 p-2 rounded border border-slate-800">✅ Kolom Area / Tujuan</div>
-                <div className="bg-slate-900 p-2 rounded border border-slate-800">✅ Kolom Plat &amp; Supir</div>
-                <div className="bg-slate-900 p-2 rounded border border-slate-800">✅ Kolom Helper &amp; Muatan</div>
               </div>
             </div>
 
@@ -2701,18 +2808,20 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 type="button"
                 onClick={() => {
                   setIsUploadConfigModalOpen(false);
+                  setScheduleChangeLogs(logisticsStore.getScheduleChangeLogs());
                   setIsHistoryModalOpen(true);
                 }}
-                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition cursor-pointer"
+                className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs font-bold transition cursor-pointer flex items-center gap-1.5"
               >
-                Lihat Riwayat Upload
+                <HistoryIcon className="w-3.5 h-3.5" />
+                <span>Riwayat Log</span>
               </button>
 
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => setIsUploadConfigModalOpen(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition cursor-pointer"
+                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition cursor-pointer"
                 >
                   Batal
                 </button>
@@ -2726,10 +2835,10 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     setIsUploadConfigModalOpen(false);
                     processFile(selectedUploadFile);
                   }}
-                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-md active:scale-95"
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-md"
                 >
-                  <Sparkles className="w-4 h-4" />
-                  <span>Preview Dulu &amp; Perbarui Jadwal</span>
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Pratinjau &amp; Proses</span>
                 </button>
               </div>
             </div>
@@ -2737,12 +2846,20 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         </div>
       )}
 
-      {/* Riwayat Upload Modal */}
+      {/* Riwayat / Log Unggah & Perubahan Jadwal Modal (with User Name & Detailed Changes) */}
       {isHistoryModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-lg w-full shadow-2xl space-y-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-2xl w-full shadow-2xl space-y-4 my-6">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <h3 className="text-sm font-bold text-white">Riwayat Unggah Spreadsheet Jadwal</h3>
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-400 flex items-center justify-center border border-amber-500/30">
+                  <HistoryIcon className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Riwayat / Log Unggah &amp; Perubahan Jadwal</h3>
+                  <p className="text-[11px] text-slate-400">Catatan lengkap aktivitas unggah Excel, penambahan jadwal, dan rincian perubahan beserta nama pengguna</p>
+                </div>
+              </div>
               <button
                 onClick={() => setIsHistoryModalOpen(false)}
                 className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
@@ -2750,26 +2867,94 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="space-y-2 text-xs text-slate-300">
-              <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
-                <div>
-                  <div className="font-bold text-white">Roster_DC_Banyuwangi_Jan2026.xlsx</div>
-                  <div className="text-[10px] text-slate-400">Diunggah 09 Okt 2026, 21:30 WIB • 121 Baris Tervalidasi</div>
+
+            <div className="space-y-3 text-xs text-slate-300 max-h-[60vh] overflow-y-auto pr-1">
+              {scheduleChangeLogs.length === 0 ? (
+                <div className="p-6 text-center text-slate-500 bg-slate-950 rounded-xl border border-slate-800">
+                  Belum ada riwayat unggah atau perubahan jadwal.
                 </div>
-                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300">Sukses</span>
-              </div>
-              <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
-                <div>
-                  <div className="font-bold text-white">Schedule_Sheet_ALL_v2.csv</div>
-                  <div className="text-[10px] text-slate-400">Diunggah 05 Okt 2026, 14:15 WIB • 115 Baris Tervalidasi</div>
-                </div>
-                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300">Sukses</span>
-              </div>
+              ) : (
+                scheduleChangeLogs.map((log) => {
+                  const dateFormatted = new Date(log.timestamp).toLocaleString('id-ID', {
+                    day: '2-digit',
+                    month: 'short',
+                    year: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  });
+                  const badgeStyle =
+                    log.actionType === 'upload_excel'
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                      : log.actionType === 'manual_create'
+                      ? 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+                      : log.actionType === 'manual_edit'
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                      : 'bg-rose-500/20 text-rose-300 border-rose-500/30';
+
+                  const badgeLabel =
+                    log.actionType === 'upload_excel'
+                      ? 'Unggah Excel'
+                      : log.actionType === 'manual_create'
+                      ? 'Tambah Jadwal'
+                      : log.actionType === 'manual_edit'
+                      ? 'Edit Jadwal'
+                      : 'Hapus Jadwal';
+
+                  return (
+                    <div key={log.id} className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2.5">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-white text-xs">{log.fileName}</span>
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${badgeStyle}`}>
+                              {badgeLabel}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-2 flex-wrap">
+                            <span>🕒 {dateFormatted} WIB</span>
+                            <span>&bull;</span>
+                            <span className="text-emerald-400 font-bold">
+                              👤 Oleh: {log.userName} ({log.userRole})
+                            </span>
+                            {typeof log.rowCount === 'number' && (
+                              <>
+                                <span>&bull;</span>
+                                <span className="font-mono text-slate-300">{log.rowCount} Baris Tervalidasi</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 w-fit">
+                          Tersimpan
+                        </span>
+                      </div>
+
+                      <div className="text-xs text-slate-200 font-semibold border-t border-slate-800/80 pt-2">
+                        {log.summary}
+                      </div>
+
+                      {log.changes && log.changes.length > 0 && (
+                        <div className="bg-slate-900/90 rounded-lg p-2.5 border border-slate-800 space-y-1">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-amber-400 block">
+                            Rincian Perubahan:
+                          </span>
+                          <ul className="space-y-1 text-[11px] text-slate-300 list-disc list-inside">
+                            {log.changes.map((chg, idx) => (
+                              <li key={idx} className="leading-relaxed">{chg}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
             </div>
-            <div className="pt-2 flex justify-end">
+
+            <div className="pt-2 flex justify-end border-t border-slate-800">
               <button
                 onClick={() => setIsHistoryModalOpen(false)}
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition cursor-pointer"
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold transition cursor-pointer"
               >
                 Tutup
               </button>
@@ -2993,10 +3178,27 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                         customCrewMapping: crewMappingDict
                       });
                       logisticsStore.syncSchedulesToCrewHistory();
+
+                      const sampleChanges = parsedUploadedTrips.slice(0, 4).map(t =>
+                        `Rute ${t.dateStr || ''}: Driver ${crewMappingDict[t.driver] || t.driver} | Helper ${t.helper || '-'} | Area ${mappingDict[t.area] || t.area} | Armada ${t.armada}`
+                      );
+                      logisticsStore.addScheduleChangeLog({
+                        fileName: uploadedFileName || 'Spreadsheet_Jadwal_AKK.xlsx',
+                        actionType: 'upload_excel',
+                        summary: `Unggah & sinkronisasi ${syncRes.syncedCount + syncRes.overwrittenCount} jadwal pengiriman (${importMode === 'ganti' ? 'Mode Ganti Data' : 'Mode Tambah Data'})`,
+                        rowCount: uploadedValidationReport.validCount,
+                        changes: [
+                          `${syncRes.syncedCount} jadwal baru ditambahkan, ${syncRes.overwrittenCount} jadwal diperbarui`,
+                          `Pemetaan: ${Object.keys(detectedAreaMappings).length} area kirim & ${Object.keys(detectedCrewMappings).length} kru terhubung`,
+                          ...sampleChanges
+                        ]
+                      });
+                      setScheduleChangeLogs(logisticsStore.getScheduleChangeLogs());
+
                       setIsUploadModalOpen(false);
-                      const msg = `⚡ Berhasil menyinkronkan ${syncRes.syncedCount} jadwal pengiriman valid (${syncRes.skippedDuplicateCount} duplikat dicegah, ${syncRes.skippedInvalidCount} baris salah diabaikan). Data otomatis masuk ke 'Histori & Otorisasi Kru'!`;
+                      const msg = `⚡ Berhasil menyinkronkan ${syncRes.syncedCount + syncRes.overwrittenCount} jadwal pengiriman valid! Riwayat perubahan tercatat.`;
                       setSyncSuccessMessage(msg);
-                      if (onSyncComplete) onSyncComplete(syncRes.syncedCount);
+                      if (onSyncComplete) onSyncComplete(syncRes.syncedCount + syncRes.overwrittenCount);
                       setTimeout(() => setSyncSuccessMessage(null), 8000);
                     } else {
                       setIsUploadModalOpen(false);
@@ -3006,7 +3208,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition flex items-center gap-2 cursor-pointer shadow-md"
                 >
                   <Sparkles className="w-4 h-4" />
-                  <span>⚡ Sinkronkan {uploadedValidationReport ? uploadedValidationReport.validCount : uploadedRowsCount} Jadwal Tervalidasi</span>
+                  <span>⚡ Sinkronkan {uploadedValidationReport ? uploadedValidationReport.validCount : uploadedRowsCount} Jadwal</span>
                 </button>
               </div>
             </div>
@@ -3014,31 +3216,28 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         </div>
       )}
 
-      {/* 6. Dedicated Area & Crew Auto-Mapping Modal */}
+      {/* 6. Simplified Area & Crew Mapping Modal */}
       {isAreaMappingModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-4xl w-full shadow-2xl space-y-4 my-6">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-3xl w-full shadow-2xl space-y-4 my-6">
             {/* Header */}
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-3">
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center border ${
+              <div className="flex items-center gap-2.5">
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center border ${
                   activeMappingCategory === 'area'
                     ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
                     : 'bg-blue-500/15 text-blue-400 border-blue-500/30'
                 }`}>
-                  {activeMappingCategory === 'area' ? <MapPin className="w-5 h-5 text-rose-400" /> : <Users className="w-5 h-5 text-blue-400" />}
+                  {activeMappingCategory === 'area' ? <MapPin className="w-4 h-4 text-rose-400" /> : <Users className="w-4 h-4 text-blue-400" />}
                 </div>
                 <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-base font-black text-white">
-                      Harmonisasi &amp; Pemetaan Cerdas (Spreadsheet &rarr; Sistem)
-                    </h3>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                      Auto-Mapping Aktif
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    Mendeteksi nama area dan kru dari spreadsheet secara cerdas serta menyelaraskannya dengan database operasional AKK.
+                  <h3 className="text-sm font-black text-white">
+                    {activeMappingCategory === 'area' ? 'Pemetaan Area Kirim' : 'Pemetaan Kru (Driver & Helper)'}
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    {activeMappingCategory === 'area'
+                      ? 'Selaraskan nama area di Excel dengan daftar area kirim resmi'
+                      : 'Terintegrasi dengan Data Kru & Supir serta User Manajemen'}
                   </p>
                 </div>
               </div>
@@ -3048,19 +3247,19 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   <button
                     type="button"
                     onClick={() => setQuickCreateAreaTarget('AREA BARU')}
-                    className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition flex items-center gap-1 cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>+ Buat Area Baru</span>
+                    <span>Area Baru</span>
                   </button>
                 ) : (
                   <button
                     type="button"
                     onClick={() => setQuickCreateCrewTarget({ name: '', roleHint: 'Driver' })}
-                    className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition flex items-center gap-1 cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>+ Daftarkan Kru Baru</span>
+                    <span>Kru Baru</span>
                   </button>
                 )}
                 <button
@@ -3073,41 +3272,31 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             </div>
 
             {/* Category Selector Tabs */}
-            <div className="flex items-center gap-2 p-1.5 bg-slate-950 rounded-xl border border-slate-800">
+            <div className="flex items-center gap-2 p-1 bg-slate-950 rounded-xl border border-slate-800">
               <button
                 type="button"
                 onClick={() => setActiveMappingCategory('area')}
-                className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
+                className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
                   activeMappingCategory === 'area'
-                    ? 'bg-emerald-600 text-white shadow-md'
-                    : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                    ? 'bg-emerald-600 text-white'
+                    : 'text-slate-400 hover:text-white'
                 }`}
               >
-                <MapPin className="w-3.5 h-3.5 text-rose-400" />
-                <span>1. Pemetaan Area Kirim</span>
-                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
-                  activeMappingCategory === 'area' ? 'bg-emerald-800 text-emerald-100' : 'bg-slate-800 text-slate-400'
-                }`}>
-                  {Object.keys(detectedAreaMappings).length} Area
-                </span>
+                <MapPin className="w-3.5 h-3.5" />
+                <span>Pemetaan Area ({Object.keys(detectedAreaMappings).length})</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setActiveMappingCategory('crew')}
-                className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
+                className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
                   activeMappingCategory === 'crew'
-                    ? 'bg-blue-600 text-white shadow-md'
-                    : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                    ? 'bg-blue-600 text-white'
+                    : 'text-slate-400 hover:text-white'
                 }`}
               >
-                <Users className="w-3.5 h-3.5 text-blue-300" />
-                <span>2. Pemetaan Kru Pengirim (Driver &amp; Helper)</span>
-                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
-                  activeMappingCategory === 'crew' ? 'bg-blue-800 text-blue-100' : 'bg-slate-800 text-slate-400'
-                }`}>
-                  {Object.keys(detectedCrewMappings).length} Kru
-                </span>
+                <Users className="w-3.5 h-3.5" />
+                <span>Pemetaan Kru ({Object.keys(detectedCrewMappings).length})</span>
               </button>
             </div>
 
@@ -3133,17 +3322,17 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             <div className="flex items-center justify-between pt-3 border-t border-slate-800 text-xs">
               <span className="text-slate-400">
                 {activeMappingCategory === 'area' ? (
-                  <>Total Area Resmi Terdaftar: <strong className="text-white">{officialAreasList.length}</strong> area di Jadwal Pengiriman &amp; Muat</>
+                  <>Area Resmi Terdaftar: <strong className="text-white">{officialAreasList.length}</strong> area</>
                 ) : (
-                  <>Total Kru Resmi Terdaftar: <strong className="text-white">{officialCrewsList.length}</strong> personel di Database AKK</>
+                  <>Kru Terdaftar (Aktif &amp; Nonaktif): <strong className="text-white">{officialCrewsList.length}</strong> kru</>
                 )}
               </span>
               <button
                 type="button"
                 onClick={() => setIsAreaMappingModalOpen(false)}
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold transition cursor-pointer"
+                className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold transition cursor-pointer"
               >
-                Selesai &amp; Tutup
+                Tutup
               </button>
             </div>
           </div>

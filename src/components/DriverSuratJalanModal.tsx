@@ -7,7 +7,6 @@ import {
   Truck,
   MapPin,
   ShieldCheck,
-  QrCode,
   ArrowRight,
   Building2,
   Copy,
@@ -146,21 +145,24 @@ export const DriverSuratJalanModal: React.FC<DriverSuratJalanModalProps> = ({
 
   const handleGateOutConfirm = () => {
     setIsUpdating(true);
-    const success = driverWaybillService.updateWaybillStatus(currentWaybill.id, 'gate_out');
+    const success = driverWaybillService.updateWaybillStatus(currentWaybill.id, 'in_transit');
     if (success) {
+      if (currentWaybill.scheduleId) {
+        logisticsStore.updateScheduleStatus(currentWaybill.scheduleId, 'in_transit', 'Gate-Out Gerbang Gudang DC');
+      }
       const now = new Date();
       const updated: OutboundWaybill = {
         ...currentWaybill,
-        status: 'gate_out',
-        statusLabel: 'Gate-Out Gerbang DC (Berangkat)',
+        status: 'in_transit',
+        statusLabel: 'Di Jalan (Keluar Gudang)',
         gateOutTime: `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')} WIB`
       };
       setCurrentWaybill(updated);
       if (onStatusUpdated) onStatusUpdated(updated);
       addNotification(
         'schedule',
-        'Gate-Out Berhasil',
-        `Armada ${currentWaybill.fleet.plateNumber} tercatat keluar gerbang gudang DC.`
+        'Gate-Out Berhasil (Di Jalan)',
+        `Armada ${currentWaybill.fleet.plateNumber} tercatat keluar gerbang gudang DC dan masuk status Di Jalan.`
       );
     }
     setIsUpdating(false);
@@ -332,21 +334,6 @@ export const DriverSuratJalanModal: React.FC<DriverSuratJalanModalProps> = ({
               </div>
               <div className="text-[8.5px] text-slate-700">
                 Telp   : {currentWaybill.crew.driverPhone}
-              </div>
-            </div>
-
-            {/* QR Gate-Pass */}
-            <div className="border-b border-dashed border-slate-400 pb-2 flex items-center gap-2">
-              <div className="w-9 h-9 bg-white p-0.5 rounded border border-slate-400 flex items-center justify-center shrink-0">
-                <QrCode className="w-7 h-7 text-slate-950" />
-              </div>
-              <div className="min-w-0">
-                <div className="font-bold text-[8.5px] text-slate-950 font-sans">
-                  GATE-OUT DC PT AKK
-                </div>
-                <div className="text-[7.5px] text-slate-600 truncate">
-                  {currentWaybill.qrCodeData}
-                </div>
               </div>
             </div>
 
