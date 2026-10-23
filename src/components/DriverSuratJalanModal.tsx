@@ -169,7 +169,7 @@ export const DriverSuratJalanModal: React.FC<DriverSuratJalanModalProps> = ({
   };
 
   const handleCopySummary = () => {
-    const text = `*SURAT JALAN KELUAR PT AKK (57-58mm)*\nNo: ${currentWaybill.waybillNumber}\nArmada: ${currentWaybill.fleet.plateNumber} (${currentWaybill.fleet.vehicleType})\nDriver: ${currentWaybill.crew.driverName}\nTujuan: ${currentWaybill.destination.storeName} (${currentWaybill.destination.city})\nStatus: ${currentWaybill.statusLabel}`;
+    const text = `*SURAT JALAN KELUAR PT AKK*\nNo: ${currentWaybill.waybillNumber}\nArmada: ${currentWaybill.fleet.plateNumber} (${currentWaybill.fleet.vehicleType})\nDriver: ${currentWaybill.crew.driverName}\nTujuan: ${currentWaybill.destination.storeName} (${currentWaybill.destination.city})\nStatus: ${currentWaybill.statusLabel}`;
     navigator.clipboard.writeText(text);
     setIsCopied(true);
     addNotification('schedule', 'Teks Disalin', 'Ringkasan Surat Jalan disalin ke clipboard.');
@@ -184,8 +184,8 @@ export const DriverSuratJalanModal: React.FC<DriverSuratJalanModalProps> = ({
       if (success) {
         addNotification(
           'delivery',
-          'PDF 57-58mm Berhasil Diunduh',
-          `Berkas ${currentWaybill.waybillNumber} ukuran kertas thermal 57-58 mm telah diunduh.`
+          'PDF Surat Jalan Berhasil Diunduh',
+          `Berkas ${currentWaybill.waybillNumber} telah berhasil diunduh.`
         );
       } else {
         throw new Error('Gagal menghasilkan file PDF');
@@ -218,7 +218,7 @@ export const DriverSuratJalanModal: React.FC<DriverSuratJalanModalProps> = ({
             </div>
             <div>
               <div className="text-xs font-black text-white uppercase tracking-wide flex items-center gap-1.5">
-                <span>Surat Jalan (57-58 mm)</span>
+                <span>Surat Jalan Keluar</span>
               </div>
               <div className="text-[10px] text-slate-400 font-mono">
                 {currentWaybill.waybillNumber}
@@ -244,7 +244,7 @@ export const DriverSuratJalanModal: React.FC<DriverSuratJalanModalProps> = ({
               onClick={handleDownloadPdf}
               disabled={isExportingPdf}
               className="p-1.5 rounded-lg text-blue-400 hover:text-blue-300 hover:bg-slate-800 transition cursor-pointer disabled:opacity-50"
-              title="Unduh PDF Ukuran 57-58 mm"
+              title="Unduh PDF Surat Jalan"
             >
               {isExportingPdf ? <Loader2 className="w-4 h-4 animate-spin text-amber-400" /> : <Download className="w-4 h-4" />}
             </button>
@@ -257,27 +257,66 @@ export const DriverSuratJalanModal: React.FC<DriverSuratJalanModalProps> = ({
           </div>
         </div>
 
-        {/* Scrollable Printable 57-58mm Thermal Paper Preview */}
+        {/* Scrollable Printable Thermal Paper Preview */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs bg-slate-950 flex flex-col items-center">
-          <div className="text-[10px] text-amber-400 font-bold bg-amber-500/10 border border-amber-500/30 px-3 py-1 rounded-full">
-            Pratinjau Kertas Thermal 57-58 mm • Kolom TTD Siap Cetak
-          </div>
-
-          {/* 58mm Thermal Receipt Sheet */}
+          {/* Thermal Receipt Sheet */}
           <div
             ref={suratJalanSheetRef}
             className="w-[260px] bg-white text-slate-950 rounded-md p-3.5 shadow-xl border border-slate-300 space-y-2.5 font-mono text-[10px] leading-snug"
           >
-            {/* Header Instansi */}
-            <div className="text-center border-b border-dashed border-slate-400 pb-2">
-              <div className="font-black text-[11px] text-slate-950 tracking-tight font-sans">
-                PT. ANUGRAH KEMASAN KREATIF
+            {/* Header Instansi + Logo PT Anugrah Kemasan Kreatif (Tanpa Latar Belakang) */}
+            <div className="border-b border-dashed border-slate-400 pb-2.5 space-y-1.5">
+              <div className="flex items-center justify-center gap-2.5 bg-transparent py-0.5">
+                {/* Official Monogram Logo Icon (Transparent Background) */}
+                <svg
+                  viewBox="0 0 100 100"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="w-11 h-11 shrink-0"
+                >
+                  <rect width="100" height="100" rx="18" ry="18" fill="#1273BA" />
+                  <path
+                    d="M 50.5 15.5 L 94.5 94 L 81.5 94 L 68 73 C 55.5 67.5, 41 61.5, 30.5 51 Z"
+                    fill="#FFFFFF"
+                  />
+                  <path
+                    d="M 30.5 61 C 42 67, 54 71.5, 68 73.5 L 66 79 C 51 77, 38 72, 28 66 Z"
+                    fill="#FFFFFF"
+                  />
+                  <path
+                    d="M 6.5 94 C 12 77.5, 26 64.5, 46 64.5 C 60 64.5, 72.5 72.5, 79.5 94 L 69.5 94 C 64.5 79.5, 56.5 74.5, 46 74.5 C 34 74.5, 23 82.5, 17 94 Z"
+                    fill="#FFFFFF"
+                  />
+                  <path
+                    d="M 25 94 C 25 79, 75 79, 75 94 Z"
+                    fill="#C84B28"
+                  />
+                </svg>
+
+                {/* Stacked Brand Lockup matching Gambar 11 */}
+                <div className="text-left font-sans leading-none space-y-0.5">
+                  <div className="text-[11px] font-black tracking-tight text-[#153A5E]">
+                    PT ANUGRAH
+                  </div>
+                  <div className="text-[11px] font-black tracking-tight text-[#153A5E]">
+                    KEMASAN
+                  </div>
+                  <div className="text-[11px] font-black tracking-tight text-[#153A5E]">
+                    KREATIF
+                  </div>
+                  <div className="text-[7.5px] font-extrabold tracking-wider text-[#C84B28] pt-0.5">
+                    SOLUTIF &amp; KREATIF
+                  </div>
+                </div>
               </div>
-              <div className="text-[9px] text-slate-700 font-sans">
-                Divisi Logistik &amp; Distribusi Armada
-              </div>
-              <div className="text-[8px] text-slate-600 font-sans">
-                Banyuwangi KM 12 • (0333) 412890
+
+              <div className="text-center space-y-0.5">
+                <div className="text-[9px] text-slate-700 font-sans font-semibold">
+                  Divisi Logistik &amp; Distribusi Armada
+                </div>
+                <div className="text-[8px] text-slate-600 font-sans">
+                  Banyuwangi KM 12 • (0333) 412890
+                </div>
               </div>
             </div>
 
@@ -412,10 +451,6 @@ export const DriverSuratJalanModal: React.FC<DriverSuratJalanModalProps> = ({
                   </div>
                 </div>
               </div>
-
-              <div className="text-center text-[7.5px] text-slate-500 pt-1 border-t border-dashed border-slate-300 font-sans">
-                Ukuran Cetak Kertas Thermal 57-58 mm • PT AKK
-              </div>
             </div>
           </div>
 
@@ -445,7 +480,7 @@ export const DriverSuratJalanModal: React.FC<DriverSuratJalanModalProps> = ({
         <div className="bg-slate-900 p-3 px-4 border-t border-slate-800 flex items-center justify-between gap-2">
           <div className="text-[10px] text-slate-400 flex items-center gap-1">
             <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span>Kertas 57-58 mm</span>
+            <span>Siap Cetak</span>
           </div>
 
           <div className="flex items-center gap-2">
@@ -462,7 +497,7 @@ export const DriverSuratJalanModal: React.FC<DriverSuratJalanModalProps> = ({
               ) : (
                 <>
                   <Download className="w-3.5 h-3.5" />
-                  <span>PDF 58mm</span>
+                  <span>PDF</span>
                 </>
               )}
             </button>

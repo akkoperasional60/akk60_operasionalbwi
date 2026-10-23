@@ -2633,6 +2633,9 @@ class LogisticsStore {
    * Helper utama untuk menyelaraskan currentUser dengan Crew dan session storage supir
    */
   public syncCurrentUserToCrew(): Crew {
+    if (!this.crews || this.crews.length === 0) {
+      this.crews = this.computeSyncedCrews();
+    }
     const user = this.getCurrentUser();
     const cleanUserName = (user?.fullName || '').trim();
     const lowerName = cleanUserName.toLowerCase();

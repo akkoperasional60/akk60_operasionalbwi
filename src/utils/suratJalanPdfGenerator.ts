@@ -12,10 +12,10 @@ export async function downloadSuratJalanPdf(
   _elementToCapture?: HTMLElement | null
 ): Promise<boolean> {
   const cleanNumber = (waybill.waybillNumber || 'SJ_AKK').replace(/[^a-zA-Z0-9]/g, '_');
-  const fileName = `Surat_Jalan_58mm_${cleanNumber}.pdf`;
+  const fileName = `Surat_Jalan_${cleanNumber}.pdf`;
 
   try {
-    // 58mm paper width (57-58mm thermal roll standard), height 210mm
+    // 58mm paper width, height 210mm
     const paperWidth = 58;
     const paperHeight = 210;
     const margin = 3;
@@ -27,7 +27,7 @@ export async function downloadSuratJalanPdf(
       format: [paperWidth, paperHeight]
     });
 
-    let y = 5;
+    let y = 4.5;
 
     const drawDashedLine = (yPos: number) => {
       doc.setDrawColor(120, 120, 120);
@@ -35,19 +35,83 @@ export async function downloadSuratJalanPdf(
       doc.line(margin, yPos, paperWidth - margin, yPos);
     };
 
-    // Company Header (Centered for 58mm thermal paper)
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8.5);
-    doc.setTextColor(0, 0, 0);
-    doc.text('PT. ANUGRAH KEMASAN KREATIF', paperWidth / 2, y, { align: 'center' });
-    y += 3.5;
+    // Render Official PT AKK Logo Icon (Transparent Background) via offscreen canvas PNG
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = 160;
+      canvas.height = 160;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.clearRect(0, 0, 160, 160);
+        // Rounded Blue Square
+        ctx.fillStyle = '#1273BA';
+        ctx.beginPath();
+        ctx.roundRect(0, 0, 160, 160, 28);
+        ctx.fill();
 
+        // White Monogram 'A' & Arch
+        ctx.fillStyle = '#FFFFFF';
+        ctx.beginPath();
+        ctx.moveTo(80.8, 24.8);
+        ctx.lineTo(151.2, 150.4);
+        ctx.lineTo(130.4, 150.4);
+        ctx.lineTo(108.8, 116.8);
+        ctx.bezierCurveTo(88.8, 108, 65.6, 98.4, 48.8, 81.6);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(48.8, 97.6);
+        ctx.bezierCurveTo(67.2, 107.2, 86.4, 114.4, 108.8, 117.6);
+        ctx.lineTo(105.6, 126.4);
+        ctx.bezierCurveTo(81.6, 123.2, 60.8, 115.2, 44.8, 105.6);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(10.4, 150.4);
+        ctx.bezierCurveTo(19.2, 124, 41.6, 103.2, 73.6, 103.2);
+        ctx.bezierCurveTo(96, 103.2, 116, 116, 127.2, 150.4);
+        ctx.lineTo(111.2, 150.4);
+        ctx.bezierCurveTo(103.2, 127.2, 90.4, 119.2, 73.6, 119.2);
+        ctx.bezierCurveTo(54.4, 119.2, 36.8, 132, 27.2, 150.4);
+        ctx.closePath();
+        ctx.fill();
+
+        // Terracotta Half Dome
+        ctx.fillStyle = '#C84B28';
+        ctx.beginPath();
+        ctx.moveTo(40, 150.4);
+        ctx.bezierCurveTo(40, 126.4, 120, 126.4, 120, 150.4);
+        ctx.closePath();
+        ctx.fill();
+
+        const logoPng = canvas.toDataURL('image/png');
+        doc.addImage(logoPng, 'PNG', 9, y, 11, 11);
+      }
+    } catch {}
+
+    // Stacked Brand Text on Right of Logo Icon (Gambar 11 Lockup)
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.2);
+    doc.setTextColor(21, 58, 94);
+    doc.text('PT ANUGRAH', 22, y + 2.8);
+    doc.text('KEMASAN', 22, y + 5.6);
+    doc.text('KREATIF', 22, y + 8.4);
+
+    doc.setFontSize(5.4);
+    doc.setTextColor(200, 75, 40);
+    doc.text('SOLUTIF & KREATIF', 22, y + 10.8);
+
+    y += 13.5;
+
+    doc.setTextColor(0, 0, 0);
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(6.5);
     doc.text('Divisi Logistik & Distribusi Armada', paperWidth / 2, y, { align: 'center' });
     y += 3;
     doc.text('Banyuwangi KM 12 • Telp (0333) 412890', paperWidth / 2, y, { align: 'center' });
-    y += 3;
+    y += 2.5;
 
     drawDashedLine(y);
     y += 3.5;
@@ -231,17 +295,10 @@ export async function downloadSuratJalanPdf(
     doc.text(secName.slice(0, 16), leftX, y, { align: 'center' });
     doc.text(crewName.slice(0, 16), rightX, y, { align: 'center' });
 
-    y += 4.5;
-    drawDashedLine(y);
-    y += 3;
-    doc.setFont('helvetica', 'italic');
-    doc.setFontSize(5.5);
-    doc.text('Format Kertas Struk Thermal 57-58 mm • PT AKK', paperWidth / 2, y, { align: 'center' });
-
     doc.save(fileName);
     return true;
   } catch (err) {
-    console.error('Failed to generate 58mm PDF:', err);
+    console.error('Failed to generate PDF:', err);
     return false;
   }
 }

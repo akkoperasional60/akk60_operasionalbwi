@@ -464,12 +464,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   {canLogisticsOps && renderNavItem('operational_dashboard', 'Dashboard Operasional', <Truck className="w-4 h-4" />)}
                   {canLogisticsOps && renderNavItem('analytics_reports', 'Analitik Armada & Kru', <BarChart3 className="w-4 h-4" />)}
                   {canLogisticsSched && renderNavItem('schedules', 'Jadwal & Penugasan', <Calendar className="w-4 h-4" />)}
-                  {canLogisticsFleets && renderNavItem('fleets', 'Armada & Kru Supir', <Truck className="w-4 h-4" />)}
-                  {canLogisticsFleets && renderNavItem('fuel_efficiency', 'Efisiensi BBM', <Fuel className="w-4 h-4" />)}
-                  {canLogisticsFleets && renderNavItem('spareparts', 'Manajemen Sparepart', <Wrench className="w-4 h-4" />)}
-                  {canLogisticsFleets && renderNavItem('crew_history', 'Histori & Otorisasi Kru', <History className="w-4 h-4" />)}
+                  {canLogisticsFleets && renderNavItem('fleets', 'Data Armada Terpadu', <Truck className="w-4 h-4" />)}
+                  {canLogisticsFleets && renderNavItem('crew_history', 'Kru Pengiriman', <Users className="w-4 h-4" />)}
                   {canLogisticsReports && renderNavItem('tracking_eval', 'Evaluasi Jalur (Excel)', <FileSpreadsheet className="w-4 h-4" />)}
-                  {canLogisticsTrack && renderNavItem('tracksolid', 'Akses Tracksolid GPS', <Radio className="w-4 h-4" />)}
                   {canLogisticsFleets && renderNavItem('fleet_forms', 'Formulir Armada', <FileText className="w-4 h-4" />)}
                 </div>
               )}

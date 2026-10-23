@@ -385,9 +385,9 @@ export default function App() {
 
           {currentTab === 'fleets' && (canManageFleet() || canAccess(currentUser, 'fleets')) && (
             <FleetCrewManagement
+              initialTab="fleets"
               onNavigateToSpareParts={() => setCurrentTab('spareparts')}
               onNavigateToFuelEfficiency={() => setCurrentTab('fuel_efficiency')}
-              onNavigateToTracksolid={() => setCurrentTab('tracksolid')}
             />
           )}
 
@@ -400,7 +400,9 @@ export default function App() {
           )}
 
           {currentTab === 'crew_history' && (
-            <CrewDeliveryHistoryView />
+            <FleetCrewManagement
+              initialTab="crews"
+            />
           )}
 
           {currentTab === 'users' && (isAdmin() || canAccess(currentUser, 'users')) && (

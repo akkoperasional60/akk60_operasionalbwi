@@ -237,12 +237,6 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
               </div>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
-          >
-            <X className="w-4 h-4" />
-          </button>
         </div>
 
         {/* Scrollable Content Body */}
@@ -476,40 +470,15 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
               </button>
             )}
           </div>
-          <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between">
-            <div className="space-y-0.5">
-              <div className="text-[10px] font-bold text-slate-300">Tanda Tangan Pengemudi (E-Signature)</div>
-              <div className="text-[9px] text-slate-500">
-                Pemeriksaan fisik telah dilakukan secara langsung sebelum armada keluar pool.
-              </div>
-            </div>
-            <div className="text-right">
-              <div className="text-[10px] font-bold text-emerald-400 font-mono">
-                {driverName}
-              </div>
-              <div className="text-[9px] text-slate-400">
-                ✓ Terverifikasi Digital
-              </div>
-            </div>
-          </div>
-
         </div>
 
         {/* Modal Bottom Actions */}
-        <div className="bg-slate-900 p-3 px-4 border-t border-slate-800 flex items-center justify-between">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs transition"
-          >
-            Batal
-          </button>
-
+        <div className="bg-slate-900 p-3 px-4 border-t border-slate-800 flex items-center justify-end">
           <button
             type="button"
             onClick={handleSave}
             disabled={isSubmitting}
-            className="px-5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-500/20 transition cursor-pointer"
+            className="w-full py-2.5 px-5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-500/20 transition cursor-pointer"
           >
             <Save className="w-4 h-4" />
             <span>Simpan Checklist</span>
