@@ -86,7 +86,7 @@ export default function App() {
     return 'dashboard';
   });
   const [preselectedStore, setPreselectedStore] = useState<RetailStore | null>(null);
-  const [isAuthOpen, setIsAuthOpen] = useState(true);
+  const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [authDefaultTab, setAuthDefaultTab] = useState<'login' | 'register'>('login');
   const [isSidebarMinimized, setIsSidebarMinimized] = useState<boolean>(() => {
     try {

@@ -1009,42 +1009,6 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
         </div>
       )}
 
-      {/* Header */}
-      <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-slate-950 border border-slate-800/90 rounded-2xl p-5 sm:p-6 shadow-lg no-print">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-2 flex-wrap">
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-500/15 border border-blue-500/30 text-blue-300 text-[11px] font-bold">
-                <Calendar className="w-3.5 h-3.5 text-blue-400" />
-                <span>Jadwal &amp; Penugasan Pengiriman</span>
-              </div>
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[11px] font-bold">
-                <User className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Terintegrasi Manajemen User ({logisticsStore.getDriverCrews().length} Driver &bull; {logisticsStore.getHelperCrews().length} Helper)</span>
-              </div>
-            </div>
-            <h2 className="text-lg sm:text-xl font-extrabold text-white tracking-tight">
-              Manajemen Jadwal Pengiriman &amp; Penugasan Armada
-            </h2>
-            <p className="text-slate-400 text-xs sm:text-sm max-w-2xl leading-relaxed">
-              Penjadwalan rute pengiriman mingguan (Senin s/d Sabtu) dari Gudang Pusat Banyuwangi DC. Daftar Kru Supir &amp; Helper otomatis tersinkronisasi dari akun ber-role Driver &amp; Helper pada Manajemen User.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2.5 self-start lg:self-center flex-wrap">
-            <button
-              onClick={() => {
-                if (stores.length > 0) handleOpenCreateWithStore(stores[0]);
-              }}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-lg shadow-blue-600/25 transition cursor-pointer active:scale-95"
-            >
-              <Plus className="w-4 h-4" />
-              <span>+ Jadwal Baru</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
       {/* Google Sheets (ALL) / Excel View */}
       <GoogleSheetsAdminScheduleView
         onSyncComplete={(count) => {
@@ -1052,6 +1016,10 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
           setAutoInitMessage(`⚡ Berhasil menyinkronkan ${count} rute pengiriman dari Google Sheets (Sheet ALL) ke Jadwal Operasional Aktif!`);
         }}
         onNavigateToCrewHistory={onNavigateToCrewHistory}
+        onOpenCreateSchedule={() => {
+          if (stores.length > 0) handleOpenCreateWithStore(stores[0]);
+          else setIsAddScheduleOpen(true);
+        }}
       />
 
 
@@ -1219,7 +1187,7 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                         <option value="">-- Pilih Supir Utama --</option>
                         {logisticsStore.getDriverCrews().map(cr => (
                           <option key={cr.id} value={cr.id}>
-                            {cr.name} {cr.status === 'off-duty' ? '(Nonaktif)' : ''}
+                            {cr.name} {cr.status === 'off' ? '(Nonaktif)' : ''}
                           </option>
                         ))}
                       </select>
@@ -1239,7 +1207,7 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                           .filter(c => c.id !== newSchedule.crewId && c.id !== newSchedule.crewHelper2Id)
                           .map(cr => (
                             <option key={cr.id} value={cr.id}>
-                              {cr.name} {cr.status === 'off-duty' ? '(Nonaktif)' : ''}
+                              {cr.name} {cr.status === 'off' ? '(Nonaktif)' : ''}
                             </option>
                           ))}
                       </select>
@@ -1259,7 +1227,7 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                           .filter(c => c.id !== newSchedule.crewId && c.id !== newSchedule.crewHelperId)
                           .map(cr => (
                             <option key={cr.id} value={cr.id}>
-                              {cr.name} {cr.status === 'off-duty' ? '(Nonaktif)' : ''}
+                              {cr.name} {cr.status === 'off' ? '(Nonaktif)' : ''}
                             </option>
                           ))}
                       </select>

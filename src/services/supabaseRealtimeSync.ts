@@ -42,6 +42,126 @@ export interface DriverSubscriptionConfig {
   onScheduleSync?: () => void;
 }
 
+export interface AdminStatusNotification {
+  id: string;
+  scheduleId: string;
+  trackingNumber: string;
+  storeName: string;
+  areaName: string;
+  fleetPlate: string;
+  fleetInitialCode?: string;
+  vehicleType?: string;
+  driverName: string;
+  helperName?: string;
+  oldStatus?: ShipmentStatus | string;
+  newStatus: ShipmentStatus | string;
+  statusLabel: string;
+  title: string;
+  message: string;
+  urgent: boolean;
+  timestamp: string;
+  isRead: boolean;
+  notes?: string;
+  source: 'supabase_realtime' | 'local_sync' | 'simulation';
+}
+
+const ADMIN_STATUS_STORAGE_KEY = 'akk_admin_status_notifications_v1';
+
+const INITIAL_ADMIN_STATUS_NOTIFICATIONS: AdminStatusNotification[] = [
+  {
+    id: 'asn-seed-1',
+    scheduleId: 'sch-20261023-DS3',
+    trackingNumber: 'PO-AKK-20261023-DS3-01',
+    storeName: 'KARTIKA PLAZA',
+    areaName: 'DENPASAR 1',
+    fleetPlate: 'P 8125 VC',
+    fleetInitialCode: 'DS3',
+    vehicleType: 'Isuzu Giga CDD Long (Bali Spec)',
+    driverName: 'Supriyanto',
+    helperName: 'Rifaldi',
+    oldStatus: 'scheduled',
+    newStatus: 'in_transit',
+    statusLabel: 'Dalam Perjalanan (In Transit)',
+    title: '🚛 Armada Berangkat (In Transit): DENPASAR 1',
+    message: 'Armada DS3 (P 8125 VC) Supriyanto & Rifaldi telah menyeberang Ketapang - Gilimanuk menuju DENPASAR 1.',
+    urgent: false,
+    timestamp: new Date(Date.now() - 12 * 60 * 1000).toISOString(),
+    isRead: false,
+    notes: 'Estimasi bongkar Kartika Plaza pukul 16:30 WITA.',
+    source: 'supabase_realtime'
+  },
+  {
+    id: 'asn-seed-2',
+    scheduleId: 'sch-20261023-NS1',
+    trackingNumber: 'PO-AKK-20261023-NS1-02',
+    storeName: 'TOKO DR. SOETOMO',
+    areaName: 'PURWO PASAR',
+    fleetPlate: 'P 8848 U',
+    fleetInitialCode: 'NS1',
+    vehicleType: 'Mitsubishi Canter FE71',
+    driverName: 'Budi Santoso',
+    helperName: 'Rizal',
+    oldStatus: 'in_transit',
+    newStatus: 'delivered',
+    statusLabel: 'Terkirim (Delivered)',
+    title: '✅ Pengiriman Berhasil (Delivered): TOKO DR. SOETOMO',
+    message: 'Armada NS1 (P 8848 U) Budi Santoso berhasil menyelesaikan pengantaran ke Toko Dr. Soetomo dengan tanda tangan penerima.',
+    urgent: false,
+    timestamp: new Date(Date.now() - 38 * 60 * 1000).toISOString(),
+    isRead: true,
+    notes: 'Muatan karton box diterima lengkap tanpa cacat.',
+    source: 'supabase_realtime'
+  }
+];
+
+export function getAdminStatusNotifications(): AdminStatusNotification[] {
+  try {
+    const raw = localStorage.getItem(ADMIN_STATUS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  return [...INITIAL_ADMIN_STATUS_NOTIFICATIONS];
+}
+
+export function saveAdminStatusNotifications(notifs: AdminStatusNotification[]): void {
+  try {
+    localStorage.setItem(ADMIN_STATUS_STORAGE_KEY, JSON.stringify(notifs.slice(0, 50)));
+  } catch {}
+}
+
+const adminStatusListeners: Array<(notif: AdminStatusNotification) => void> = [];
+
+export function subscribeAdminStatusNotifications(callback: (notif: AdminStatusNotification) => void): () => void {
+  if (!adminStatusListeners.includes(callback)) {
+    adminStatusListeners.push(callback);
+  }
+  return () => {
+    const idx = adminStatusListeners.indexOf(callback);
+    if (idx !== -1) adminStatusListeners.splice(idx, 1);
+  };
+}
+
+export function markAdminStatusNotificationRead(id: string): void {
+  const current = getAdminStatusNotifications();
+  const updated = current.map(n => (n.id === id ? { ...n, isRead: true } : n));
+  saveAdminStatusNotifications(updated);
+  window.dispatchEvent(new CustomEvent('akk-admin-status-updated', { detail: { notifs: updated } }));
+}
+
+export function markAllAdminStatusNotificationsRead(): void {
+  const current = getAdminStatusNotifications();
+  const updated = current.map(n => ({ ...n, isRead: true }));
+  saveAdminStatusNotifications(updated);
+  window.dispatchEvent(new CustomEvent('akk-admin-status-updated', { detail: { notifs: updated } }));
+}
+
+export function clearAdminStatusNotifications(): void {
+  saveAdminStatusNotifications([]);
+  window.dispatchEvent(new CustomEvent('akk-admin-status-updated', { detail: { notifs: [] } }));
+}
+
 let realtimeChannel: any = null;
 let isSubscribed = false;
 const listeners: Array<(event: { table: string; eventType: string; payload: any }) => void> = [];
@@ -49,7 +169,7 @@ const driverSubscribers = new Map<string, DriverSubscriptionConfig>();
 const driverFilteredChannels = new Map<string, any>();
 const recentEventSignatures = new Map<string, number>();
 
-const STATUS_LABELS: Record<string, string> = {
+export const STATUS_LABELS: Record<string, string> = {
   scheduled: 'Terjadwal',
   picked_up: 'Telah Dimuat (Picked Up)',
   in_transit: 'Dalam Perjalanan (In Transit)',
@@ -331,6 +451,122 @@ function dispatchToMatchingDrivers(
   });
 }
 
+/**
+ * Dispatches real-time status change notification to SPV Logistik & Super Admin
+ */
+export function dispatchToAdminLogistics(
+  newRow: any,
+  oldRow?: any,
+  source: 'supabase_realtime' | 'local_sync' | 'simulation' = 'supabase_realtime'
+): AdminStatusNotification | null {
+  if (!newRow) return null;
+  const newStatus = String(newRow.status || 'scheduled');
+  const oldStatus = oldRow ? String(oldRow.status || '') : undefined;
+
+  // In postgres_changes, if old status is provided and is identical, ignore
+  if (oldStatus && oldStatus === newStatus && source === 'supabase_realtime') {
+    return null;
+  }
+
+  const scheduleId = String(newRow.id || `sch-${Date.now()}`);
+  const trackingNumber = String(
+    newRow.trackingNumber || newRow.tracking_number || `PO-AKK-${Date.now().toString().slice(-6)}`
+  );
+  const storeName = String(
+    newRow.store?.storeName ||
+      newRow.store_name ||
+      newRow.areaName ||
+      newRow.area_name ||
+      'Area Distribusi'
+  );
+  const areaName = String(newRow.areaName || newRow.area_name || storeName);
+  const fleetPlate = String(
+    newRow.fleet?.plateNumber || newRow.plateNumber || newRow.plate_number || 'Armada AKK'
+  );
+  const fleetInitialCode = String(
+    newRow.fleet?.initialCode || newRow.initialCode || newRow.initial_code || ''
+  );
+  const vehicleType = String(
+    newRow.fleet?.vehicleType || newRow.vehicleType || newRow.vehicle_type || 'Truk Box'
+  );
+  const driverName = String(
+    newRow.crew?.name || newRow.crewName || newRow.crew_name || newRow.driver || 'Driver AKK'
+  );
+  const helperName = String(
+    newRow.crewHelper?.name || newRow.crewHelperName || newRow.helper || ''
+  );
+  const notes = String(newRow.notes || '');
+
+  const oldLabel = oldStatus ? (STATUS_LABELS[oldStatus] || oldStatus) : undefined;
+  const newLabel = STATUS_LABELS[newStatus] || newStatus;
+
+  const urgent = newStatus === 'delayed' || Boolean(newRow.isUrgentOverride);
+
+  let title = `🚚 Perubahan Status: ${newLabel}`;
+  if (newStatus === 'in_transit') {
+    title = `🚛 Armada Berangkat (In Transit): ${areaName}`;
+  } else if (newStatus === 'delivered') {
+    title = `✅ Pengiriman Berhasil (Delivered): ${storeName}`;
+  } else if (newStatus === 'picked_up') {
+    title = `📦 Muatan Dimuat (Picked Up): ${fleetPlate}`;
+  } else if (newStatus === 'delayed') {
+    title = `⚠️ Kendala Pengiriman (Delayed): ${areaName}`;
+  }
+
+  const message =
+    oldLabel && oldLabel !== newLabel
+      ? `Jadwal ${trackingNumber} (${storeName}) berganti status: "${oldLabel}" ➔ "${newLabel}". Driver: ${driverName} • Armada: ${fleetPlate}${fleetInitialCode ? ` (${fleetInitialCode})` : ''}.`
+      : `Jadwal ${trackingNumber} (${storeName}) kini berstatus "${newLabel}". Driver: ${driverName} • Armada: ${fleetPlate}.`;
+
+  const notif: AdminStatusNotification = {
+    id: `asn-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    scheduleId,
+    trackingNumber,
+    storeName,
+    areaName,
+    fleetPlate,
+    fleetInitialCode,
+    vehicleType,
+    driverName,
+    helperName,
+    oldStatus,
+    newStatus,
+    statusLabel: newLabel,
+    title,
+    message,
+    urgent,
+    timestamp: new Date().toISOString(),
+    isRead: false,
+    notes,
+    source
+  };
+
+  const prev = getAdminStatusNotifications();
+  const next = [notif, ...prev.filter(item => item.id !== notif.id)].slice(0, 50);
+  saveAdminStatusNotifications(next);
+
+  // Notify registered callbacks
+  adminStatusListeners.forEach((cb) => {
+    try {
+      cb(notif);
+    } catch (e) {
+      console.error(e);
+    }
+  });
+
+  // Emit window events for DashboardOverview & RealtimeShipmentListener
+  try {
+    window.dispatchEvent(
+      new CustomEvent('akk-admin-status-notification', { detail: notif })
+    );
+    window.dispatchEvent(
+      new CustomEvent('akk-admin-status-updated', { detail: { notifs: next } })
+    );
+  } catch {}
+
+  return notif;
+}
+
 export const supabaseRealtimeSync = {
   /**
    * Subscribe to real-time changes on core operational tables
@@ -379,6 +615,7 @@ export const supabaseRealtimeSync = {
             console.log('[SupabaseRealtime] Schedule UPDATE received:', payload);
             notifyListeners('schedules', 'UPDATE', payload.new);
             dispatchToMatchingDrivers('UPDATE', payload.new, payload.old);
+            dispatchToAdminLogistics(payload.new, payload.old, 'supabase_realtime');
             triggerStoreSync();
           }
         )
@@ -410,6 +647,25 @@ export const supabaseRealtimeSync = {
           const data = payload?.payload;
           if (data && data.schedule) {
             dispatchToMatchingDrivers(data.eventType || 'UPDATE', data.schedule, data.previousSchedule, data.notification);
+            triggerStoreSync();
+          }
+        })
+        .on('broadcast', { event: 'admin-status-push' }, (payload) => {
+          const data = payload?.payload;
+          if (data && data.notification) {
+            const notif = data.notification as AdminStatusNotification;
+            const prev = getAdminStatusNotifications();
+            const next = [notif, ...prev.filter(item => item.id !== notif.id)].slice(0, 50);
+            saveAdminStatusNotifications(next);
+            adminStatusListeners.forEach((cb) => {
+              try { cb(notif); } catch (e) {}
+            });
+            window.dispatchEvent(
+              new CustomEvent('akk-admin-status-notification', { detail: notif })
+            );
+            window.dispatchEvent(
+              new CustomEvent('akk-admin-status-updated', { detail: { notifs: next } })
+            );
             triggerStoreSync();
           }
         })
@@ -565,6 +821,51 @@ export const supabaseRealtimeSync = {
   },
 
   /**
+   * Specifically broadcasts a schedule status change to SPV Logistik & Super Admin
+   * over Supabase Realtime WebSocket broadcast and updates PostgreSQL table.
+   */
+  async publishScheduleStatusChange(
+    schedule: Partial<Schedule> & Record<string, any>,
+    oldStatus?: string,
+    extraNotes?: string
+  ): Promise<AdminStatusNotification | null> {
+    const notif = dispatchToAdminLogistics(schedule, oldStatus ? { status: oldStatus } : null, 'local_sync');
+    if (!notif) return null;
+
+    // 1. Broadcast over Supabase Realtime channel
+    try {
+      if (realtimeChannel && isSubscribed) {
+        realtimeChannel.send({
+          type: 'broadcast',
+          event: 'admin-status-push',
+          payload: { notification: notif, schedule }
+        });
+      }
+    } catch (err) {
+      console.warn('[SupabaseRealtime] Broadcast admin-status-push notice:', err);
+    }
+
+    // 2. Upsert to Supabase `schedules` table so other connected clients receive postgres_changes
+    try {
+      const client = getSupabaseClient();
+      if (client && schedule.id) {
+        await client
+          .from('schedules')
+          .update({
+            status: schedule.status,
+            notes: extraNotes || schedule.notes,
+            actual_arrival: schedule.status === 'delivered' ? new Date().toISOString() : undefined
+          })
+          .eq('id', schedule.id);
+      }
+    } catch (err) {
+      console.warn('[SupabaseRealtime] Supabase schedules status update note:', err);
+    }
+
+    return notif;
+  },
+
+  /**
    * Unsubscribe from Supabase Realtime channel
    */
   unsubscribe(): void {
@@ -611,3 +912,6 @@ function triggerStoreSync() {
     window.dispatchEvent(new CustomEvent('akk-realtime-synced', { detail: { timestamp: Date.now() } }));
   } catch {}
 }
+
+export const publishScheduleStatusChange = supabaseRealtimeSync.publishScheduleStatusChange.bind(supabaseRealtimeSync);
+

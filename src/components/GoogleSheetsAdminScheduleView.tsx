@@ -127,12 +127,14 @@ interface GoogleSheetsAdminScheduleViewProps {
   onSyncComplete?: (count: number) => void;
   onNavigateToSchedules?: () => void;
   onNavigateToCrewHistory?: () => void;
+  onOpenCreateSchedule?: () => void;
 }
 
 export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleViewProps> = ({
   onSyncComplete,
   onNavigateToSchedules,
-  onNavigateToCrewHistory
+  onNavigateToCrewHistory,
+  onOpenCreateSchedule
 }) => {
   const [selectedWeekNum, setSelectedWeekNum] = useState<number | 'all'>('all');
   const [selectedDayFilter, setSelectedDayFilter] = useState<string>('all');
@@ -140,6 +142,9 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
   const [selectedYear, setSelectedYear] = useState<number>(2026);
   const [categoryFilter, setCategoryFilter] = useState<'all' | 'luar_kota' | 'lokal'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [scheduleStatusFilter, setScheduleStatusFilter] = useState<'all' | 'scheduled' | 'picked_up' | 'in_transit' | 'delivered' | 'delayed'>('all');
+  const [armadaFilter, setArmadaFilter] = useState<string>('all');
+  const [crewDriverFilter, setCrewDriverFilter] = useState<string>('all');
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<string>('05 Januari 2026');
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncSuccessMessage, setSyncSuccessMessage] = useState<string | null>(null);
@@ -931,6 +936,15 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     setSyncSuccessMessage('✅ Ritase berhasil dihapus dari jadwal operasional aktif.');
     setTimeout(() => setSyncSuccessMessage(null), 5000);
   };
+
+  // Extract all unique drivers present across weeks for dropdown filter
+  const allDriversInWeeks = useMemo(() => {
+    const dSet = new Set<string>();
+    weeks.forEach(w => w.days.forEach(d => d.pengiriman.forEach(p => {
+      if (p.driver && p.driver !== '-') dSet.add(p.driver.trim());
+    })));
+    return Array.from(dSet).sort();
+  }, [weeks]);
 
   // Filtered weeks & days dynamically adapted to selected month and year
   const filteredWeeks = useMemo(() => {
@@ -1873,6 +1887,17 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               onChange={handleFileUpload}
             />
 
+            {onOpenCreateSchedule && (
+              <button
+                onClick={onOpenCreateSchedule}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold border border-blue-500/40 shadow-sm transition cursor-pointer"
+                title="Tambah Jadwal Pengiriman Baru"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Jadwal Baru</span>
+              </button>
+            )}
+
             <button
               onClick={() => {
                 setActiveMappingCategory('area');
@@ -2041,9 +2066,9 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       </div>
 
       {/* 2. Filter & Navigation Bar */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
-        {/* Category Filters */}
-        <div className="flex items-center gap-3 flex-wrap">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs space-y-3">
+        {/* Top: Category Tabs & Active Count */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 text-xs">
             <button
               onClick={() => setCategoryFilter('all')}
@@ -2078,19 +2103,96 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               <span>Lokal ({stats.totalLokal})</span>
             </button>
           </div>
+
+          {(searchQuery || scheduleStatusFilter !== 'all' || armadaFilter !== 'all' || crewDriverFilter !== 'all' || categoryFilter !== 'all') && (
+            <button
+              onClick={() => {
+                setSearchQuery('');
+                setScheduleStatusFilter('all');
+                setArmadaFilter('all');
+                setCrewDriverFilter('all');
+                setCategoryFilter('all');
+              }}
+              className="text-xs text-rose-600 dark:text-rose-400 hover:underline font-bold flex items-center gap-1 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>Reset Semua Filter</span>
+            </button>
+          )}
         </div>
 
-        {/* Search Bar */}
-        <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
-          <div className="relative flex-1 sm:w-72">
+        {/* Bottom: Search Input & Filter Dropdowns Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 pt-1">
+          {/* 1. Input Field Pencarian */}
+          <div className="relative">
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               placeholder="Cari driver, helper, area, armada..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-200 text-xs rounded-xl pl-9 pr-3 py-2 border border-slate-200 dark:border-slate-800 focus:border-emerald-500 focus:outline-hidden placeholder:text-slate-400 dark:placeholder:text-slate-500"
+              className="w-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-200 text-xs rounded-xl pl-9 pr-7 py-2.5 border border-slate-200 dark:border-slate-800 focus:border-emerald-500 focus:outline-hidden placeholder:text-slate-400 dark:placeholder:text-slate-500"
             />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 text-xs cursor-pointer"
+              >
+                &times;
+              </button>
+            )}
+          </div>
+
+          {/* 2. Dropdown Filter Status Pengiriman */}
+          <div className="relative">
+            <select
+              value={scheduleStatusFilter}
+              onChange={(e) => setScheduleStatusFilter(e.target.value as any)}
+              className="w-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-200 text-xs font-bold rounded-xl px-3 py-2.5 border border-slate-200 dark:border-slate-800 focus:border-emerald-500 focus:outline-hidden cursor-pointer"
+            >
+              <option value="all">Semua Status Pengiriman</option>
+              <option value="scheduled">Terjadwal (Scheduled)</option>
+              <option value="picked_up">Telah Dimuat (Picked Up)</option>
+              <option value="in_transit">Dalam Perjalanan (In Transit)</option>
+              <option value="delivered">Terkirim (Delivered)</option>
+              <option value="delayed">Tertunda / Kendala (Delayed)</option>
+            </select>
+          </div>
+
+          {/* 3. Dropdown Filter Tipe Kendaraan / Armada */}
+          <div className="relative">
+            <select
+              value={armadaFilter}
+              onChange={(e) => setArmadaFilter(e.target.value)}
+              className="w-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-200 text-xs font-bold rounded-xl px-3 py-2.5 border border-slate-200 dark:border-slate-800 focus:border-emerald-500 focus:outline-hidden cursor-pointer"
+            >
+              <option value="all">Semua Tipe Kendaraan / Armada</option>
+              <option value="DS1">DS1 - Isuzu Giga CDD Long (Bali Spec)</option>
+              <option value="DS2">DS2 - Mitsubishi Canter HDX (6 Roda)</option>
+              <option value="DS3">DS3 - Hino Dutro 130 HD (Bali Spec)</option>
+              <option value="DS4">DS4 - Isuzu Elf NMR 71</option>
+              <option value="NS1">NS1 - Canter FE71 (Engkel 4R)</option>
+              <option value="NS2">NS2 - Isuzu Elf NLR 55 (Engkel 4R)</option>
+              <option value="NS3">NS3 - Hino Dutro 110 SDB (Engkel 4R)</option>
+              <option value="N20">N20 - Mitsubishi L300 Box (Pick Up)</option>
+            </select>
+          </div>
+
+          {/* 4. Dropdown Filter Kru Pengemudi */}
+          <div className="relative">
+            <select
+              value={crewDriverFilter}
+              onChange={(e) => setCrewDriverFilter(e.target.value)}
+              className="w-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-200 text-xs font-bold rounded-xl px-3 py-2.5 border border-slate-200 dark:border-slate-800 focus:border-emerald-500 focus:outline-hidden cursor-pointer"
+            >
+              <option value="all">Semua Kru / Pengemudi</option>
+              {allDriversInWeeks.map(drv => (
+                <option key={`drv-opt-${drv}`} value={drv}>
+                  Supir: {drv}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
       </div>
@@ -2351,6 +2453,56 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 }
               });
 
+              // Dynamic schedule lookup and filter
+              const storeSchedules = logisticsStore.getSchedules();
+
+              const filteredPengiriman = activeDayObj.pengiriman.filter((p: DeliveryAssignment) => {
+                const standardArea = standardizeAreaName(p.area);
+                const isLuarPulau = standardArea.includes('DENPASAR') || standardArea.includes('SINGARAJA') || standardArea.includes('NEGARA') || standardArea.includes('GIANYAR') || standardArea.includes('TABANAN') || standardArea.includes('KUTA') || standardArea.includes('BALI');
+
+                // 1. Category Filter
+                if (categoryFilter === 'lokal' && isLuarPulau) return false;
+                if (categoryFilter === 'luar_kota' && !isLuarPulau) return false;
+
+                // 2. Search Query (Driver, Helper, Helper2, Area, Armada)
+                if (searchQuery.trim()) {
+                  const q = searchQuery.toLowerCase().trim();
+                  const matchDriver = (p.driver || '').toLowerCase().includes(q);
+                  const matchHelper = (p.helper || '').toLowerCase().includes(q);
+                  const matchHelper2 = (p.helper2 || '').toLowerCase().includes(q);
+                  const matchArea = (p.area || '').toLowerCase().includes(q);
+                  const matchArmada = (p.armada || '').toLowerCase().includes(q);
+                  if (!matchDriver && !matchHelper && !matchHelper2 && !matchArea && !matchArmada) {
+                    return false;
+                  }
+                }
+
+                // 3. Armada Filter
+                if (armadaFilter !== 'all' && p.armada !== armadaFilter) {
+                  return false;
+                }
+
+                // 4. Crew / Driver Filter
+                if (crewDriverFilter !== 'all' && p.driver !== crewDriverFilter) {
+                  return false;
+                }
+
+                // 5. Schedule Status Filter
+                if (scheduleStatusFilter !== 'all') {
+                  const matched = storeSchedules.find(s => {
+                    if (p.id && s.id === p.id) return true;
+                    if (s.fleet?.initialCode === p.armada && s.crew?.name === p.driver) return true;
+                    return false;
+                  });
+                  const effStatus: ShipmentStatus = matched?.status || 'scheduled';
+                  if (effStatus !== scheduleStatusFilter) {
+                    return false;
+                  }
+                }
+
+                return true;
+              });
+
               return (
                 <div className="space-y-4">
                   {/* Selected Date Title Bar - Bright Non-Black Style */}
@@ -2371,7 +2523,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="px-3 py-1 rounded-xl text-xs font-black bg-emerald-600 text-white shadow-xs">
-                        {activeDayObj.pengiriman.length} Total Ritase
+                        {filteredPengiriman.length} {filteredPengiriman.length !== activeDayObj.pengiriman.length ? `dari ${activeDayObj.pengiriman.length}` : ''} Total Ritase
                       </span>
                       <span className="px-3 py-1 rounded-xl text-xs font-bold bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
                         🚛 {lokalInSelected} Area Lokal
@@ -2402,120 +2554,173 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                           <th className="p-3 border-r border-slate-200 dark:border-slate-700 w-40">HELPER 2</th>
                           <th className="p-3 border-r border-slate-200 dark:border-slate-700">KIRIM AREA (TUJUAN)</th>
                           <th className="p-3 border-r border-slate-200 dark:border-slate-700 w-44">ARMADA TRUK</th>
-                          <th className="p-3 border-r border-slate-200 dark:border-slate-700 w-36">STATUS</th>
+                          <th className="p-3 border-r border-slate-200 dark:border-slate-700 w-40">STATUS OPERASIONAL</th>
                           <th className="p-3 text-center w-24">AKSI</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y-2 divide-slate-300 dark:divide-slate-700 font-medium">
-                        {activeDayObj.pengiriman.map((p: DeliveryAssignment, pIdx: number) => {
-                          const standardArea = standardizeAreaName(p.area);
-                          const isLuarPulau = standardArea.includes('DENPASAR') || standardArea.includes('SINGARAJA') || standardArea.includes('NEGARA') || standardArea.includes('GIANYAR') || standardArea.includes('TABANAN') || standardArea.includes('KUTA') || standardArea.includes('BALI');
-                          const driverInitials = getDriverInitials(p.driver);
-                          const avatarStyle = DRIVER_AVATAR_COLORS[p.driver] || { 
-                            bg: 'bg-slate-100 dark:bg-slate-800', 
-                            text: 'text-slate-700 dark:text-slate-300', 
-                            ring: 'border-slate-300 dark:border-slate-700' 
-                          };
-                          const corridor = getAreaCorridor(standardArea);
-                          const fleetSpec = FLEET_SPEC_MAP[p.armada] || { model: 'Truk Box Reguler', category: 'Distribusi' };
-
-                          return (
-                            <tr
-                              key={`cal-detail-${pIdx}-${p.driver}-${p.armada}`}
-                              className={`hover:bg-slate-50 dark:hover:bg-slate-800/60 transition border-b-2 border-slate-300 dark:border-slate-700 ${
-                                isLuarPulau ? 'bg-blue-50/30 dark:bg-blue-950/20' : ''
-                              }`}
-                            >
-                              <td className="p-3 text-center font-bold text-slate-500 border-r border-slate-200 dark:border-slate-800">
-                                {pIdx + 1}
-                              </td>
-
-                              {/* Driver */}
-                              <td className="p-3 border-r border-slate-200 dark:border-slate-800">
-                                <div className="flex items-center gap-2.5">
-                                  <div className={`w-8 h-8 rounded-full border ${avatarStyle.bg} ${avatarStyle.ring} ${avatarStyle.text} flex items-center justify-center font-black text-xs shrink-0 shadow-2xs`}>
-                                    {driverInitials}
-                                  </div>
-                                  <span className="font-extrabold text-slate-900 dark:text-white text-xs">
-                                    {p.driver}
-                                  </span>
+                        {filteredPengiriman.length === 0 ? (
+                          <tr>
+                            <td colSpan={8} className="p-8 text-center bg-slate-50 dark:bg-slate-900/50">
+                              <div className="max-w-md mx-auto space-y-2">
+                                <Search className="w-6 h-6 text-slate-400 mx-auto" />
+                                <div className="text-sm font-bold text-slate-700 dark:text-slate-300">
+                                  Tidak ada jadwal ritase yang cocok dengan filter
                                 </div>
-                              </td>
+                                <p className="text-xs text-slate-500">
+                                  Coba ubah kata kunci pencarian atau reset filter status / armada / kru.
+                                </p>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSearchQuery('');
+                                    setScheduleStatusFilter('all');
+                                    setArmadaFilter('all');
+                                    setCrewDriverFilter('all');
+                                    setCategoryFilter('all');
+                                  }}
+                                  className="mt-2 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer"
+                                >
+                                  Reset Semua Filter
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ) : (
+                          filteredPengiriman.map((p: DeliveryAssignment, pIdx: number) => {
+                            const standardArea = standardizeAreaName(p.area);
+                            const isLuarPulau = standardArea.includes('DENPASAR') || standardArea.includes('SINGARAJA') || standardArea.includes('NEGARA') || standardArea.includes('GIANYAR') || standardArea.includes('TABANAN') || standardArea.includes('KUTA') || standardArea.includes('BALI');
+                            const driverInitials = getDriverInitials(p.driver);
+                            const avatarStyle = DRIVER_AVATAR_COLORS[p.driver] || { 
+                              bg: 'bg-slate-100 dark:bg-slate-800', 
+                              text: 'text-slate-700 dark:text-slate-300', 
+                              ring: 'border-slate-300 dark:border-slate-700' 
+                            };
 
-                              {/* Helper 1 */}
-                              <td className="p-3 border-r border-slate-200 dark:border-slate-800">
-                                <span className={`font-semibold ${p.helper && p.helper !== '-' ? 'text-slate-800 dark:text-slate-200' : 'text-slate-400'}`}>
-                                  {p.helper || '-'}
-                                </span>
-                              </td>
-                              {/* Helper 2 */}
-                              <td className="p-3 border-r border-slate-200 dark:border-slate-800">
-                                <span className={`font-semibold ${p.helper2 && p.helper2 !== '-' ? 'text-slate-800 dark:text-slate-200' : 'text-slate-400'}`}>
-                                  {p.helper2 || '-'}
-                                </span>
-                              </td>
+                            // Resolve operational schedule from store
+                            const matchedSch = storeSchedules.find(s => {
+                              if (p.id && s.id === p.id) return true;
+                              if (s.fleet?.initialCode === p.armada && s.crew?.name === p.driver) return true;
+                              return false;
+                            });
 
-                              {/* Kirim Area */}
-                              <td className="p-3 border-r border-slate-200 dark:border-slate-800">
-                                <div>
-                                  <span className={`text-xs font-black uppercase px-2 py-0.5 rounded-md border ${
-                                    isLuarPulau 
-                                      ? 'bg-blue-100 text-blue-900 dark:bg-blue-950 dark:text-blue-200 border-blue-300 dark:border-blue-700' 
-                                      : 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200 border-emerald-300 dark:border-emerald-700'
-                                  }`}>
-                                    {standardArea}
-                                  </span>
-                                </div>
-                              </td>
+                            const currentStatus: ShipmentStatus = matchedSch?.status || 'scheduled';
 
-                              {/* Armada */}
-                              <td className="p-3 border-r border-slate-200 dark:border-slate-800">
-                                <div className="flex items-center gap-2">
-                                  <span className="px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950/80 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 font-mono font-black text-xs">
-                                    {p.armada}
-                                  </span>
-                                </div>
-                              </td>
+                            const statusBadgeConfig: Record<ShipmentStatus, { label: string; bg: string; text: string; border: string }> = {
+                              scheduled: { label: 'Terjadwal', bg: 'bg-blue-50 dark:bg-blue-950/80', text: 'text-blue-700 dark:text-blue-300', border: 'border-blue-300 dark:border-blue-800' },
+                              picked_up: { label: 'Telah Dimuat', bg: 'bg-amber-50 dark:bg-amber-950/80', text: 'text-amber-800 dark:text-amber-300', border: 'border-amber-300 dark:border-amber-800' },
+                              in_transit: { label: 'Dalam Perjalanan', bg: 'bg-purple-50 dark:bg-purple-950/80', text: 'text-purple-700 dark:text-purple-300', border: 'border-purple-300 dark:border-purple-800' },
+                              delivered: { label: 'Terkirim', bg: 'bg-emerald-50 dark:bg-emerald-950/80', text: 'text-emerald-700 dark:text-emerald-300', border: 'border-emerald-300 dark:border-emerald-800' },
+                              delayed: { label: 'Tertunda', bg: 'bg-rose-50 dark:bg-rose-950/80', text: 'text-rose-700 dark:text-rose-300', border: 'border-rose-300 dark:border-rose-800' }
+                            };
 
-                              {/* Status */}
-                              <td className="p-3 border-r border-slate-200 dark:border-slate-800">
-                                <div className="flex flex-col gap-1">
-                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 w-fit">
-                                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                                    <span>Tervalidasi (OK)</span>
-                                  </span>
-                                  {p.isManuallyEdited && (
-                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 w-fit">
-                                      <span>✏️ Manual Edit</span>
+                            const cfg = statusBadgeConfig[currentStatus] || statusBadgeConfig.scheduled;
+
+                            return (
+                              <tr
+                                key={`cal-detail-${pIdx}-${p.driver}-${p.armada}`}
+                                className={`hover:bg-slate-50 dark:hover:bg-slate-800/60 transition border-b-2 border-slate-300 dark:border-slate-700 ${
+                                  isLuarPulau ? 'bg-blue-50/30 dark:bg-blue-950/20' : ''
+                                }`}
+                              >
+                                <td className="p-3 text-center font-bold text-slate-500 border-r border-slate-200 dark:border-slate-800">
+                                  {pIdx + 1}
+                                </td>
+
+                                {/* Driver */}
+                                <td className="p-3 border-r border-slate-200 dark:border-slate-800">
+                                  <div className="flex items-center gap-2.5">
+                                    <div className={`w-8 h-8 rounded-full border ${avatarStyle.bg} ${avatarStyle.ring} ${avatarStyle.text} flex items-center justify-center font-black text-xs shrink-0 shadow-2xs`}>
+                                      {driverInitials}
+                                    </div>
+                                    <span className="font-extrabold text-slate-900 dark:text-white text-xs">
+                                      {p.driver}
                                     </span>
-                                  )}
-                                </div>
-                              </td>
+                                  </div>
+                                </td>
 
-                              {/* Aksi */}
-                              <td className="p-3 text-center">
-                                <div className="flex items-center justify-center gap-1.5">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleOpenEditTripModal(p, activeDayObj.dayNumber, activeDayObj.dateString, pIdx)}
-                                    className="p-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/25 text-amber-600 dark:text-amber-400 border border-amber-500/30 transition cursor-pointer"
-                                    title="Edit Rincian Pengiriman Ini"
-                                  >
-                                    <Edit className="w-3.5 h-3.5" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDeleteTrip(p, activeDayObj.dayNumber, pIdx)}
-                                    className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/25 text-rose-600 dark:text-rose-400 border border-rose-500/30 transition cursor-pointer"
-                                    title="Hapus Rincian Pengiriman Ini"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
+                                {/* Helper 1 */}
+                                <td className="p-3 border-r border-slate-200 dark:border-slate-800">
+                                  <span className={`font-semibold ${p.helper && p.helper !== '-' ? 'text-slate-800 dark:text-slate-200' : 'text-slate-400'}`}>
+                                    {p.helper || '-'}
+                                  </span>
+                                </td>
+                                {/* Helper 2 */}
+                                <td className="p-3 border-r border-slate-200 dark:border-slate-800">
+                                  <span className={`font-semibold ${p.helper2 && p.helper2 !== '-' ? 'text-slate-800 dark:text-slate-200' : 'text-slate-400'}`}>
+                                    {p.helper2 || '-'}
+                                  </span>
+                                </td>
+
+                                {/* Kirim Area */}
+                                <td className="p-3 border-r border-slate-200 dark:border-slate-800">
+                                  <div>
+                                    <span className={`text-xs font-black uppercase px-2 py-0.5 rounded-md border ${
+                                      isLuarPulau 
+                                        ? 'bg-blue-100 text-blue-900 dark:bg-blue-950 dark:text-blue-200 border-blue-300 dark:border-blue-700' 
+                                        : 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200 border-emerald-300 dark:border-emerald-700'
+                                    }`}>
+                                      {standardArea}
+                                    </span>
+                                  </div>
+                                </td>
+
+                                {/* Armada */}
+                                <td className="p-3 border-r border-slate-200 dark:border-slate-800">
+                                  <div className="flex items-center gap-2">
+                                    <span className="px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950/80 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 font-mono font-black text-xs">
+                                      {p.armada}
+                                    </span>
+                                  </div>
+                                </td>
+
+                                {/* Status */}
+                                <td className="p-3 border-r border-slate-200 dark:border-slate-800">
+                                  <div className="flex flex-col gap-1.5">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-extrabold border ${cfg.bg} ${cfg.text} ${cfg.border} w-fit`}>
+                                        <span className={`w-1.5 h-1.5 rounded-full ${
+                                          currentStatus === 'delivered' ? 'bg-emerald-500' :
+                                          currentStatus === 'in_transit' ? 'bg-purple-500 animate-pulse' :
+                                          currentStatus === 'picked_up' ? 'bg-amber-500' :
+                                          currentStatus === 'delayed' ? 'bg-rose-500 animate-ping' : 'bg-blue-500'
+                                        }`} />
+                                        <span>{cfg.label}</span>
+                                      </span>
+                                    </div>
+                                    {p.isManuallyEdited && (
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 w-fit">
+                                        <span>✏️ Manual Edit</span>
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+
+                                {/* Aksi */}
+                                <td className="p-3 text-center">
+                                  <div className="flex items-center justify-center gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenEditTripModal(p, activeDayObj.dayNumber, activeDayObj.dateString, pIdx)}
+                                      className="p-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/25 text-amber-600 dark:text-amber-400 border border-amber-500/30 transition cursor-pointer"
+                                      title="Edit Rincian Pengiriman Ini"
+                                    >
+                                      <Edit className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteTrip(p, activeDayObj.dayNumber, pIdx)}
+                                      className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/25 text-rose-600 dark:text-rose-400 border border-rose-500/30 transition cursor-pointer"
+                                      title="Hapus Rincian Pengiriman Ini"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
                       </tbody>
                     </table>
                   </div>

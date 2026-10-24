@@ -467,7 +467,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   {canLogisticsFleets && renderNavItem('fleets', 'Data Armada Terpadu', <Truck className="w-4 h-4" />)}
                   {canLogisticsFleets && renderNavItem('crew_history', 'Kru Pengiriman', <Users className="w-4 h-4" />)}
                   {canLogisticsReports && renderNavItem('tracking_eval', 'Evaluasi Jalur (Excel)', <FileSpreadsheet className="w-4 h-4" />)}
-                  {canLogisticsFleets && renderNavItem('fleet_forms', 'Formulir Armada', <FileText className="w-4 h-4" />)}
                 </div>
               )}
             </div>

@@ -6,6 +6,7 @@ import {
   TracksolidDevice,
   UserProfile,
   UserRole,
+  UserApprovalStatus,
   CrewDeliveryHistory,
   AreaDeliveryStat,
   AreaApprovalRequest,
@@ -72,10 +73,11 @@ export interface ScheduleChangeLogEntry {
   fileName: string;
   userName: string;
   userRole: string;
-  actionType: 'upload_excel' | 'tambah_jadwal' | 'edit_jadwal' | 'hapus_jadwal';
+  actionType: 'upload_excel' | 'tambah_jadwal' | 'edit_jadwal' | 'hapus_jadwal' | 'manual_create' | 'manual_edit' | 'delete_schedule';
   summary: string;
   changes: string[];
-  status: 'Sukses' | 'Sebagian';
+  status?: 'Sukses' | 'Sebagian' | 'Gagal' | 'Peringatan';
+  rowCount?: number;
 }
 
 const STORAGE_KEYS = {
@@ -1654,7 +1656,7 @@ class LogisticsStore {
         : (refCrew && !refCrew.role.includes('Helper') ? refCrew.role : 'Driver Utama');
 
       const crewStatus: Crew['status'] = u.status === 'inactive'
-        ? 'off-duty'
+        ? 'off'
         : (existingInStore?.status === 'on-duty' ? 'on-duty' : 'available');
 
       const crewItem: Crew = {
@@ -3086,6 +3088,7 @@ class LogisticsStore {
 
       import('./supabaseRealtimeSync').then(({ supabaseRealtimeSync }) => {
         supabaseRealtimeSync.publishScheduleChange('UPDATE', hydratedStatusSch, sch);
+        supabaseRealtimeSync.publishScheduleStatusChange(hydratedStatusSch, sch.status, extraNotes);
       }).catch(() => {});
 
       const updateItem: OfflineScheduleStatusUpdate = {

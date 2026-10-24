@@ -121,10 +121,27 @@ export const RealtimeShipmentListener: React.FC = () => {
       );
     };
 
+    // 3. Listen specifically for Admin & SPV Logistik Realtime status notifications
+    const handleAdminStatusNotification = (e: Event) => {
+      const notif = (e as CustomEvent).detail;
+      if (!notif) return;
+      const isAdminOrSpv = currentUser?.role === 'super_admin' || currentUser?.role === 'spv_logistik';
+      if (isAdminOrSpv) {
+        addNotification(
+          notif.urgent ? 'sla_warning' : 'delivery',
+          notif.title,
+          notif.message,
+          notif.urgent
+        );
+      }
+    };
+
     window.addEventListener('akk-driver-schedule-realtime', handleCustomRealtimeEvent);
+    window.addEventListener('akk-admin-status-notification', handleAdminStatusNotification);
 
     return () => {
       window.removeEventListener('akk-driver-schedule-realtime', handleCustomRealtimeEvent);
+      window.removeEventListener('akk-admin-status-notification', handleAdminStatusNotification);
       supabase.removeChannel(channel);
     };
   }, [addNotification, currentUser, activeCrew]);
