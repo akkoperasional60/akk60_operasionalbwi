@@ -2270,15 +2270,17 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
             </div>
 
             {/* Fitur Kalender / Filter Rentang Tanggal Kirim (Hanya Dari Tanggal s/d Sampai Tanggal) */}
-            <div className="p-3.5 bg-gradient-to-b from-slate-900 to-slate-950 rounded-2xl border border-slate-800/90 shadow-lg space-y-3 text-xs">
+            <div className="p-3.5 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3 text-xs">
               <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
-                    <Calendar className="w-3.5 h-3.5" />
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-600 dark:text-amber-400 shrink-0">
+                    <Calendar className="w-4 h-4" />
                   </div>
                   <div>
-                    <span className="font-black text-white block leading-tight">Filter Rentang Tanggal Kirim</span>
-                    <span className="text-[10px] text-slate-400 block">
+                    <span className="font-black text-slate-900 dark:text-white block leading-tight text-xs">
+                      Filter Rentang Tanggal Kirim
+                    </span>
+                    <span className="text-[10px] text-slate-500 dark:text-slate-400 block mt-0.5">
                       {dateFilterStart || dateFilterEnd
                         ? `Rentang Aktif: ${dateFilterStart || 'Awal'} s/d ${dateFilterEnd || 'Akhir'}`
                         : 'Pilih Dari Tanggal dan Sampai Tanggal'}
@@ -2293,7 +2295,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                       setDateFilterStart('');
                       setDateFilterEnd('');
                     }}
-                    className="px-2.5 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30 text-[10px] font-bold transition cursor-pointer flex items-center gap-1 shrink-0"
+                    className="px-2.5 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 text-rose-600 dark:text-rose-300 border border-rose-500/30 text-[10px] font-bold transition cursor-pointer flex items-center gap-1 shrink-0"
                   >
                     <X className="w-3 h-3" />
                     <span>Reset</span>
@@ -2303,19 +2305,19 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
               {/* Input Dari Tanggal & Sampai Tanggal */}
               <div className="grid grid-cols-2 gap-2.5">
-                <div className="bg-slate-950/90 border border-slate-800 focus-within:border-amber-500 rounded-xl p-2 transition">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                <div className="bg-slate-50 dark:bg-slate-950/90 border border-slate-200 dark:border-slate-800 focus-within:border-amber-500 rounded-xl p-2.5 transition">
+                  <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block mb-1">
                     Dari Tanggal
                   </label>
                   <input
                     type="date"
                     value={dateFilterStart}
                     onChange={(e) => setDateFilterStart(e.target.value)}
-                    className="w-full bg-transparent text-white text-[11px] font-mono focus:outline-none cursor-pointer"
+                    className="w-full bg-transparent text-slate-900 dark:text-white text-[11px] font-mono font-bold focus:outline-none cursor-pointer"
                   />
                 </div>
-                <div className="bg-slate-950/90 border border-slate-800 focus-within:border-amber-500 rounded-xl p-2 transition">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                <div className="bg-slate-50 dark:bg-slate-950/90 border border-slate-200 dark:border-slate-800 focus-within:border-amber-500 rounded-xl p-2.5 transition">
+                  <label className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider block mb-1">
                     Sampai Tanggal
                   </label>
                   <input
@@ -2323,7 +2325,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                     value={dateFilterEnd}
                     min={dateFilterStart || undefined}
                     onChange={(e) => setDateFilterEnd(e.target.value)}
-                    className="w-full bg-transparent text-white text-[11px] font-mono focus:outline-none cursor-pointer"
+                    className="w-full bg-transparent text-slate-900 dark:text-white text-[11px] font-mono font-bold focus:outline-none cursor-pointer"
                   />
                 </div>
               </div>
@@ -2576,22 +2578,10 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                                   <Calendar className="w-3.5 h-3.5 text-emerald-400" />
                                   <span>Tanggal Kirim</span>
                                 </span>
-                                <div className="font-bold text-white text-xs mt-0.5">
+                                <div className="font-bold text-white text-xs mt-1">
                                   {delivery.departureDate 
                                     ? new Date(delivery.departureDate).toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
                                     : 'Hari ini'}
-                                </div>
-                                <div className="text-[10px] text-emerald-400 font-semibold mt-0.5 flex items-center gap-1">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                                  <span>
-                                    {portalTiming.isNightRun
-                                      ? (delivery.departureDate && new Date(delivery.departureDate).getDate() !== new Date().getDate()
-                                          ? 'Jadwal H+1 (Berangkat Nanti Malam)'
-                                          : 'Berangkat Nanti Malam')
-                                      : (delivery.departureDate && new Date(delivery.departureDate).getDate() !== new Date().getDate()
-                                          ? 'Jadwal H+1 (Besok)'
-                                          : 'Jadwal Kirim')}
-                                  </span>
                                 </div>
                               </div>
 
