@@ -466,6 +466,17 @@ class LogisticsStore {
       window.addEventListener('online', () => {
         this.syncOfflineQueueToSupabase();
       });
+      window.addEventListener('storage', (e) => {
+        if (e.key && Object.values(STORAGE_KEYS).includes(e.key)) {
+          this.fleets = this.loadFromStorage(STORAGE_KEYS.FLEETS, INITIAL_FLEETS);
+          this.crews = this.loadFromStorage(STORAGE_KEYS.CREWS, INITIAL_CREWS);
+          this.stores = this.loadFromStorage(STORAGE_KEYS.STORES, INITIAL_STORES);
+          this.schedules = this.loadFromStorage(STORAGE_KEYS.SCHEDULES, INITIAL_SCHEDULES);
+          this.users = this.loadFromStorage(STORAGE_KEYS.USERS, INITIAL_PROFILES);
+          this.crewHistory = this.loadFromStorage(STORAGE_KEYS.CREW_HISTORY, INITIAL_CREW_HISTORY);
+          this.notify();
+        }
+      });
       setInterval(() => {
         if (navigator.onLine && this.offlineScheduleQueue.length > 0) {
           this.syncOfflineQueueToSupabase();
@@ -2041,6 +2052,7 @@ class LogisticsStore {
 
       const areaStats = this.checkCrewAreaThreshold(crew.id, areaName);
       const seqNum = (existingIndex !== -1 ? this.crewHistory[existingIndex].areaTripSequenceNumber : areaStats.tripCount + 1) || 1;
+      const totalAreaTrips = this.crewHistory.filter(h => h.area.toUpperCase() === areaName.toUpperCase()).length + 1;
       const reqAppr = seqNum >= this.areaThreshold;
 
       const historyItem: CrewDeliveryHistory = {
@@ -2065,6 +2077,7 @@ class LogisticsStore {
         onTimeStatus: 'Tepat Waktu',
         ratingReceived: 5.0,
         areaTripSequenceNumber: seqNum,
+        totalAreaTrips,
         requiresAreaApproval: reqAppr,
         areaApprovalStatus: reqAppr ? 'approved' : 'not_required',
         notes: helper ? `Kru Driver: ${crew.name} | Helper: ${helper.name}` : `Kru Driver: ${crew.name}`
@@ -2376,11 +2389,9 @@ class LogisticsStore {
       department: data.department || 'Logistik & Pengiriman',
       phone: data.phone || '0812-3456-7890',
       password: data.password || 'password123',
-      status: data.status || (resolvedRole !== 'unassigned' ? 'approved' : 'pending'),
+      status: data.status || 'pending',
       createdAt: new Date().toISOString(),
-      approvedAt: (data.status === 'approved' || resolvedRole !== 'unassigned') ? new Date().toISOString() : undefined,
-      approvedBy: (data.status === 'approved' || resolvedRole !== 'unassigned') ? (this.currentUser?.fullName || 'Super Admin') : undefined,
-      notes: data.notes || (resolvedRole !== 'unassigned' ? 'Terdaftar & Terintegrasi dengan Sistem AKK' : 'Pendaftaran baru - Role perlu diisi oleh Admin'),
+      notes: data.notes || 'Pendaftaran mandiri melalui portal AKK - Menunggu persetujuan (acc) Super Admin',
       permissions: {
         modules: getDefaultPermissionsForRole(resolvedRole)
       }
@@ -2486,7 +2497,7 @@ class LogisticsStore {
   public loginUser(identifier: string, password?: string): UserProfile | null {
     const existing = this.findUserByIdentifier(identifier);
     if (!existing) return null;
-    if (existing.status === 'inactive') return null;
+    if (existing.status !== 'approved') return null;
 
     const cleanPass = (password || '').trim();
 

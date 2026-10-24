@@ -839,7 +839,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           )
         : localSchedules;
 
-      const targetList = filtered.length > 0 ? filtered : localSchedules;
+      const targetList = filtered;
 
       // Prioritas status agar jika ada jadwal ganda di tanggal yang sama, jadwal yang sedang jalan / selesai / diedit manual diprioritaskan
       const getStatusRank = (s: Schedule): number => {
@@ -2364,15 +2364,17 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                 <span className="text-xs">Memuat tugas pengiriman driver...</span>
               </div>
             ) : filteredDeliveries.length === 0 ? (
-              <div className="py-10 text-center bg-slate-900/60 rounded-2xl border border-slate-800/80 p-6 space-y-2">
-                <Package className="w-8 h-8 text-slate-500 mx-auto" />
-                <h3 className="text-sm font-bold text-white">Tidak Ada Pengiriman</h3>
-                <p className="text-xs text-slate-400">
+              <div className="py-10 text-center bg-slate-900/60 rounded-2xl border border-slate-800/80 p-6 space-y-2.5">
+                <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-400 flex items-center justify-center mx-auto">
+                  <Calendar className="w-6 h-6" />
+                </div>
+                <h3 className="text-sm font-black text-white">Belum Ada Jadwal Penugasan</h3>
+                <p className="text-xs text-slate-400 max-w-sm mx-auto leading-relaxed">
                   {searchQuery 
                     ? `Tidak ada pengiriman yang cocok dengan "${searchQuery}".`
                     : (dateFilterStart || dateFilterEnd)
                     ? 'Tidak ada jadwal pengiriman pada rentang tanggal yang dipilih.'
-                    : 'Belum ada rute pengiriman yang ditugaskan pada status/bulan ini.'}
+                    : 'Masih belum ada jadwal penugasan pengiriman untuk Anda hari ini atau besok. Silakan periksa kembali nanti atau hubungi SPV Logistik.'}
                 </p>
                 <button
                   onClick={() => {

@@ -298,9 +298,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     // 4. Proses Otentikasi
     const targetAccount = logisticsStore.findUserByIdentifier(trimmedInput);
-    if (targetAccount && targetAccount.status === 'inactive') {
-      setErrorMsg('Akun Anda sedang berstatus Nonaktif. Hak akses sistem ditutup sementara. Silakan hubungi Super Admin untuk mengaktifkan kembali akun Anda.');
-      return;
+    if (targetAccount) {
+      if (targetAccount.status === 'pending') {
+        setErrorMsg('Akun Anda masih menunggu persetujuan (acc) dari Super Admin. Belum dapat masuk ke sistem.');
+        return;
+      }
+      if (targetAccount.status === 'rejected') {
+        setErrorMsg('Akun Anda telah ditolak oleh Super Admin.');
+        return;
+      }
+      if (targetAccount.status === 'inactive') {
+        setErrorMsg('Akun Anda sedang berstatus Nonaktif. Silakan hubungi Super Admin.');
+        return;
+      }
     }
 
     const user = logisticsStore.loginUser(trimmedInput, loginPassword);
@@ -367,11 +377,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       notes: 'Pendaftaran mandiri melalui portal AKK - Role perlu diisi oleh Super Admin'
     });
 
-    setSuccessMsg(`Pendaftaran berhasil! Akun "${newUser.fullName}" terdaftar dan menunggu persetujuan (Pending Approval) Super Admin.`);
+    setSuccessMsg(`Pendaftaran berhasil! Akun "${newUser.fullName}" terdaftar dan menunggu persetujuan (acc) dari Super Admin sebelum dapat masuk ke sistem.`);
     setTimeout(() => {
       setTab('login');
-      setSuccessMsg('Pendaftaran berhasil! Silakan masuk menggunakan email dan password Anda setelah akun disetujui Super Admin.');
-    }, 1200);
+      setSuccessMsg('Pendaftaran berhasil! Akun Anda sedang menunggu persetujuan (acc) Super Admin. Belum dapat masuk sebelum di-acc.');
+    }, 1500);
   };
 
   return (

@@ -194,7 +194,8 @@ export interface CrewDeliveryHistory {
   podPhotoUrl?: string; // Proof of delivery photo
   podReceiverName?: string;
   requiresAreaApproval?: boolean;
-  areaTripSequenceNumber?: number; // Pengiriman ke-X di area yang sama
+  areaTripSequenceNumber?: number; // Pengiriman ke-X di area yang sama oleh kru ini
+  totalAreaTrips?: number; // Total frekuensi pengiriman ke area ini secara keseluruhan
   areaApprovalStatus?: 'approved' | 'pending' | 'not_required';
   approvedBy?: string;
   approvedAt?: string;
