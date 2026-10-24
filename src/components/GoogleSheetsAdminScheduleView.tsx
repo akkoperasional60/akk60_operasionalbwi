@@ -156,10 +156,29 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
   const [skipDuplicatesUpload, setSkipDuplicatesUpload] = useState<boolean>(false);
   const [skipInvalidUpload, setSkipInvalidUpload] = useState<boolean>(true);
   const [isUploadConfigModalOpen, setIsUploadConfigModalOpen] = useState<boolean>(false);
-  const [importMonth, setImportMonth] = useState<string>('Oktober');
+  const [importMonth, setImportMonth] = useState<string>('Januari');
   const [importYear, setImportYear] = useState<string>('2026');
   const [importMode, setImportMode] = useState<'tambahkan' | 'ganti'>('tambahkan');
   const [selectedUploadFile, setSelectedUploadFile] = useState<File | null>(null);
+  const [combinedModalMode, setCombinedModalMode] = useState<'semua' | 'manual' | 'excel'>('semua');
+  const [manualScheduleForm, setManualScheduleForm] = useState<{
+    dateIso: string;
+    driver: string;
+    helper: string;
+    helper2: string;
+    area: string;
+    armada: string;
+    target: string;
+  }>({
+    dateIso: '2026-01-05',
+    driver: 'Supri',
+    helper: 'Rifal',
+    helper2: '',
+    area: 'DENPASAR 1',
+    armada: 'DS3',
+    target: 'Gudang Pusat AKK Banyuwangi DC'
+  });
+  const [stagedCombinedTrips, setStagedCombinedTrips] = useState<Array<ParsedSheetTrip & { source: 'excel' | 'manual'; tempId: string }>>([]);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState<boolean>(false);
   const [scheduleChangeLogs, setScheduleChangeLogs] = useState<ScheduleChangeLogEntry[]>(() => logisticsStore.getScheduleChangeLogs());
   const [schemaValidationError, setSchemaValidationError] = useState<any | null>(null);
@@ -625,6 +644,209 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     }
   };
 
+  // Merge new parsed trips (from Excel upload and/or manual schedule creation) into existing weeks & store
+  const mergeAndSaveCombinedTrips = (
+    incomingTrips: Array<ParsedSheetTrip & { source?: 'excel' | 'manual' }>,
+    mode: 'tambahkan' | 'ganti' = 'tambahkan',
+    sourceLabel: string = 'Kombinasi Tambah & Unggah Jadwal'
+  ) => {
+    if (!incomingTrips || incomingTrips.length === 0) return;
+
+    const effectiveMonth = selectedMonth === -1 ? 0 : selectedMonth;
+    const defaultDateObj = new Date(selectedYear, effectiveMonth, 5);
+    const DAY_NAMES_ID = ['MINGGU', 'SENIN', 'SELASA', 'RABU', 'KAMIS', 'JUMAT', 'SABTU'];
+
+    // Build dayMap from existing weeks if mode === 'tambahkan'
+    const dayMap = new Map<number, AdminScheduleDay>();
+    if (mode === 'tambahkan') {
+      weeksRef.current.forEach(w => {
+        w.days.forEach(d => {
+          dayMap.set(d.dayNumber, {
+            ...d,
+            pengiriman: [...d.pengiriman]
+          });
+        });
+      });
+    }
+
+    let lastFocusedDateString = selectedCalendarDate;
+    let targetYear = selectedYear;
+    let targetMonth = effectiveMonth;
+
+    const fleets = logisticsStore.getFleets();
+    const crews = logisticsStore.getCrews();
+    const driverCrews = logisticsStore.getDriverCrews();
+    const helperCrews = logisticsStore.getHelperCrews();
+
+    const changeDetails: string[] = [];
+
+    incomingTrips.forEach((t, idx) => {
+      const parsedDateRes = scheduleImportValidator.parseDate(t.dateStr || `${selectedYear}-${String(effectiveMonth + 1).padStart(2, '0')}-05`, defaultDateObj);
+      const dObj = parsedDateRes.date || defaultDateObj;
+      const yr = dObj.getFullYear();
+      const mo = dObj.getMonth();
+      const dayNum = dObj.getDate();
+      targetYear = yr;
+      targetMonth = mo;
+
+      const dayName = t.dayName || DAY_NAMES_ID[dObj.getDay()] || 'SENIN';
+      const monthNameDisplay = MONTH_NAMES[mo] || 'Januari';
+      const dateString = `${String(dayNum).padStart(2, '0')} ${monthNameDisplay} ${yr}`;
+      lastFocusedDateString = dateString;
+
+      const stdArea = standardizeAreaName(t.area || 'DENPASAR 1');
+      const armadaCode = (t.armada || 'DS3').trim().toUpperCase();
+      const driverName = (t.driver || 'Supri').trim();
+      const helperName = t.helper && t.helper.trim() && t.helper.trim() !== '-' ? t.helper.trim() : '-';
+      const helper2Name = t.helper2 && t.helper2.trim() && t.helper2.trim() !== '-' ? t.helper2.trim() : '-';
+
+      const monthPadded = String(mo + 1).padStart(2, '0');
+      const dayPadded = String(dayNum).padStart(2, '0');
+      const departureIso = `${yr}-${monthPadded}-${dayPadded}T07:30:00.000Z`;
+      const estArrivalIso = `${yr}-${monthPadded}-${dayPadded}T18:00:00.000Z`;
+
+      const matchedFleet = fleets.find(f =>
+        f.initialCode?.toUpperCase() === armadaCode ||
+        f.plateNumber.replace(/\s+/g, '').toUpperCase().includes(armadaCode.replace(/\s+/g, ''))
+      ) || fleets[0];
+
+      const matchedDriver = driverCrews.find(c =>
+        c.name.toLowerCase().includes(driverName.toLowerCase()) ||
+        driverName.toLowerCase().includes(c.name.toLowerCase())
+      ) || crews.find(c => c.name.toLowerCase().includes(driverName.toLowerCase())) || driverCrews[0] || crews[0];
+
+      const matchedHelper = helperName !== '-' ? (helperCrews.find(c =>
+        c.name.toLowerCase().includes(helperName.toLowerCase()) ||
+        helperName.toLowerCase().includes(c.name.toLowerCase())
+      ) || crews.find(c => c.name.toLowerCase().includes(helperName.toLowerCase()))) : undefined;
+
+      const matchedHelper2 = helper2Name !== '-' ? (helperCrews.find(c =>
+        c.name.toLowerCase().includes(helper2Name.toLowerCase()) ||
+        helper2Name.toLowerCase().includes(c.name.toLowerCase())
+      ) || crews.find(c => c.name.toLowerCase().includes(helper2Name.toLowerCase()))) : undefined;
+
+      const isBali = stdArea.includes('DENPASAR') || stdArea.includes('SINGARAJA') || stdArea.includes('NEGARA') || stdArea.includes('BALI');
+      const newSchId = `sch-comb-${yr}${monthPadded}${dayPadded}-${armadaCode}-${Date.now().toString().slice(-4)}-${idx}`;
+
+      const newSch: Schedule = {
+        id: newSchId,
+        trackingNumber: `PO-AKK-${yr}${monthPadded}${dayPadded}-${armadaCode}-${idx + 1}`,
+        originName: 'Gudang Pusat AKK Banyuwangi DC',
+        originCoords: [-8.1906, 114.3708],
+        storeId: `area-${stdArea.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
+        store: {
+          id: `area-${stdArea.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
+          storeCode: `AREA-${stdArea.substring(0, 4).toUpperCase().replace(/[^A-Z0-9]/g, '')}`,
+          storeName: stdArea,
+          island: isBali ? 'Bali & Nusa Tenggara' : 'Jawa',
+          province: isBali ? 'Bali' : 'Jawa Timur',
+          city: isBali ? 'Denpasar' : 'Banyuwangi',
+          address: `Area Pengiriman ${stdArea}`,
+          latitude: isBali ? -8.6705 : -8.219,
+          longitude: isBali ? 115.2126 : 114.369,
+          contactPerson: 'PIC Distribusi Area',
+          phone: '-',
+          deliveryWindow: '08:00 - 17:00',
+          storeCategory: 'Distribution Hub'
+        },
+        areaName: stdArea,
+        fleetId: matchedFleet ? matchedFleet.id : 'flt-01',
+        fleet: matchedFleet,
+        crewId: matchedDriver ? matchedDriver.id : 'crw-01',
+        crew: matchedDriver,
+        crewHelperId: matchedHelper ? matchedHelper.id : undefined,
+        crewHelper: matchedHelper,
+        crewHelper2Id: matchedHelper2 ? matchedHelper2.id : undefined,
+        crewHelper2: matchedHelper2,
+        status: 'scheduled',
+        departureDate: departureIso,
+        estimatedArrival: estArrivalIso,
+        cargoDescription: `Karton Box & Sheet Kemasan - Area ${stdArea}`,
+        cargoWeightTon: isBali ? 4.5 : 2.5,
+        isInterIsland: isBali,
+        ferryBookingCode: isBali ? `ASDP-KTP-GLM-${Math.floor(Math.random() * 9000 + 1000)}` : undefined,
+        transitPort: isBali ? 'Pelabuhan Ketapang Banyuwangi -> Gilimanuk Bali' : undefined,
+        notes: t.target || `Rute ${stdArea}`,
+        createdAt: new Date().toISOString(),
+        isManuallyEdited: t.source === 'manual'
+      };
+
+      logisticsStore.addSchedule(newSch);
+
+      if (!dayMap.has(dayNum)) {
+        dayMap.set(dayNum, {
+          dayNumber: dayNum,
+          dayName: dayName.toUpperCase(),
+          dateString,
+          pengiriman: [],
+          gudang: [],
+          pengirimanOff: [],
+          karyawanIzin: []
+        });
+      }
+
+      const dayEntry = dayMap.get(dayNum)!;
+      dayEntry.pengiriman.push({
+        id: newSchId,
+        driver: driverName,
+        helper: helperName,
+        helper2: helper2Name,
+        area: stdArea,
+        armada: armadaCode,
+        target: t.target || 'Gudang Pusat AKK Banyuwangi DC',
+        isManuallyEdited: t.source === 'manual'
+      });
+
+      if (changeDetails.length < 6) {
+        changeDetails.push(
+          `[${t.source === 'excel' ? 'Excel' : 'Input Baru'}] ${dateString}: Driver ${driverName} | Helper ${helperName} | Area ${stdArea} | Armada ${armadaCode}`
+        );
+      }
+    });
+
+    const sortedDays = Array.from(dayMap.values()).sort((a, b) => a.dayNumber - b.dayNumber);
+    const mergedWeeks: AdminScheduleWeek[] = [
+      {
+        weekNumber: 1,
+        weekLabel: `JADWAL PENGIRIMAN AKTIF (${(MONTH_NAMES[targetMonth] || 'JANUARI').toUpperCase()} ${targetYear} • ${sortedDays.length} HARI)`,
+        dateRangeLabel: `${MONTH_NAMES[targetMonth] || 'Januari'} ${targetYear}`,
+        days: sortedDays
+      }
+    ];
+
+    if (selectedYear !== targetYear) setSelectedYear(targetYear);
+    if (selectedMonth !== -1 && selectedMonth !== targetMonth) setSelectedMonth(targetMonth);
+
+    updateWeeks(mergedWeeks);
+    setSelectedCalendarDate(lastFocusedDateString);
+    setSelectedDayFilter(lastFocusedDateString);
+
+    logisticsStore.syncSchedulesToCrewHistory();
+
+    const excelCount = incomingTrips.filter(x => x.source === 'excel').length;
+    const manualCount = incomingTrips.filter(x => x.source !== 'excel').length;
+
+    logisticsStore.addScheduleChangeLog({
+      fileName: sourceLabel,
+      actionType: excelCount > 0 ? 'upload_excel' : 'manual_create',
+      summary: `Kombinasi Jadwal Disimpan: ${incomingTrips.length} total jadwal (${excelCount} dari Excel, ${manualCount} dari Input Jadwal Baru)`,
+      rowCount: incomingTrips.length,
+      changes: changeDetails
+    });
+    setScheduleChangeLogs(logisticsStore.getScheduleChangeLogs());
+
+    persistSchedulesToDatabase(logisticsStore.getSchedules(), mergedWeeks, {
+      month: String(targetMonth + 1),
+      year: Number(targetYear),
+      source: 'combined_excel_and_manual_schedule'
+    }).catch(() => {});
+
+    const msg = `✅ ${incomingTrips.length} jadwal (${excelCount > 0 ? `${excelCount} Excel + ` : ''}${manualCount > 0 ? `${manualCount} Jadwal Baru` : ''}) berhasil terbaca sistem, digabungkan, dan disimpan permanen!`;
+    setSyncSuccessMessage(msg);
+    if (onSyncComplete) onSyncComplete(incomingTrips.length);
+    setTimeout(() => setSyncSuccessMessage(null), 7000);
+  };
+
   const handleSaveTripModal = () => {
     if (!editingTripModal) return;
     const { dayNumber, dateString, tripIndex, scheduleId, driver, helper, helper2, area, armada, target, isNew } = editingTripModal;
@@ -720,32 +942,62 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         ]
       });
 
-      // Update weeks state directly
-      const newWeeks = weeks.map(w => ({
-        ...w,
-        days: w.days.map(d => {
-          if (d.dayNumber === dayNumber) {
-            return {
-              ...d,
-              pengiriman: [
-                ...d.pengiriman,
-                {
-                  id: newSchId,
-                  driver,
-                  helper: helper || '-',
-                  helper2: helper2 || '-',
-                  area: stdArea,
-                  armada,
-                  target,
-                  isManuallyEdited: true
-                }
-              ]
-            };
-          }
-          return d;
-        })
-      }));
+      // Update weeks state directly (and create the day if not yet present in weeks)
+      const DAY_NAMES_ID = ['MINGGU', 'SENIN', 'SELASA', 'RABU', 'KAMIS', 'JUMAT', 'SABTU'];
+      const dObj = new Date(selectedYear, effectiveMonth, dayNumber);
+      const computedDayName = DAY_NAMES_ID[dObj.getDay()] || 'SENIN';
+      const newTripObj: DeliveryAssignment = {
+        id: newSchId,
+        driver,
+        helper: helper || '-',
+        helper2: helper2 || '-',
+        area: stdArea,
+        armada,
+        target,
+        isManuallyEdited: true
+      };
+
+      let dayFound = false;
+      const newWeeks = weeks.map((w, wIdx) => {
+        const existsInWeek = w.days.some(d => d.dayNumber === dayNumber);
+        if (existsInWeek) {
+          dayFound = true;
+          return {
+            ...w,
+            days: w.days.map(d => {
+              if (d.dayNumber === dayNumber) {
+                return {
+                  ...d,
+                  pengiriman: [...d.pengiriman, newTripObj]
+                };
+              }
+              return d;
+            })
+          };
+        }
+        if (wIdx === weeks.length - 1 && !dayFound) {
+          dayFound = true;
+          const updatedDays = [
+            ...w.days,
+            {
+              dayNumber,
+              dayName: computedDayName,
+              dateString,
+              pengiriman: [newTripObj],
+              gudang: [],
+              pengirimanOff: [],
+              karyawanIzin: []
+            }
+          ].sort((a, b) => a.dayNumber - b.dayNumber);
+          return {
+            ...w,
+            days: updatedDays
+          };
+        }
+        return w;
+      });
       updateWeeks(newWeeks);
+      setSelectedCalendarDate(dateString);
       setSyncSuccessMessage(`✅ Berhasil menambahkan ritase pengiriman baru pada ${dateString}! Data disimpan permanen.`);
     } else {
       // Editing existing
@@ -1640,8 +1892,16 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       setParsedUploadedTrips(parsedTrips);
 
       if (parsedTrips.length > 0) {
-        const groupedWeeks = convertParsedTripsToWeeks(parsedTrips);
-        updateWeeks(groupedWeeks);
+        if (importMode === 'tambahkan') {
+          mergeAndSaveCombinedTrips(
+            parsedTrips.map(t => ({ ...t, source: 'excel' as const })),
+            'tambahkan',
+            file.name
+          );
+        } else {
+          const groupedWeeks = convertParsedTripsToWeeks(parsedTrips);
+          updateWeeks(groupedWeeks);
+        }
       }
 
       const rawAreas = parsedTrips.map(t => t.area).filter(Boolean);
@@ -1859,21 +2119,11 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 relative z-10">
           <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                <FileSpreadsheet className="w-3.5 h-3.5" />
-                EXCEL SPREADSHEET &bull; JADWAL PENGIRIMAN
-              </span>
-              <span className="text-xs text-slate-400 font-medium">
-                {selectedMonth === -1 ? `Semua Bulan ${selectedYear}` : `${MONTH_NAMES[selectedMonth]} ${selectedYear}`}
-              </span>
-            </div>
-
-            <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight mt-2 flex items-center gap-2">
+            <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2">
               Jadwal Pengiriman &amp; Penugasan Armada
             </h2>
             <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-2xl leading-relaxed">
-              Tabel jadwal pengiriman armada, penugasan kru supir &amp; helper, serta alokasi area distribusi berbasis Excel.
+              Tabel jadwal pengiriman armada, penugasan kru supir &amp; helper, serta alokasi area distribusi terintegrasi.
             </p>
           </div>
 
@@ -1887,16 +2137,28 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               onChange={handleFileUpload}
             />
 
-            {onOpenCreateSchedule && (
-              <button
-                onClick={onOpenCreateSchedule}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold border border-blue-500/40 shadow-sm transition cursor-pointer"
-                title="Tambah Jadwal Pengiriman Baru"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Jadwal Baru</span>
-              </button>
-            )}
+            <button
+              onClick={() => {
+                const effectiveMo = selectedMonth === -1 ? 0 : selectedMonth;
+                const activeDayMatch = selectedCalendarDate.match(/^(\d{1,2})/);
+                const dayNum = activeDayMatch ? Number(activeDayMatch[1]) : 5;
+                const defaultIso = `${selectedYear}-${String(effectiveMo + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+                setManualScheduleForm(prev => ({
+                  ...prev,
+                  dateIso: defaultIso
+                }));
+                setImportMonth(MONTH_NAMES[effectiveMo] || 'Januari');
+                setImportYear(String(selectedYear));
+                setCombinedModalMode('semua');
+                setIsUploadConfigModalOpen(true);
+              }}
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black border border-emerald-400/40 shadow-md shadow-emerald-950/40 transition cursor-pointer"
+              title="Kombinasi Tambah Jadwal Baru & Unggah Excel (.xlsx / .csv)"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <Upload className="w-3.5 h-3.5" />
+              <span>Tambah / Unggah Jadwal</span>
+            </button>
 
             <button
               onClick={() => {
@@ -1920,15 +2182,6 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             >
               <Users className="w-3.5 h-3.5 text-blue-400" />
               <span>Kru ({Object.keys(detectedCrewMappings).length})</span>
-            </button>
-
-            <button
-              onClick={() => setIsUploadConfigModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold border border-emerald-500/40 shadow-sm transition cursor-pointer"
-              title="Unggah Excel (.xlsx / .csv)"
-            >
-              <Upload className="w-3.5 h-3.5" />
-              <span>Unggah</span>
             </button>
 
             <button
@@ -2194,97 +2447,6 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               ))}
             </select>
           </div>
-        </div>
-      </div>
-
-      {/* Day Selection Pills & Dropdown Bar - Ringkas & Bebas Scroll */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-2xs space-y-3">
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <div className="flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-            <span className="text-xs font-black text-slate-800 dark:text-white uppercase tracking-wider">
-              Pilih Hari / Tanggal Pengiriman:
-            </span>
-          </div>
-          <span className="text-[11px] font-mono font-bold text-slate-500 dark:text-slate-400">
-            {selectedDayFilter === 'all' 
-              ? `Menampilkan ${totalTripsCount} Ritase (${availableDaysList.length} Hari Aktif)` 
-              : `Terfilter: Tanggal ${selectedDayFilter}`
-            }
-          </span>
-        </div>
-
-        {/* Dropdown Model Selector for Active Delivery Schedule */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-          <div className="flex-1 relative">
-            <select
-              value={selectedDayFilter}
-              onChange={(e) => setSelectedDayFilter(e.target.value)}
-              className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-xl px-4 py-2.5 text-xs font-black focus:outline-none focus:border-emerald-500 cursor-pointer shadow-xs appearance-none pr-10"
-            >
-              <option value="all">Dropdown Roster: Semua Hari ({availableDaysList.length} Hari Aktif • {totalTripsCount} Ritase Total)</option>
-              {availableDaysList.map(d => (
-                <option key={`opt-select-${d.key}`} value={d.dateString}>
-                  📅 {d.dayName}, {d.dateString} — ({d.count} Ritase Pengiriman)
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-          </div>
-
-          {selectedDayFilter !== 'all' && (
-            <button
-              type="button"
-              onClick={() => setSelectedDayFilter('all')}
-              className="px-3.5 py-2 rounded-xl bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
-            >
-              <X className="w-3.5 h-3.5" />
-              <span>Reset Ke Semua Hari</span>
-            </button>
-          )}
-        </div>
-
-        {/* Day Pills Bar */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin">
-          <button
-            type="button"
-            onClick={() => setSelectedDayFilter('all')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-black transition whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
-              selectedDayFilter === 'all'
-                ? 'bg-emerald-600 text-white shadow-xs'
-                : 'bg-slate-100 dark:bg-slate-950 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-800'
-            }`}
-          >
-            <span>Semua Hari</span>
-            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
-              selectedDayFilter === 'all' ? 'bg-emerald-950 text-emerald-200' : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
-            }`}>
-              {availableDaysList.reduce((acc, d) => acc + d.count, 0)}
-            </span>
-          </button>
-
-          {availableDaysList.map(d => {
-            const isSelected = selectedDayFilter === d.key || selectedDayFilter === d.dateString || selectedDayFilter === `${d.dayNumber}`;
-            return (
-              <button
-                key={d.key}
-                type="button"
-                onClick={() => setSelectedDayFilter(isSelected ? 'all' : d.dateString)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
-                  isSelected
-                    ? 'bg-emerald-600 text-white shadow-xs font-black'
-                    : 'bg-slate-100 dark:bg-slate-950 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-800'
-                }`}
-              >
-                <span>📅 {d.dayName}, {d.dateString.split(' ')[0]} {d.dateString.split(' ')[1]?.substring(0, 3)}</span>
-                <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
-                  isSelected ? 'bg-emerald-950 text-emerald-200' : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
-                }`}>
-                  {d.count} Rit
-                </span>
-              </button>
-            );
-          })}
         </div>
       </div>
 
@@ -2902,18 +3064,23 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         </div>
       )}
 
-      {/* Simplified Upload Configuration Modal */}
+      {/* Combined Modal: Unggah Excel + Tambah Jadwal Baru (Terbaca Sistem & Disimpan) */}
       {isUploadConfigModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-lg w-full shadow-2xl space-y-4 my-6">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-3xl w-full shadow-2xl space-y-4 my-4 max-h-[90vh] flex flex-col">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3 shrink-0">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-xl bg-emerald-500/15 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
-                  <Upload className="w-4 h-4" />
+                  <Plus className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-white">Unggah Spreadsheet Jadwal (.xlsx / .csv)</h3>
-                  <p className="text-[11px] text-slate-400">Pilih periode dan file Excel jadwal pengiriman</p>
+                  <h3 className="text-sm font-black text-white">
+                    Kombinasi Tambah Jadwal Baru &amp; Unggah Excel (.xlsx / .csv)
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Input jadwal baru dan/atau unggah file Excel sekaligus — otomatis terbaca sistem, digabungkan, dan disimpan permanen
+                  </p>
                 </div>
               </div>
               <button
@@ -2924,98 +3091,412 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-[11px] font-bold text-slate-300 block mb-1">Bulan</label>
-                <select
-                  value={importMonth}
-                  onChange={(e) => setImportMonth(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl p-2 focus:outline-none focus:border-emerald-500"
-                >
-                  {MONTH_NAMES.map(m => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="text-[11px] font-bold text-slate-300 block mb-1">Tahun</label>
-                <input
-                  type="text"
-                  value={importYear}
-                  onChange={(e) => setImportYear(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl p-2 focus:outline-none focus:border-emerald-500 font-mono"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2.5">
-              <button
-                type="button"
-                onClick={() => setImportMode('tambahkan')}
-                className={`p-2.5 rounded-xl border text-left text-xs cursor-pointer transition ${
-                  importMode === 'tambahkan'
-                    ? 'bg-emerald-500/15 border-emerald-500 text-white font-bold'
-                    : 'bg-slate-950 border-slate-800 text-slate-400'
-                }`}
-              >
-                <span className="block font-bold">Tambahkan Data</span>
-                <span className="text-[10px] text-slate-400 font-normal">Gabung ke jadwal aktif</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setImportMode('ganti')}
-                className={`p-2.5 rounded-xl border text-left text-xs cursor-pointer transition ${
-                  importMode === 'ganti'
-                    ? 'bg-amber-500/15 border-amber-500 text-white font-bold'
-                    : 'bg-slate-950 border-slate-800 text-slate-400'
-                }`}
-              >
-                <span className="block font-bold text-amber-300">Ganti Data Bulan Ini</span>
-                <span className="text-[10px] text-slate-400 font-normal">Timpa jadwal periode sama</span>
-              </button>
-            </div>
-
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="text-[11px] font-bold text-slate-300">File Excel</label>
+            {/* Mode Switcher Tabs */}
+            <div className="flex items-center justify-between gap-2 flex-wrap bg-slate-950 p-1.5 rounded-xl border border-slate-800 shrink-0">
+              <div className="flex items-center gap-1">
                 <button
                   type="button"
-                  onClick={downloadScheduleTemplate}
-                  className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-400 hover:text-emerald-300 transition cursor-pointer"
+                  onClick={() => setCombinedModalMode('semua')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                    combinedModalMode === 'semua'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
                 >
-                  <Download className="w-3 h-3" />
-                  <span>Unduh Template</span>
+                  ⚡ Kombinasi (Excel + Input Baru)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCombinedModalMode('manual')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                    combinedModalMode === 'manual'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  ➕ Input Jadwal Baru
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCombinedModalMode('excel')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                    combinedModalMode === 'excel'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  📄 Unggah File Excel
                 </button>
               </div>
-              <input
-                type="file"
-                ref={modalFileInputRef}
-                accept=".xlsx,.xls,.csv"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) setSelectedUploadFile(f);
-                }}
-              />
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 min-w-0">
-                  <button
-                    type="button"
-                    onClick={() => modalFileInputRef.current?.click()}
-                    className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shrink-0 cursor-pointer transition"
-                  >
-                    Pilih File
-                  </button>
-                  <span className="text-xs text-slate-300 truncate font-mono">
-                    {selectedUploadFile ? selectedUploadFile.name : 'Belum ada file dipilih'}
-                  </span>
-                </div>
+
+              <div className="flex items-center gap-1.5 text-[11px] pr-1">
+                <span className="text-slate-400 font-semibold">Mode Simpan:</span>
+                <button
+                  type="button"
+                  onClick={() => setImportMode('tambahkan')}
+                  className={`px-2.5 py-1 rounded-lg font-bold cursor-pointer transition ${
+                    importMode === 'tambahkan'
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                      : 'bg-slate-900 text-slate-400 border border-slate-800'
+                  }`}
+                >
+                  Gabungkan ke Jadwal Aktif
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setImportMode('ganti')}
+                  className={`px-2.5 py-1 rounded-lg font-bold cursor-pointer transition ${
+                    importMode === 'ganti'
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                      : 'bg-slate-900 text-slate-400 border border-slate-800'
+                  }`}
+                >
+                  Timpa Bulan Ini
+                </button>
               </div>
             </div>
 
-            <div className="flex items-center justify-between pt-3 border-t border-slate-800">
+            {/* Scrollable Body */}
+            <div className="space-y-4 overflow-y-auto pr-1 flex-1 text-xs">
+              <div className={`grid grid-cols-1 ${combinedModalMode === 'semua' ? 'lg:grid-cols-2' : ''} gap-4`}>
+                {/* Panel 1: Tambah Jadwal Baru (Manual Input) */}
+                {(combinedModalMode === 'semua' || combinedModalMode === 'manual') && (
+                  <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-3.5 space-y-3">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                      <span className="font-black text-blue-400 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>1. Form Tambah Jadwal Baru</span>
+                      </span>
+                      <span className="text-[10px] text-slate-400">Terintegrasi Kru &amp; Armada</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-300 block mb-1">Tanggal Kirim *</label>
+                        <input
+                          type="date"
+                          value={manualScheduleForm.dateIso}
+                          onChange={(e) => setManualScheduleForm({ ...manualScheduleForm, dateIso: e.target.value })}
+                          className="w-full bg-slate-900 border border-slate-800 text-white text-xs rounded-xl px-2.5 py-2 focus:outline-none focus:border-blue-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-300 block mb-1">Armada Truk *</label>
+                        <select
+                          value={manualScheduleForm.armada}
+                          onChange={(e) => setManualScheduleForm({ ...manualScheduleForm, armada: e.target.value })}
+                          className="w-full bg-slate-900 border border-slate-800 text-white text-xs font-bold rounded-xl px-2.5 py-2 focus:outline-none focus:border-blue-500 cursor-pointer"
+                        >
+                          {logisticsStore.getFleets().map(f => (
+                            <option key={f.id} value={f.initialCode || f.plateNumber}>
+                              {f.initialCode ? `[${f.initialCode}] ` : ''}{f.plateNumber}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-300 block mb-1">Driver / Supir *</label>
+                        <input
+                          type="text"
+                          list="combined-driver-options"
+                          value={manualScheduleForm.driver}
+                          onChange={(e) => setManualScheduleForm({ ...manualScheduleForm, driver: e.target.value })}
+                          placeholder="Nama Driver"
+                          className="w-full bg-slate-900 border border-slate-800 text-white text-xs rounded-xl px-2.5 py-2 focus:outline-none focus:border-blue-500"
+                        />
+                        <datalist id="combined-driver-options">
+                          {logisticsStore.getDriverCrews().map(c => (
+                            <option key={c.id} value={c.name} />
+                          ))}
+                        </datalist>
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-300 block mb-1">Helper 1</label>
+                        <input
+                          type="text"
+                          list="combined-helper-options"
+                          value={manualScheduleForm.helper}
+                          onChange={(e) => setManualScheduleForm({ ...manualScheduleForm, helper: e.target.value })}
+                          placeholder="Helper 1"
+                          className="w-full bg-slate-900 border border-slate-800 text-white text-xs rounded-xl px-2.5 py-2 focus:outline-none focus:border-blue-500"
+                        />
+                        <datalist id="combined-helper-options">
+                          {logisticsStore.getHelperCrews().map(c => (
+                            <option key={c.id} value={c.name} />
+                          ))}
+                        </datalist>
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-300 block mb-1">Helper 2</label>
+                        <input
+                          type="text"
+                          list="combined-helper-options"
+                          value={manualScheduleForm.helper2}
+                          onChange={(e) => setManualScheduleForm({ ...manualScheduleForm, helper2: e.target.value })}
+                          placeholder="Opsional"
+                          className="w-full bg-slate-900 border border-slate-800 text-white text-xs rounded-xl px-2.5 py-2 focus:outline-none focus:border-blue-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-300 block mb-1">Area Kirim Tujuan *</label>
+                      <input
+                        type="text"
+                        list="combined-area-options"
+                        value={manualScheduleForm.area}
+                        onChange={(e) => setManualScheduleForm({ ...manualScheduleForm, area: e.target.value })}
+                        placeholder="Contoh: DENPASAR 1, SITUBONDO, BONDOWOSO"
+                        className="w-full bg-slate-900 border border-slate-800 text-white text-xs uppercase font-bold rounded-xl px-2.5 py-2 focus:outline-none focus:border-blue-500"
+                      />
+                      <datalist id="combined-area-options">
+                        {officialAreasList.map(a => (
+                          <option key={a.id} value={a.name} />
+                        ))}
+                      </datalist>
+                    </div>
+
+                    <div className="pt-1 flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!manualScheduleForm.driver.trim() || !manualScheduleForm.area.trim()) return;
+                          const newEntry: ParsedSheetTrip & { source: 'manual'; tempId: string } = {
+                            tempId: `man-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                            source: 'manual',
+                            dateStr: manualScheduleForm.dateIso,
+                            driver: manualScheduleForm.driver.trim(),
+                            helper: manualScheduleForm.helper.trim() || '-',
+                            helper2: manualScheduleForm.helper2.trim() || '-',
+                            area: standardizeAreaName(manualScheduleForm.area.trim()),
+                            armada: manualScheduleForm.armada.trim() || 'DS3',
+                            target: manualScheduleForm.target.trim() || 'Gudang Pusat AKK Banyuwangi DC'
+                          };
+                          setStagedCombinedTrips(prev => [...prev, newEntry]);
+                        }}
+                        className="w-full py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow-xs"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Masukkan ke Daftar Bacaan Sistem</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Panel 2: Unggah File Excel (.xlsx / .csv) */}
+                {(combinedModalMode === 'semua' || combinedModalMode === 'excel') && (
+                  <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-3.5 space-y-3 flex flex-col justify-between">
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                        <span className="font-black text-emerald-400 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                          <FileSpreadsheet className="w-3.5 h-3.5" />
+                          <span>2. Unggah File Excel (.xlsx / .csv)</span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={downloadScheduleTemplate}
+                          className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-400 hover:text-emerald-300 transition cursor-pointer"
+                        >
+                          <Download className="w-3 h-3" />
+                          <span>Unduh Template</span>
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2.5">
+                        <div>
+                          <label className="text-[11px] font-bold text-slate-300 block mb-1">Bulan Periode</label>
+                          <select
+                            value={importMonth}
+                            onChange={(e) => setImportMonth(e.target.value)}
+                            className="w-full bg-slate-900 border border-slate-800 text-slate-200 text-xs rounded-xl p-2 focus:outline-none focus:border-emerald-500"
+                          >
+                            {MONTH_NAMES.map(m => (
+                              <option key={m} value={m}>{m}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="text-[11px] font-bold text-slate-300 block mb-1">Tahun</label>
+                          <input
+                            type="text"
+                            value={importYear}
+                            onChange={(e) => setImportYear(e.target.value)}
+                            className="w-full bg-slate-900 border border-slate-800 text-slate-200 text-xs rounded-xl p-2 focus:outline-none focus:border-emerald-500 font-mono"
+                          />
+                        </div>
+                      </div>
+
+                      <input
+                        type="file"
+                        ref={modalFileInputRef}
+                        accept=".xlsx,.xls,.csv"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const f = e.target.files?.[0];
+                          if (!f) return;
+                          setSelectedUploadFile(f);
+                          setUploadedFileName(f.name);
+                          try {
+                            const arrayBuffer = await f.arrayBuffer();
+                            const data = new Uint8Array(arrayBuffer);
+                            const workbook = XLSX.read(data, { type: 'array' });
+                            const sheetName = workbook.SheetNames.find(n => n.toUpperCase() === 'ALL') || workbook.SheetNames[0];
+                            const worksheet = workbook.Sheets[sheetName];
+                            const jsonRows = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+                            const parsed = googleSheetsApiService.parseScheduleRows(jsonRows);
+                            if (parsed.length > 0) {
+                              const excelEntries = parsed.map((item, idx) => ({
+                                ...item,
+                                source: 'excel' as const,
+                                tempId: `xls-${Date.now()}-${idx}`
+                              }));
+                              setStagedCombinedTrips(prev => [
+                                ...prev.filter(x => x.source !== 'excel'),
+                                ...excelEntries
+                              ]);
+                            }
+                          } catch (err) {
+                            console.error('Failed reading excel in combined modal:', err);
+                          }
+                        }}
+                      />
+
+                      <div className="bg-slate-900 border border-dashed border-slate-700 rounded-xl p-3 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <button
+                            type="button"
+                            onClick={() => modalFileInputRef.current?.click()}
+                            className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shrink-0 cursor-pointer transition flex items-center gap-1.5"
+                          >
+                            <Upload className="w-3.5 h-3.5" />
+                            <span>Pilih File Excel</span>
+                          </button>
+                          <span className="text-xs text-slate-300 truncate font-mono flex-1">
+                            {selectedUploadFile ? selectedUploadFile.name : 'Belum ada file dipilih'}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 leading-relaxed">
+                          Saat file dipilih, seluruh baris jadwal dari Excel langsung dibaca sistem dan digabungkan bersama jadwal baru di bawah.
+                        </p>
+                      </div>
+                    </div>
+
+                    {selectedUploadFile && (
+                      <div className="pt-1 flex items-center justify-between gap-2">
+                        <span className="text-[11px] text-emerald-400 font-bold">
+                          ✓ {stagedCombinedTrips.filter(x => x.source === 'excel').length} baris terbaca dari Excel
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (selectedUploadFile) {
+                              setIsUploadConfigModalOpen(false);
+                              processFile(selectedUploadFile);
+                            }
+                          }}
+                          className="text-[11px] font-bold text-blue-400 hover:text-blue-300 underline cursor-pointer"
+                        >
+                          Buka Pratinjau Kolom Lengkap
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Combined System Reader Staging Table */}
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2.5">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    <span className="font-black text-white text-xs">
+                      Daftar Jadwal Terbaca Sistem ({stagedCombinedTrips.length} Baris Siap Disimpan)
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 text-[10px] font-bold">
+                    <span className="px-2 py-0.5 rounded bg-blue-500/15 text-blue-300 border border-blue-500/30">
+                      Input Baru: {stagedCombinedTrips.filter(x => x.source === 'manual').length}
+                    </span>
+                    <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                      Unggah Excel: {stagedCombinedTrips.filter(x => x.source === 'excel').length}
+                    </span>
+                    {stagedCombinedTrips.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStagedCombinedTrips([]);
+                          setSelectedUploadFile(null);
+                        }}
+                        className="text-rose-400 hover:underline cursor-pointer ml-1"
+                      >
+                        Bersihkan Daftar
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {stagedCombinedTrips.length === 0 ? (
+                  <div className="p-4 text-center text-slate-400 bg-slate-900/60 rounded-xl border border-slate-800/80 text-[11px]">
+                    Silakan isi <strong>Form Tambah Jadwal Baru</strong> atau <strong>Pilih File Excel</strong> di atas. Anda juga dapat langsung menekan tombol <strong>Simpan &amp; Gabungkan ke Sistem</strong> untuk menyimpan form jadwal baru secara instan.
+                  </div>
+                ) : (
+                  <div className="max-h-44 overflow-y-auto rounded-lg border border-slate-800">
+                    <table className="w-full text-left border-collapse text-[11px]">
+                      <thead>
+                        <tr className="bg-slate-900 text-slate-400 border-b border-slate-800">
+                          <th className="p-2 font-bold">SUMBER</th>
+                          <th className="p-2 font-bold">TANGGAL</th>
+                          <th className="p-2 font-bold">DRIVER</th>
+                          <th className="p-2 font-bold">HELPER</th>
+                          <th className="p-2 font-bold">AREA KIRIM</th>
+                          <th className="p-2 font-bold">ARMADA</th>
+                          <th className="p-2 font-bold text-center">HAPUS</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/80 text-slate-200">
+                        {stagedCombinedTrips.map((item) => (
+                          <tr key={item.tempId} className="hover:bg-slate-900/60">
+                            <td className="p-2">
+                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase ${
+                                item.source === 'excel'
+                                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                  : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                              }`}>
+                                {item.source === 'excel' ? 'Excel' : 'Baru'}
+                              </span>
+                            </td>
+                            <td className="p-2 font-mono text-slate-300">{item.dateStr || '-'}</td>
+                            <td className="p-2 font-bold text-white">{item.driver}</td>
+                            <td className="p-2 text-slate-300">
+                              {item.helper || '-'}{item.helper2 && item.helper2 !== '-' ? `, ${item.helper2}` : ''}
+                            </td>
+                            <td className="p-2 font-bold text-emerald-300">{item.area}</td>
+                            <td className="p-2 font-mono font-bold text-amber-300">{item.armada}</td>
+                            <td className="p-2 text-center">
+                              <button
+                                type="button"
+                                onClick={() => setStagedCombinedTrips(prev => prev.filter(x => x.tempId !== item.tempId))}
+                                className="text-rose-400 hover:text-rose-300 cursor-pointer p-1"
+                                title="Hapus baris ini"
+                              >
+                                <Trash2 className="w-3.5 h-3.5 mx-auto" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Footer Actions */}
+            <div className="flex items-center justify-between pt-3 border-t border-slate-800 shrink-0">
               <button
                 type="button"
                 onClick={() => {
@@ -3026,7 +3507,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs font-bold transition cursor-pointer flex items-center gap-1.5"
               >
                 <HistoryIcon className="w-3.5 h-3.5" />
-                <span>Riwayat Log</span>
+                <span>Riwayat Log ({scheduleChangeLogs.length})</span>
               </button>
 
               <div className="flex items-center gap-2">
@@ -3040,17 +3521,47 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 <button
                   type="button"
                   onClick={() => {
-                    if (!selectedUploadFile) {
+                    let finalQueue = [...stagedCombinedTrips];
+                    // If user filled the manual form and hasn't clicked "Masukkan ke Daftar" yet (or queue is empty), include the form automatically if in manual/combined mode
+                    if (
+                      finalQueue.length === 0 &&
+                      (combinedModalMode === 'semua' || combinedModalMode === 'manual') &&
+                      manualScheduleForm.driver.trim() &&
+                      manualScheduleForm.area.trim()
+                    ) {
+                      finalQueue.push({
+                        tempId: `man-direct-${Date.now()}`,
+                        source: 'manual',
+                        dateStr: manualScheduleForm.dateIso,
+                        driver: manualScheduleForm.driver.trim(),
+                        helper: manualScheduleForm.helper.trim() || '-',
+                        helper2: manualScheduleForm.helper2.trim() || '-',
+                        area: standardizeAreaName(manualScheduleForm.area.trim()),
+                        armada: manualScheduleForm.armada.trim() || 'DS3',
+                        target: manualScheduleForm.target.trim() || 'Gudang Pusat AKK Banyuwangi DC'
+                      });
+                    }
+
+                    if (finalQueue.length === 0) {
                       modalFileInputRef.current?.click();
                       return;
                     }
+
+                    mergeAndSaveCombinedTrips(
+                      finalQueue,
+                      importMode,
+                      selectedUploadFile ? `${selectedUploadFile.name} + Input Jadwal` : 'Input Jadwal Baru & Kombinasi'
+                    );
+                    setStagedCombinedTrips([]);
+                    setSelectedUploadFile(null);
                     setIsUploadConfigModalOpen(false);
-                    processFile(selectedUploadFile);
                   }}
-                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-md"
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black transition flex items-center gap-1.5 cursor-pointer shadow-md"
                 >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>Pratinjau &amp; Proses</span>
+                  <Save className="w-3.5 h-3.5" />
+                  <span>
+                    Simpan &amp; Gabungkan ke Sistem {stagedCombinedTrips.length > 0 ? `(${stagedCombinedTrips.length} Jadwal)` : ''}
+                  </span>
                 </button>
               </div>
             </div>

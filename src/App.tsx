@@ -225,15 +225,22 @@ export default function App() {
       <div className={`flex-1 flex flex-col min-h-screen w-full transition-all duration-300 ${isSidebarMinimized ? 'lg:pl-20' : 'lg:pl-72'}`}>
         {/* Desktop Top Header Bar with High-Contrast Readability */}
         <header className="hidden lg:flex sticky top-0 z-20 h-16 bg-slate-900 border-b border-slate-800 px-6 lg:px-8 items-center justify-between shadow-xs">
-          <div className="flex items-center gap-3.5 min-w-0">
-            <div className="w-1 h-8 rounded-full bg-amber-500 shrink-0" />
+          <div className="flex items-center gap-3 min-w-0">
+            <button
+              type="button"
+              onClick={toggleSidebar}
+              className="p-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800 transition cursor-pointer shrink-0"
+              title={isSidebarMinimized ? 'Tampilkan Sidebar Navigasi' : 'Sembunyikan Sidebar Navigasi'}
+            >
+              {isSidebarMinimized ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+            </button>
             <div className="min-w-0">
-              <div className="text-[10px] uppercase font-bold tracking-wider text-amber-400 flex items-center gap-1.5">
-                <span>PT Anugrah Kemasan Kreatif</span>
-                <span className="text-slate-500">&bull;</span>
-                <span className="text-slate-400 font-semibold">Banyuwangi Hub</span>
+              <div className="text-[11px] font-medium text-slate-400 flex items-center gap-1.5">
+                <span className="text-amber-400 font-semibold">PT Anugrah Kemasan Kreatif</span>
+                <span>&middot;</span>
+                <span>Banyuwangi Hub</span>
               </div>
-              <h1 className="text-sm sm:text-base font-extrabold text-white tracking-tight truncate">
+              <h1 className="text-sm sm:text-base font-bold text-white tracking-tight truncate">
                 {getTabTitle(currentTab)}
               </h1>
             </div>
@@ -402,6 +409,7 @@ export default function App() {
           {currentTab === 'crew_history' && (
             <FleetCrewManagement
               initialTab="crews"
+              initialSubTab="history"
             />
           )}
 
@@ -527,16 +535,13 @@ export default function App() {
         </main>
 
         {/* Enterprise AKK Footer */}
-        <footer className="bg-slate-950 border-t border-slate-900 py-6 text-slate-500 text-xs text-center mt-auto">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-slate-400">
-              <span className="w-2 h-2 rounded-full bg-amber-500 inline-block"></span>
-              <span>PT Anugrah Kemasan Kreatif &bull; Sistem Distribusi & Manajemen Operasional</span>
+        <footer className="bg-slate-950 border-t border-slate-900 py-4 text-slate-500 text-xs text-center mt-auto">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2">
+            <div className="text-slate-400">
+              <span>&copy; {new Date().getFullYear()} PT Anugrah Kemasan Kreatif &middot; Sistem Distribusi &amp; Manajemen Operasional</span>
             </div>
             <div className="flex items-center gap-4 text-slate-500 text-[11px]">
-              <span>Next.js App Router</span>
-              <span>Supabase RLS & PostgreSQL</span>
-              <span>Tracksolid Telematics</span>
+              <span>Banyuwangi Distribution Hub</span>
             </div>
           </div>
         </footer>

@@ -1,50 +1,75 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  History, 
-  ShieldAlert, 
-  CheckCircle2, 
-  XCircle, 
-  Search, 
-  Filter, 
-  User, 
-  MapPin, 
-  Truck, 
-  Calendar, 
-  Award, 
-  Clock, 
-  AlertTriangle, 
-  ChevronRight, 
-  ChevronDown, 
-  Sliders, 
-  FileText, 
-  Sparkles, 
-  ArrowRight,
+import {
+  History,
+  CheckCircle2,
+  Search,
+  MapPin,
+  Truck,
+  Sliders,
   RotateCcw,
-  FileDown
+  FileDown,
+  Users,
+  AlertTriangle,
+  Eye,
+  LayoutGrid,
+  ListFilter
 } from 'lucide-react';
-import { Crew, CrewDeliveryHistory, AreaApprovalRequest, AreaDeliveryStat, Fleet } from '../types';
+import { Crew, CrewDeliveryHistory, AreaApprovalRequest, Fleet } from '../types';
 import { logisticsStore } from '../services/store';
 import { AreaApprovalModal } from './AreaApprovalModal';
 import { CrewReportDownloadModal } from './CrewReportDownloadModal';
+import {
+  UiCard,
+  UiCollapsibleSidebar,
+  UiWidget,
+  UiPopover,
+  UiToggleSwitch,
+  UiTextField,
+  UiAccordionItem,
+  UiBadge,
+  UiProgressBar
+} from './ui/UiPrimitives';
 
 export const CrewDeliveryHistoryView: React.FC = () => {
   const [crews, setCrews] = useState<Crew[]>(logisticsStore.getCrews());
   const [fleets, setFleets] = useState<Fleet[]>(logisticsStore.getFleets());
   const [history, setHistory] = useState<CrewDeliveryHistory[]>(logisticsStore.getCrewDeliveryHistory());
-  const [approvalRequests, setApprovalRequests] = useState<AreaApprovalRequest[]>(logisticsStore.getAreaApprovalRequests());
+  const [, setApprovalRequests] = useState<AreaApprovalRequest[]>(logisticsStore.getAreaApprovalRequests());
   const [threshold, setThreshold] = useState<number>(logisticsStore.getAreaDeliveryThreshold());
   const [isReportModalOpen, setIsReportModalOpen] = useState<boolean>(false);
 
+  // Filter & Search States (Text Fields & Selectors)
   const [selectedCrewId, setSelectedCrewId] = useState<string>('all');
-  const [selectedMonth, setSelectedMonth] = useState<number>(0); // Default to Januari (0)
-  const [selectedYear, setSelectedYear] = useState<number>(2026); // Default to 2026
+  const [selectedMonth, setSelectedMonth] = useState<number>(0); // Default Januari (0)
+  const [selectedYear, setSelectedYear] = useState<number>(2026);
   const [selectedAreaFilter, setSelectedAreaFilter] = useState<string>('all');
-  const [selectedDateKey, setSelectedDateKey] = useState<string>('all'); // 'all' or 'YYYY-MM-DD'
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [areaQuickFilter, setAreaQuickFilter] = useState<string>('');
   const [activeSubTab, setActiveSubTab] = useState<'area_stats' | 'fleet_stats'>('area_stats');
 
-  // Track expanded dates in accordion view
-  const [expandedDates, setExpandedDates] = useState<Record<string, boolean>>({});
+  // Toggle Switches States
+  const [isFilterSidebarOpen, setIsFilterSidebarOpen] = useState<boolean>(true);
+  const [useAccordionLayout, setUseAccordionLayout] = useState<boolean>(true);
+  const [onlyExceededFilter, setOnlyExceededFilter] = useState<boolean>(false);
+  const [autoSyncEnabled, setAutoSyncEnabled] = useState<boolean>(true);
+
+  // Accordion Expanded State (Single or Multiple)
+  const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
+
+  // Popover State (Dismissed by clicking outside, locks scroll)
+  const [popoverData, setPopoverData] = useState<{
+    isOpen: boolean;
+    title: string;
+    subtitle: string;
+    crewName?: string;
+    crewId?: string;
+    areaName: string;
+    tripCount: number;
+    maxLimit: number;
+    trips: CrewDeliveryHistory[];
+  } | null>(null);
+
+  const [isThresholdPopoverOpen, setIsThresholdPopoverOpen] = useState<boolean>(false);
 
   // Interactive Approval Modal State
   const [modalData, setModalData] = useState<{
@@ -73,41 +98,33 @@ export const CrewDeliveryHistoryView: React.FC = () => {
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    // Ensure all current active schedules are synced into crew history
-    logisticsStore.syncSchedulesToCrewHistory();
+    if (autoSyncEnabled) {
+      logisticsStore.syncSchedulesToCrewHistory();
+    }
     const latestHistory = logisticsStore.getCrewDeliveryHistory();
     setHistory(latestHistory);
     setCrews(logisticsStore.getCrews());
 
-    // Auto-expand all dates by default
-    const initExpanded: Record<string, boolean> = {};
-    latestHistory.forEach(item => {
-      const dKey = item.completionDate.substring(0, 10);
-      initExpanded[dKey] = true;
-    });
-    setExpandedDates(initExpanded);
-
     return logisticsStore.subscribe(() => {
       setCrews(logisticsStore.getCrews());
       setFleets(logisticsStore.getFleets());
-      const updated = logisticsStore.getCrewDeliveryHistory();
-      setHistory(updated);
+      setHistory(logisticsStore.getCrewDeliveryHistory());
       setApprovalRequests(logisticsStore.getAreaApprovalRequests());
       setThreshold(logisticsStore.getAreaDeliveryThreshold());
     });
-  }, []);
+  }, [autoSyncEnabled]);
 
   const handleThresholdChange = (val: number) => {
     logisticsStore.setAreaDeliveryThreshold(val);
-    setFeedbackMessage(`Batas maksimal pengiriman dalam 1 area diperbarui menjadi: ${val} kali.`);
+    setFeedbackMessage(`Batas maksimal rotasi pengiriman area diperbarui menjadi ${val}x kirim.`);
     setTimeout(() => setFeedbackMessage(null), 3000);
   };
 
   const handleManualSyncHistory = () => {
     const syncedCount = logisticsStore.syncSchedulesToCrewHistory();
     setHistory(logisticsStore.getCrewDeliveryHistory());
-    setFeedbackMessage(`⚡ Berhasil menyinkronkan ulang data jadwal operasional ke Histori & Otorisasi Kru (${syncedCount} entri diperbarui/ditambahkan)!`);
-    setTimeout(() => setFeedbackMessage(null), 4000);
+    setFeedbackMessage(`Sinkronisasi selesai (${syncedCount} entri jadwal diselaraskan ke histori kru).`);
+    setTimeout(() => setFeedbackMessage(null), 3500);
   };
 
   const handleOpenSimulateApproval = (crewName: string, crewId: string, areaName: string, tripCount: number) => {
@@ -117,14 +134,31 @@ export const CrewDeliveryHistoryView: React.FC = () => {
 
     setModalData({
       isOpen: true,
-      crewName: crewName,
-      crewId: crewId,
-      areaName: areaName,
-      storeName: areaTrips[0]?.storeName || `Pengiriman Distribusi ${areaName}`,
+      crewName,
+      crewId,
+      areaName,
+      storeName: areaTrips[0]?.storeName || `Distribusi ${areaName}`,
       plateNumber: areaTrips[0]?.vehiclePlate || 'P 8125 VC',
-      tripCount: tripCount,
+      tripCount,
       threshold,
       recentTrips: areaTrips
+    });
+  };
+
+  const handleOpenInspectPopover = (crewName: string, crewId: string, areaName: string, tripCount: number) => {
+    const areaTrips = history.filter(
+      h => (h.crewId === crewId || h.crewName === crewName) && h.area.toLowerCase() === areaName.toLowerCase()
+    );
+    setPopoverData({
+      isOpen: true,
+      title: `${areaName} · ${crewName}`,
+      subtitle: `Rincian ${tripCount} perjalanan tercatat pada log operasional`,
+      crewName,
+      crewId,
+      areaName,
+      tripCount,
+      maxLimit: threshold,
+      trips: areaTrips
     });
   };
 
@@ -139,25 +173,19 @@ export const CrewDeliveryHistoryView: React.FC = () => {
       plateNumber: modalData.plateNumber,
       departureDate: new Date().toISOString(),
       status: 'approved',
-      reasonPolicy: `Disetujui dispensasi penugasan wilayah ${modalData.areaName} untuk trip ke-${modalData.tripCount + 1}.`,
+      reasonPolicy: `Dispensasi rotasi wilayah ${modalData.areaName} untuk trip ke-${modalData.tripCount + 1}.`,
       notes
     });
 
     setModalData(prev => ({ ...prev, isOpen: false }));
-    setFeedbackMessage(`Penugasan wilayah untuk ${modalData.crewName} di ${modalData.areaName} berhasil DISETUJUI.`);
-    setTimeout(() => setFeedbackMessage(null), 4000);
-  };
-
-  const handleDecideRequest = (reqId: string, status: 'approved' | 'rejected') => {
-    logisticsStore.decideAreaApproval(reqId, status);
-    setFeedbackMessage(`Permohonan otorisasi telah di-${status === 'approved' ? 'SETUJUI' : 'TOLAK'}.`);
+    setFeedbackMessage(`Otorisasi rute ${modalData.areaName} untuk ${modalData.crewName} berhasil disimpan.`);
     setTimeout(() => setFeedbackMessage(null), 3500);
   };
 
-  const toggleDateExpand = (dKey: string) => {
-    setExpandedDates(prev => ({
+  const toggleAccordion = (id: string) => {
+    setExpandedIds(prev => ({
       ...prev,
-      [dKey]: !prev[dKey]
+      [id]: !prev[id]
     }));
   };
 
@@ -166,15 +194,22 @@ export const CrewDeliveryHistoryView: React.FC = () => {
     return history.filter(item => {
       const itemDate = new Date(item.completionDate);
       const matchesCrew = selectedCrewId === 'all' || item.crewId === selectedCrewId;
-      const matchesArea = selectedAreaFilter === 'all' || item.island === selectedAreaFilter || item.area.includes(selectedAreaFilter);
+      const matchesArea =
+        selectedAreaFilter === 'all' ||
+        item.island === selectedAreaFilter ||
+        item.area.toLowerCase().includes(selectedAreaFilter.toLowerCase());
+      const matchesQuickArea =
+        !areaQuickFilter.trim() ||
+        item.area.toLowerCase().includes(areaQuickFilter.toLowerCase().trim());
       const matchesMonth = selectedMonth === -1 || itemDate.getMonth() === selectedMonth;
       const matchesYear = itemDate.getFullYear() === selectedYear;
-      const matchesDateKey = selectedDateKey === 'all' || item.completionDate.substring(0, 10) === selectedDateKey;
-      
-      const q = searchQuery.toLowerCase();
-      const initialCode = item.initialCode || (item.trackingNumber.match(/PO-AKK-\d+-([A-Za-z0-9]+)/)?.[1]) || '';
-      
-      const matchesSearch = !searchQuery ||
+
+      const q = searchQuery.toLowerCase().trim();
+      const initialCode =
+        item.initialCode || item.trackingNumber.match(/PO-AKK-\d+-([A-Za-z0-9]+)/)?.[1] || '';
+
+      const matchesSearch =
+        !q ||
         item.crewName.toLowerCase().includes(q) ||
         item.trackingNumber.toLowerCase().includes(q) ||
         item.storeName.toLowerCase().includes(q) ||
@@ -182,55 +217,31 @@ export const CrewDeliveryHistoryView: React.FC = () => {
         item.vehiclePlate.toLowerCase().includes(q) ||
         initialCode.toLowerCase().includes(q);
 
-      return matchesCrew && matchesArea && matchesMonth && matchesYear && matchesDateKey && matchesSearch;
+      return (
+        matchesCrew &&
+        matchesArea &&
+        matchesQuickArea &&
+        matchesMonth &&
+        matchesYear &&
+        matchesSearch
+      );
     });
-  }, [history, selectedCrewId, selectedAreaFilter, selectedMonth, selectedYear, selectedDateKey, searchQuery]);
-
-  // Extract unique dates for Date Pills / Selector
-  const availableDatesList = useMemo(() => {
-    const map: Record<string, { iso: string; formatted: string; count: number }> = {};
-    history.forEach(item => {
-      const itemDate = new Date(item.completionDate);
-      if (selectedMonth !== -1 && itemDate.getMonth() !== selectedMonth) return;
-      if (itemDate.getFullYear() !== selectedYear) return;
-
-      const iso = item.completionDate.substring(0, 10);
-      if (!map[iso]) {
-        const d = new Date(item.completionDate);
-        const formatted = d.toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' });
-        map[iso] = { iso, formatted, count: 0 };
-      }
-      map[iso].count += 1;
-    });
-    return Object.values(map).sort((a, b) => b.iso.localeCompare(a.iso));
-  }, [history, selectedMonth, selectedYear]);
-
-  // Group filtered history by Date ISO (YYYY-MM-DD)
-  const groupedHistoryByDate = useMemo(() => {
-    const groups: Record<string, { iso: string; formattedDate: string; items: CrewDeliveryHistory[] }> = {};
-
-    filteredHistory.forEach(item => {
-      const iso = item.completionDate.substring(0, 10);
-      if (!groups[iso]) {
-        const d = new Date(item.completionDate);
-        const formattedDate = d.toLocaleDateString('id-ID', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
-        groups[iso] = { iso, formattedDate, items: [] };
-      }
-      groups[iso].items.push(item);
-    });
-
-    return Object.values(groups).sort((a, b) => b.iso.localeCompare(a.iso));
-  }, [filteredHistory]);
+  }, [history, selectedCrewId, selectedAreaFilter, areaQuickFilter, selectedMonth, selectedYear, searchQuery]);
 
   // Integrated Real-time Crew Area Stats from History Log
   const crewAreaStatsList = useMemo(() => {
-    const map: Record<string, { 
-      crewId: string; 
-      crewName: string; 
-      role: string; 
-      totalTrips: number; 
-      areas: Record<string, { areaName: string; tripCount: number; isExceeded: boolean }> 
-    }> = {};
+    const map: Record<
+      string,
+      {
+        crewId: string;
+        crewName: string;
+        role: string;
+        totalTrips: number;
+        exceededCount: number;
+        maxSingleAreaTrips: number;
+        areas: Record<string, { areaName: string; tripCount: number; isExceeded: boolean; lastDate: string }>;
+      }
+    > = {};
 
     filteredHistory.forEach(item => {
       const key = item.crewId || item.crewName;
@@ -238,35 +249,64 @@ export const CrewDeliveryHistoryView: React.FC = () => {
         map[key] = {
           crewId: item.crewId,
           crewName: item.crewName,
-          role: 'Driver Utama',
+          role: item.notes?.includes('Helper') ? 'Kru Helper' : 'Driver Utama',
           totalTrips: 0,
+          exceededCount: 0,
+          maxSingleAreaTrips: 0,
           areas: {}
         };
       }
       map[key].totalTrips += 1;
       const areaKey = item.area;
       if (!map[key].areas[areaKey]) {
-        map[key].areas[areaKey] = { areaName: areaKey, tripCount: 0, isExceeded: false };
+        map[key].areas[areaKey] = {
+          areaName: areaKey,
+          tripCount: 0,
+          isExceeded: false,
+          lastDate: item.completionDate
+        };
       }
       map[key].areas[areaKey].tripCount += 1;
+      if (item.completionDate > map[key].areas[areaKey].lastDate) {
+        map[key].areas[areaKey].lastDate = item.completionDate;
+      }
       map[key].areas[areaKey].isExceeded = map[key].areas[areaKey].tripCount >= threshold;
     });
 
-    return Object.values(map).sort((a, b) => b.totalTrips - a.totalTrips);
-  }, [filteredHistory, threshold]);
+    const list = Object.values(map).map(crew => {
+      const areasArr = Object.values(crew.areas);
+      const exceededCount = areasArr.filter(a => a.isExceeded).length;
+      const maxSingleAreaTrips = areasArr.reduce((acc, a) => Math.max(acc, a.tripCount), 0);
+      return {
+        ...crew,
+        exceededCount,
+        maxSingleAreaTrips
+      };
+    });
+
+    const filteredByToggle = onlyExceededFilter
+      ? list.filter(c => c.exceededCount > 0)
+      : list;
+
+    return filteredByToggle.sort((a, b) => b.totalTrips - a.totalTrips);
+  }, [filteredHistory, threshold, onlyExceededFilter]);
 
   // Integrated Real-time Fleet (Inisial Mobil) Area Stats from History Log
   const fleetAreaStatsList = useMemo(() => {
-    const map: Record<string, { 
-      initialCode: string; 
-      plateNumber: string; 
-      vehicleType: string; 
-      totalTrips: number; 
-      areas: Record<string, number> 
-    }> = {};
+    const map: Record<
+      string,
+      {
+        initialCode: string;
+        plateNumber: string;
+        vehicleType: string;
+        totalTrips: number;
+        areas: Record<string, number>;
+      }
+    > = {};
 
     filteredHistory.forEach(item => {
-      const initialCode = item.initialCode || (item.trackingNumber.match(/PO-AKK-\d+-([A-Za-z0-9]+)/)?.[1]) || 'DS3';
+      const initialCode =
+        item.initialCode || item.trackingNumber.match(/PO-AKK-\d+-([A-Za-z0-9]+)/)?.[1] || 'DS3';
       if (!map[initialCode]) {
         map[initialCode] = {
           initialCode,
@@ -283,302 +323,790 @@ export const CrewDeliveryHistoryView: React.FC = () => {
     return Object.values(map).sort((a, b) => b.totalTrips - a.totalTrips);
   }, [filteredHistory]);
 
+  // Global summary metrics for Widgets & Badges
+  const totalExceededAreasCount = useMemo(() => {
+    return crewAreaStatsList.reduce((sum, c) => sum + c.exceededCount, 0);
+  }, [crewAreaStatsList]);
+
+  const activeFiltersCount = useMemo(() => {
+    let c = 0;
+    if (selectedCrewId !== 'all') c++;
+    if (selectedMonth !== -1) c++;
+    if (searchQuery.trim()) c++;
+    if (areaQuickFilter.trim()) c++;
+    if (onlyExceededFilter) c++;
+    return c;
+  }, [selectedCrewId, selectedMonth, searchQuery, areaQuickFilter, onlyExceededFilter]);
+
+  const complianceRate = useMemo(() => {
+    const totalAreaPairs = crewAreaStatsList.reduce(
+      (sum, c) => sum + Object.keys(c.areas).length,
+      0
+    );
+    if (totalAreaPairs === 0) return 100;
+    return Math.max(
+      0,
+      Math.round(((totalAreaPairs - totalExceededAreasCount) / totalAreaPairs) * 100)
+    );
+  }, [crewAreaStatsList, totalExceededAreasCount]);
+
   return (
-    <div className="space-y-6">
-      {/* Header Banner */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-md relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-80 h-80 bg-blue-500/5 rounded-full blur-3xl pointer-events-none" />
+    <div className="space-y-4">
+      {/* Top Action & Widget Strip (3. WIDGETS + 9. BADGE + 10. PROGRESS BAR) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <UiWidget
+          kicker="Frekuensi Personel"
+          title="Kru & Supir Terdata"
+          icon={<Users className="w-4 h-4" />}
+          action={<UiBadge count={crewAreaStatsList.length} variant="blue" title="Jumlah kru aktif" />}
+        >
+          <UiProgressBar
+            value={complianceRate}
+            max={100}
+            label="Kepatuhan Rotasi Wilayah"
+            valueLabel={`${complianceRate}%`}
+            status={complianceRate >= 85 ? 'success' : complianceRate >= 65 ? 'warning' : 'danger'}
+          />
+        </UiWidget>
 
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 relative z-10">
-          <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/15 text-amber-300 text-xs font-black border border-amber-500/30 mb-2">
-              <History className="w-3.5 h-3.5" />
-              <span>SOP Rotasi Wilayah &amp; Fatigue Risk Management</span>
-            </div>
-            <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
-              Histori Pengiriman Kru &amp; Otorisasi Pengiriman Area Berulang
-            </h2>
-            <p className="text-slate-400 text-xs sm:text-sm mt-1 max-w-2xl leading-relaxed">
-              Melacak riwayat penugasan supir berdasarkan tanggal dan wilayah. Terintegrasi penuh dengan penugasan operasional spreadsheet &amp; kontrol rotasi stamina kru.
-            </p>
-          </div>
-
-          {/* Quick Actions & Configurable Threshold Selector */}
-          <div className="flex flex-wrap items-center gap-3">
+        <UiWidget
+          kicker="Kontrol Batas Rotasi"
+          title={`Batas Maksimal: ${threshold}x Kirim`}
+          icon={<AlertTriangle className="w-4 h-4 text-amber-400" />}
+          action={
+            <UiBadge
+              count={totalExceededAreasCount}
+              variant={totalExceededAreasCount > 0 ? 'red' : 'emerald'}
+              title="Jumlah area mencapai batas rotasi"
+            />
+          }
+        >
+          <div className="flex items-center justify-between gap-2 pt-1">
+            <span className="text-[11px] text-slate-400">
+              {totalExceededAreasCount > 0
+                ? `${totalExceededAreasCount} rute perlu otorisasi`
+                : 'Semua rute dalam batas aman'}
+            </span>
             <button
+              type="button"
+              onClick={() => setIsThresholdPopoverOpen(true)}
+              className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-semibold text-amber-300 transition cursor-pointer"
+            >
+              Atur Batas
+            </button>
+          </div>
+        </UiWidget>
+
+        <UiWidget
+          kicker="Utilisasi Unit"
+          title="Frekuensi Armada"
+          icon={<Truck className="w-4 h-4 text-emerald-400" />}
+          action={<UiBadge count={fleetAreaStatsList.length} variant="emerald" />}
+        >
+          <UiProgressBar
+            value={filteredHistory.length}
+            max={Math.max(filteredHistory.length, 30)}
+            label="Total Perjalanan"
+            valueLabel={`${filteredHistory.length} Trip`}
+            status="normal"
+          />
+        </UiWidget>
+
+        <UiWidget
+          kicker="Dokumen & Sinkronisasi"
+          title="Tindakan Cepat"
+          icon={<History className="w-4 h-4 text-indigo-400" />}
+        >
+          <div className="flex items-center gap-2 pt-0.5">
+            <button
+              type="button"
               onClick={() => setIsReportModalOpen(true)}
-              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold transition flex items-center gap-2 shadow-md cursor-pointer border border-emerald-500/30"
-              title="Cetak & Unduh Laporan PDF Kinerja Pengiriman Kru Berdasarkan Rentang Tanggal"
+              className="flex-1 px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold transition flex items-center justify-center gap-1.5 cursor-pointer"
             >
-              <FileDown className="w-4 h-4 text-emerald-200" />
-              <span>Cetak Laporan PDF Kinerja</span>
+              <FileDown className="w-3.5 h-3.5" />
+              <span>PDF Kinerja</span>
             </button>
-
             <button
+              type="button"
               onClick={handleManualSyncHistory}
-              className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition flex items-center gap-2 shadow-md cursor-pointer"
-              title="Sinkronkan ulang seluruh jadwal aktif dari sistem ke riwayat pengiriman"
+              className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-semibold transition flex items-center justify-center gap-1 cursor-pointer"
+              title="Sinkronkan ulang jadwal ke histori"
             >
-              <RotateCcw className="w-4 h-4" />
-              <span>Sinkronkan Ulang Riwayat</span>
-            </button>
-
-            <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 flex items-center gap-2.5">
-              <div className="flex items-center gap-1.5 text-xs text-slate-300 font-semibold">
-                <Sliders className="w-4 h-4 text-amber-400" />
-                <span>Batas Rotasi Area:</span>
-              </div>
-              <div className="flex items-center gap-1">
-                {[2, 3, 5].map(num => (
-                  <button
-                    key={num}
-                    onClick={() => handleThresholdChange(num)}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-black transition cursor-pointer ${
-                      threshold === num
-                        ? 'bg-amber-500 text-slate-950 shadow-xs'
-                        : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
-                    }`}
-                  >
-                    {num}x Kirim
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Primary Sub-Tabs Navigation */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mt-6 pt-5 border-t border-slate-800">
-          <div className="flex items-center gap-1.5 bg-slate-950 p-1.5 rounded-xl border border-slate-800 flex-wrap">
-            <button
-              onClick={() => setActiveSubTab('area_stats')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
-                activeSubTab === 'area_stats' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <MapPin className="w-4 h-4 text-indigo-300" />
-              <span>Frekuensi Kru per Area</span>
-            </button>
-
-            <button
-              onClick={() => setActiveSubTab('fleet_stats')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition cursor-pointer ${
-                activeSubTab === 'fleet_stats' ? 'bg-amber-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Truck className="w-4 h-4 text-amber-300" />
-              <span>Frekuensi Armada (Inisial Mobil)</span>
+              <RotateCcw className="w-3.5 h-3.5 text-blue-400" />
+              <span>Sync</span>
             </button>
           </div>
-
-          {/* Search and Period Controls */}
-          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-            <select
-              value={selectedMonth}
-              onChange={(e) => setSelectedMonth(Number(e.target.value))}
-              className="px-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-semibold text-slate-200"
-            >
-              <option value={-1}>Semua Bulan</option>
-              {Array.from({ length: 12 }).map((_, i) => (
-                <option key={'month-' + i} value={i}>{new Date(0, i).toLocaleString('id-ID', { month: 'long' })}</option>
-              ))}
-            </select>
-
-            <select
-              value={selectedYear}
-              onChange={(e) => setSelectedYear(Number(e.target.value))}
-              className="px-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-semibold text-slate-200"
-            >
-              {Array.from({ length: 5 }).map((_, i) => (
-                <option key={'year-' + i} value={2024 + i}>{2024 + i}</option>
-              ))}
-            </select>
-
-            <div className="relative flex-1 sm:w-56">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
-              <input
-                type="text"
-                placeholder="Cari supir, resi, inisial mobil, area..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-              />
-            </div>
-
-            <select
-              value={selectedCrewId}
-              onChange={(e) => setSelectedCrewId(e.target.value)}
-              className="px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-semibold text-slate-200 focus:outline-none"
-            >
-              <option value="all">Semua Pengemudi</option>
-              {crews.map(cr => (
-                <option key={cr.id} value={cr.id}>{cr.name} ({cr.role})</option>
-              ))}
-            </select>
-          </div>
-        </div>
+        </UiWidget>
       </div>
 
+      {/* Feedback Banner */}
       {feedbackMessage && (
-        <div className="p-3.5 rounded-xl bg-emerald-950/80 border border-emerald-600/50 text-emerald-200 text-xs flex items-center justify-between gap-2 shadow-md animate-in fade-in duration-200">
+        <div className="px-4 py-2.5 rounded-xl bg-emerald-950/90 border border-emerald-600/50 text-emerald-200 text-xs flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
             <span>{feedbackMessage}</span>
           </div>
-          <button onClick={() => setFeedbackMessage(null)} className="text-emerald-400 hover:text-white font-bold text-xs">
-            ✕
+          <button
+            type="button"
+            onClick={() => setFeedbackMessage(null)}
+            className="text-emerald-400 hover:text-white font-bold text-xs cursor-pointer"
+          >
+            &times;
           </button>
         </div>
       )}
 
+      {/* Main Workspace Split: 2. COLLAPSIBLE SIDEBAR + MAIN CONTENT VIEWPORT */}
+      <div className="flex flex-col lg:flex-row items-start gap-4">
+        {/* 2. SIDEBAR (Filter, Text Fields & Toggle Switches) */}
+        <UiCollapsibleSidebar
+          isOpen={isFilterSidebarOpen}
+          onToggle={() => setIsFilterSidebarOpen(prev => !prev)}
+          title="Filter & Konfigurasi"
+          badgeCount={activeFiltersCount}
+        >
+          {/* 6. TEXT FIELDS */}
+          <UiTextField
+            label="Pencarian Kru / Plat / Resi"
+            value={searchQuery}
+            onChange={setSearchQuery}
+            placeholder="Ketik nama supir, plat..."
+            icon={<Search className="w-3.5 h-3.5" />}
+          />
 
+          <UiTextField
+            label="Filter Nama Area Kirim"
+            value={areaQuickFilter}
+            onChange={setAreaQuickFilter}
+            placeholder="Contoh: Denpasar, Purwo..."
+            icon={<MapPin className="w-3.5 h-3.5" />}
+          />
 
-      {/* Sub-Tab 3: Frekuensi Kru per Area Terintegrasi dengan Log Pengiriman */}
-      {activeSubTab === 'area_stats' && (
-        <div className="space-y-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm text-xs text-slate-300 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <MapPin className="w-4 h-4 text-indigo-400" />
-              <span>
-                Statistik frekuensi pengiriman kru dihitung secara <strong>real-time dari log pengiriman aktif</strong>. Batas rotasi otomatis: <strong className="text-amber-400">{threshold}x pengiriman</strong> di area yang sama.
-              </span>
+          {/* Period & Driver Selectors */}
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <label className="block text-[11px] font-medium text-slate-400">Bulan</label>
+              <select
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(Number(e.target.value))}
+                className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+              >
+                <option value={-1}>Semua Bulan</option>
+                {Array.from({ length: 12 }).map((_, i) => (
+                  <option key={'month-' + i} value={i}>
+                    {new Date(0, i).toLocaleString('id-ID', { month: 'long' })}
+                  </option>
+                ))}
+              </select>
             </div>
-            <span className="font-mono text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2.5 py-1 rounded-lg">
-              {crewAreaStatsList.length} Kru Terdata
-            </span>
+
+            <div className="space-y-1">
+              <label className="block text-[11px] font-medium text-slate-400">Tahun</label>
+              <select
+                value={selectedYear}
+                onChange={(e) => setSelectedYear(Number(e.target.value))}
+                className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+              >
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <option key={'year-' + i} value={2024 + i}>
+                    {2024 + i}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {crewAreaStatsList.map(item => {
-              const areaItems = Object.values(item.areas);
+          <div className="space-y-1">
+            <label className="block text-[11px] font-medium text-slate-400">Pilih Personel Kru</label>
+            <select
+              value={selectedCrewId}
+              onChange={(e) => setSelectedCrewId(e.target.value)}
+              className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+            >
+              <option value="all">Semua Pengemudi ({crews.length})</option>
+              {crews.map(cr => (
+                <option key={cr.id} value={cr.id}>
+                  {cr.name}
+                </option>
+              ))}
+            </select>
+          </div>
 
-              return (
-                <div key={item.crewId || item.crewName} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
-                  <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-9 h-9 rounded-xl bg-blue-600/20 border border-blue-500/30 text-blue-400 font-black flex items-center justify-center text-xs">
-                        {item.crewName.substring(0, 2).toUpperCase()}
-                      </div>
-                      <div>
-                        <h4 className="font-extrabold text-white text-sm">{item.crewName}</h4>
-                        <span className="text-[11px] text-slate-400">{item.role}</span>
-                      </div>
-                    </div>
-                    <span className="text-xs font-black px-2.5 py-1 rounded-xl bg-slate-950 text-amber-400 border border-slate-800 font-mono">
-                      {item.totalTrips} Total Trip
-                    </span>
+          {/* 5. TOGGLE SWITCHES */}
+          <div className="pt-3 border-t border-slate-800 space-y-2.5">
+            <div className="text-[11px] font-semibold text-slate-400">Preferensi Tampilan &amp; Filter</div>
+
+            <UiToggleSwitch
+              checked={useAccordionLayout}
+              onChange={setUseAccordionLayout}
+              label="Mode Accordion Ringkas"
+              description="Susun bertumpuk tanpa perlu scroll panjang"
+            />
+
+            <UiToggleSwitch
+              checked={onlyExceededFilter}
+              onChange={setOnlyExceededFilter}
+              label="Hanya Melebihi Batas"
+              description={`Tampilkan kru dengan >= ${threshold}x kirim`}
+            />
+
+            <UiToggleSwitch
+              checked={autoSyncEnabled}
+              onChange={setAutoSyncEnabled}
+              label="Auto-Sync Jadwal"
+              description="Integrasi otomatis dari penugasan"
+            />
+          </div>
+
+          {activeFiltersCount > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedCrewId('all');
+                setSelectedMonth(0);
+                setSelectedAreaFilter('all');
+                setSearchQuery('');
+                setAreaQuickFilter('');
+                setOnlyExceededFilter(false);
+              }}
+              className="w-full py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition cursor-pointer"
+            >
+              Reset Filter ({activeFiltersCount})
+            </button>
+          )}
+        </UiCollapsibleSidebar>
+
+        {/* Right Main Content Area */}
+        <div className="flex-1 min-w-0 w-full space-y-3">
+          {/* Sub-Tab Bar & Layout Controls */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-lg border border-slate-800">
+              <button
+                type="button"
+                onClick={() => setActiveSubTab('area_stats')}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
+                  activeSubTab === 'area_stats'
+                    ? 'bg-blue-600 text-white'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <MapPin className="w-3.5 h-3.5" />
+                <span>Frekuensi Kru per Area</span>
+                <UiBadge
+                  count={crewAreaStatsList.length}
+                  variant={activeSubTab === 'area_stats' ? 'slate' : 'blue'}
+                />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveSubTab('fleet_stats')}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
+                  activeSubTab === 'fleet_stats'
+                    ? 'bg-amber-600 text-white'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Truck className="w-3.5 h-3.5" />
+                <span>Frekuensi Armada</span>
+                <UiBadge
+                  count={fleetAreaStatsList.length}
+                  variant={activeSubTab === 'fleet_stats' ? 'slate' : 'amber'}
+                />
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {useAccordionLayout && (
+                <div className="flex items-center gap-1.5 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next: Record<string, boolean> = {};
+                      if (activeSubTab === 'area_stats') {
+                        crewAreaStatsList.forEach(c => {
+                          next[c.crewId || c.crewName] = true;
+                        });
+                      } else {
+                        fleetAreaStatsList.forEach(f => {
+                          next[f.initialCode] = true;
+                        });
+                      }
+                      setExpandedIds(next);
+                    }}
+                    className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 hover:text-white text-[11px] font-medium transition cursor-pointer"
+                  >
+                    Buka Semua
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setExpandedIds({})}
+                    className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 hover:text-white text-[11px] font-medium transition cursor-pointer"
+                  >
+                    Tutup Semua
+                  </button>
+                </div>
+              )}
+
+              <div className="flex items-center bg-slate-950 p-1 rounded-lg border border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setUseAccordionLayout(true)}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold transition cursor-pointer ${
+                    useAccordionLayout ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="Tampilan Accordion Bertumpuk (Tanpa Scroll)"
+                >
+                  <ListFilter className="w-3.5 h-3.5" />
+                  <span>Accordion</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUseAccordionLayout(false)}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-semibold transition cursor-pointer ${
+                    !useAccordionLayout ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="Tampilan Kartu (Cards Grid)"
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                  <span>Cards</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* TAB 1: FREKUENSI KRU PER AREA */}
+          {activeSubTab === 'area_stats' && (
+            <>
+              {crewAreaStatsList.length === 0 ? (
+                <UiCard title="Tidak Ada Data Pengiriman Kru" subtitle="Sesuaikan filter atau sinkronkan jadwal">
+                  <div className="py-6 text-center space-y-3">
+                    <p className="text-slate-400 text-xs">
+                      Belum ada riwayat penugasan kru yang cocok dengan filter pencarian saat ini.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleManualSyncHistory}
+                      className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition cursor-pointer"
+                    >
+                      Sinkronkan Jadwal Aktif
+                    </button>
                   </div>
+                </UiCard>
+              ) : useAccordionLayout ? (
+                /* 8. ACCORDION VIEW: Neat stacked rows that expand/collapse on click */
+                <div className="space-y-2 max-h-[calc(100vh-270px)] overflow-y-auto pr-1 custom-scrollbar">
+                  {crewAreaStatsList.map(item => {
+                    const id = item.crewId || item.crewName;
+                    const isExpanded = !!expandedIds[id];
+                    const areaItems = Object.values(item.areas).sort((a, b) => b.tripCount - a.tripCount);
 
-                  <div className="space-y-2 text-xs">
-                    <span className="text-slate-400 text-[11px] font-bold uppercase tracking-wider block">
-                      Frekuensi per Area Kirim:
-                    </span>
-
-                    {areaItems.length > 0 ? (
-                      areaItems.map(st => (
-                        <div
-                          key={st.areaName}
-                          className={`p-3 rounded-xl border flex items-center justify-between ${
-                            st.isExceeded
-                              ? 'bg-amber-950/30 border-amber-500/50 text-amber-200'
-                              : 'bg-slate-950/60 border-slate-800 text-slate-300'
-                          }`}
-                        >
-                          <div>
-                            <div className="font-black text-white text-xs">{st.areaName}</div>
-                            <div className="text-[10px] text-slate-400 mt-0.5">
-                              {st.tripCount}x pengiriman ({st.isExceeded ? `⚠️ Mencapai Batas (${threshold}x)` : `Batas: ${threshold}x`})
+                    return (
+                      <UiAccordionItem
+                        key={id}
+                        id={id}
+                        isExpanded={isExpanded}
+                        onToggle={toggleAccordion}
+                        title={
+                          <div className="flex items-center gap-2">
+                            <span>{item.crewName}</span>
+                            <span className="text-slate-500">&middot;</span>
+                            <span className="text-slate-400 font-normal">{item.role}</span>
+                            {item.exceededCount > 0 && (
+                              <UiBadge
+                                count={`${item.exceededCount} Batas`}
+                                variant="amber"
+                                title="Mencapai batas rotasi wilayah"
+                              />
+                            )}
+                          </div>
+                        }
+                        subtitle={`${areaItems.length} Area Dikunjungi · Maks ${item.maxSingleAreaTrips}/${threshold}x di 1 area`}
+                        rightMeta={
+                          <div className="flex items-center gap-3">
+                            <div className="hidden sm:block w-28">
+                              <UiProgressBar
+                                value={item.maxSingleAreaTrips}
+                                max={threshold}
+                                status={
+                                  item.maxSingleAreaTrips >= threshold
+                                    ? 'warning'
+                                    : 'normal'
+                                }
+                              />
                             </div>
+                            <UiBadge
+                              count={`${item.totalTrips} Trip`}
+                              variant="blue"
+                            />
                           </div>
+                        }
+                      >
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5">
+                          {areaItems.map(st => (
+                            <div
+                              key={st.areaName}
+                              className="p-3 rounded-lg bg-slate-900 border border-slate-800 flex flex-col justify-between gap-2.5"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <div className="font-semibold text-white text-xs truncate">
+                                    {st.areaName}
+                                  </div>
+                                  <div className="text-[11px] text-slate-400 mt-0.5">
+                                    Terakhir: {new Date(st.lastDate).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                  </div>
+                                </div>
+                                <UiBadge
+                                  count={`${st.tripCount}x`}
+                                  variant={st.isExceeded ? 'amber' : 'slate'}
+                                />
+                              </div>
 
-                          <button
-                            onClick={() => handleOpenSimulateApproval(item.crewName, item.crewId, st.areaName, st.tripCount)}
-                            className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition cursor-pointer ${
-                              st.isExceeded
-                                ? 'bg-amber-500 text-slate-950 hover:bg-amber-400 shadow-xs'
-                                : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                            }`}
-                          >
-                            {st.isExceeded ? 'Otorisasi' : 'Detail'}
-                          </button>
+                              {/* 10. PROGRESS BAR inside each area */}
+                              <UiProgressBar
+                                value={st.tripCount}
+                                max={threshold}
+                                label={st.isExceeded ? 'Mencapai Batas Rotasi' : 'Kuota Area'}
+                                valueLabel={`${st.tripCount}/${threshold}x`}
+                                status={st.isExceeded ? 'warning' : 'emerald' as any}
+                              />
+
+                              <div className="flex items-center justify-end gap-1.5 pt-1">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleOpenInspectPopover(
+                                      item.crewName,
+                                      item.crewId,
+                                      st.areaName,
+                                      st.tripCount
+                                    )
+                                  }
+                                  className="px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-medium transition flex items-center gap-1 cursor-pointer"
+                                >
+                                  <Eye className="w-3 h-3 text-blue-400" />
+                                  <span>Popover</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleOpenSimulateApproval(
+                                      item.crewName,
+                                      item.crewId,
+                                      st.areaName,
+                                      st.tripCount
+                                    )
+                                  }
+                                  className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition cursor-pointer ${
+                                    st.isExceeded
+                                      ? 'bg-amber-500 hover:bg-amber-400 text-slate-950'
+                                      : 'bg-blue-600/20 hover:bg-blue-600/30 text-blue-300'
+                                  }`}
+                                >
+                                  {st.isExceeded ? 'Modal Otorisasi' : 'Detail Modal'}
+                                </button>
+                              </div>
+                            </div>
+                          ))}
                         </div>
-                      ))
-                    ) : (
-                      <div className="p-3 text-center text-slate-500 text-xs italic bg-slate-950/40 rounded-xl">
-                        Belum ada riwayat pengiriman.
-                      </div>
-                    )}
-                  </div>
+                      </UiAccordionItem>
+                    );
+                  })}
                 </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+              ) : (
+                /* 1. CARDS VIEW: Clean rectangular modules with compact scrollable body */
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 max-h-[calc(100vh-270px)] overflow-y-auto pr-1 custom-scrollbar">
+                  {crewAreaStatsList.map(item => {
+                    const areaItems = Object.values(item.areas).sort((a, b) => b.tripCount - a.tripCount);
 
-      {/* Sub-Tab 4: Frekuensi Armada (Inisial Mobil) per Area */}
-      {activeSubTab === 'fleet_stats' && (
-        <div className="space-y-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm text-xs text-slate-300 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Truck className="w-4 h-4 text-emerald-400" />
-              <span>
-                Rekapitulasi frekuensi penggunaan armada berdasarkan <strong>Inisial Mobil (DS1, DS3, NS2, NL1, N20, dll.)</strong> langsung dari log pengiriman.
+                    return (
+                      <UiCard
+                        key={item.crewId || item.crewName}
+                        compact
+                        title={item.crewName}
+                        subtitle={`${item.role} · ${areaItems.length} Area Kirim`}
+                        badge={
+                          item.exceededCount > 0 ? (
+                            <UiBadge count={`${item.exceededCount} Batas`} variant="amber" />
+                          ) : undefined
+                        }
+                        headerAction={<UiBadge count={`${item.totalTrips} Trip`} variant="blue" />}
+                        footer={
+                          <UiProgressBar
+                            value={item.maxSingleAreaTrips}
+                            max={threshold}
+                            label="Puncak Rotasi Area"
+                            valueLabel={`${item.maxSingleAreaTrips}/${threshold}x`}
+                            status={item.maxSingleAreaTrips >= threshold ? 'warning' : 'normal'}
+                          />
+                        }
+                      >
+                        <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1 custom-scrollbar">
+                          {areaItems.map(st => (
+                            <div
+                              key={st.areaName}
+                              className="p-2 rounded-lg bg-slate-950 border border-slate-800/90 flex items-center justify-between gap-2"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="font-semibold text-white text-xs truncate">
+                                  {st.areaName}
+                                </div>
+                                <div className="text-[10px] text-slate-400">
+                                  {st.tripCount}/{threshold}x pengiriman
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleOpenInspectPopover(
+                                      item.crewName,
+                                      item.crewId,
+                                      st.areaName,
+                                      st.tripCount
+                                    )
+                                  }
+                                  className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-medium cursor-pointer"
+                                  title="Buka Popover Ringkas"
+                                >
+                                  Info
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleOpenSimulateApproval(
+                                      item.crewName,
+                                      item.crewId,
+                                      st.areaName,
+                                      st.tripCount
+                                    )
+                                  }
+                                  className={`px-2 py-1 rounded text-[10px] font-semibold cursor-pointer ${
+                                    st.isExceeded
+                                      ? 'bg-amber-500 text-slate-950 hover:bg-amber-400'
+                                      : 'bg-blue-600 text-white hover:bg-blue-500'
+                                  }`}
+                                >
+                                  {st.isExceeded ? 'Otorisasi' : 'Modal'}
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </UiCard>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* TAB 2: FREKUENSI ARMADA */}
+          {activeSubTab === 'fleet_stats' && (
+            <>
+              {useAccordionLayout ? (
+                <div className="space-y-2 max-h-[calc(100vh-270px)] overflow-y-auto pr-1 custom-scrollbar">
+                  {fleetAreaStatsList.map(fl => {
+                    const isExpanded = !!expandedIds[fl.initialCode];
+                    const areaEntries = Object.entries(fl.areas).sort((a, b) => b[1] - a[1]);
+
+                    return (
+                      <UiAccordionItem
+                        key={fl.initialCode}
+                        id={fl.initialCode}
+                        isExpanded={isExpanded}
+                        onToggle={toggleAccordion}
+                        title={`Armada ${fl.initialCode} · ${fl.plateNumber}`}
+                        subtitle={`${fl.vehicleType} · ${areaEntries.length} Rute Distribusi`}
+                        rightMeta={<UiBadge count={`${fl.totalTrips} Trip`} variant="emerald" />}
+                      >
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5">
+                          {areaEntries.map(([areaName, count]) => (
+                            <div
+                              key={areaName}
+                              className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1.5"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-semibold text-white text-xs truncate">
+                                  {areaName}
+                                </span>
+                                <UiBadge count={`${count} Trip`} variant="emerald" />
+                              </div>
+                              <UiProgressBar
+                                value={count}
+                                max={fl.totalTrips}
+                                label="Porsi Rute Armada"
+                                valueLabel={`${Math.round((count / Math.max(1, fl.totalTrips)) * 100)}%`}
+                                status="success"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </UiAccordionItem>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 max-h-[calc(100vh-270px)] overflow-y-auto pr-1 custom-scrollbar">
+                  {fleetAreaStatsList.map(fl => {
+                    const areaEntries = Object.entries(fl.areas).sort((a, b) => b[1] - a[1]);
+
+                    return (
+                      <UiCard
+                        key={fl.initialCode}
+                        compact
+                        title={`Armada ${fl.initialCode}`}
+                        subtitle={`${fl.plateNumber} · ${fl.vehicleType}`}
+                        headerAction={<UiBadge count={`${fl.totalTrips} Trip`} variant="emerald" />}
+                      >
+                        <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1 custom-scrollbar">
+                          {areaEntries.map(([areaName, count]) => (
+                            <div
+                              key={areaName}
+                              className="p-2 rounded-lg bg-slate-950 border border-slate-800 space-y-1"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-semibold text-white text-xs truncate">
+                                  {areaName}
+                                </span>
+                                <span className="font-mono tabular-nums text-[11px] font-bold text-emerald-400">
+                                  {count} Trip
+                                </span>
+                              </div>
+                              <UiProgressBar
+                                value={count}
+                                max={fl.totalTrips}
+                                status="success"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </UiCard>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* 4. POPOVER: Quick Inspection of Area Trips (Blocks scroll, closes on outside click) */}
+      <UiPopover
+        isOpen={!!popoverData?.isOpen}
+        onClose={() => setPopoverData(null)}
+        title={popoverData?.title || 'Detail Frekuensi Rute'}
+        subtitle={popoverData?.subtitle}
+        footer={
+          popoverData ? (
+            <div className="flex items-center justify-between w-full">
+              <span className="text-[11px] text-slate-400">
+                Klik di luar jendela untuk menutup
               </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPopoverData(null)}
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold cursor-pointer"
+                >
+                  Tutup
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const d = popoverData;
+                    setPopoverData(null);
+                    if (d && d.crewName && d.crewId) {
+                      handleOpenSimulateApproval(d.crewName, d.crewId, d.areaName, d.tripCount);
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold cursor-pointer"
+                >
+                  Buka Modal Otorisasi
+                </button>
+              </div>
             </div>
-            <span className="font-mono text-xs text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-1 rounded-lg">
-              {fleetAreaStatsList.length} Armada Aktif
-            </span>
-          </div>
+          ) : undefined
+        }
+      >
+        {popoverData && (
+          <div className="space-y-3">
+            <UiProgressBar
+              value={popoverData.tripCount}
+              max={popoverData.maxLimit}
+              label="Progres Batas Rotasi Wilayah"
+              valueLabel={`${popoverData.tripCount} / ${popoverData.maxLimit} Kirim`}
+              status={popoverData.tripCount >= popoverData.maxLimit ? 'warning' : 'normal'}
+              size="md"
+            />
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {fleetAreaStatsList.map(fl => {
-              const areaEntries = Object.entries(fl.areas).sort((a, b) => b[1] - a[1]);
-
-              return (
-                <div key={fl.initialCode} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
-                  <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-300 font-mono font-black flex items-center justify-center text-sm shadow-xs">
-                        {fl.initialCode}
-                      </div>
-                      <div>
-                        <h4 className="font-black text-white text-sm">Armada {fl.initialCode}</h4>
-                        <span className="text-[11px] font-mono text-slate-400">{fl.plateNumber} &bull; {fl.vehicleType}</span>
-                      </div>
-                    </div>
-                    <span className="text-xs font-black px-2.5 py-1 rounded-xl bg-slate-950 text-emerald-400 border border-slate-800 font-mono">
-                      {fl.totalTrips} Total Trip
-                    </span>
-                  </div>
-
-                  <div className="space-y-2 text-xs">
-                    <span className="text-slate-400 text-[11px] font-bold uppercase tracking-wider block">
-                      Sebaran Rute / Area Pengiriman:
-                    </span>
-
-                    <div className="space-y-1.5">
-                      {areaEntries.map(([areaName, count]) => (
-                        <div key={areaName} className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800 flex items-center justify-between">
-                          <div className="font-bold text-white text-xs flex items-center gap-1.5">
-                            <MapPin className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                            <span>{areaName}</span>
-                          </div>
-                          <span className="px-2 py-0.5 rounded-md font-mono font-black text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 text-xs">
-                            {count} Trip
-                          </span>
-                        </div>
-                      ))}
+            <div className="space-y-1.5">
+              <div className="text-[11px] font-semibold text-slate-400">
+                Riwayat Tanggal &amp; Armada:
+              </div>
+              {popoverData.trips.map((t, idx) => (
+                <div
+                  key={t.id || idx}
+                  className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-between gap-2"
+                >
+                  <div>
+                    <div className="font-semibold text-white text-xs">{t.trackingNumber}</div>
+                    <div className="text-[11px] text-slate-400">
+                      {new Date(t.completionDate).toLocaleDateString('id-ID', {
+                        weekday: 'short',
+                        day: '2-digit',
+                        month: 'short',
+                        year: 'numeric'
+                      })}{' '}
+                      &middot; {t.vehiclePlate}
                     </div>
                   </div>
+                  <UiBadge count={`Trip #${idx + 1}`} variant="slate" />
                 </div>
-              );
-            })}
+              ))}
+            </div>
+          </div>
+        )}
+      </UiPopover>
+
+      {/* 4. POPOVER: Rotation Threshold Settings */}
+      <UiPopover
+        isOpen={isThresholdPopoverOpen}
+        onClose={() => setIsThresholdPopoverOpen(false)}
+        title="Konfigurasi Batas Rotasi Wilayah"
+        subtitle="Pilih batas maksimal pengiriman berulang pada area yang sama"
+      >
+        <div className="space-y-3">
+          <p className="text-xs text-slate-400">
+            Jika seorang pengemudi mencapai batas pengiriman di area yang sama, sistem akan memberikan indikator peringatan rotasi stamina.
+          </p>
+          <div className="grid grid-cols-3 gap-2">
+            {[2, 3, 5].map(num => (
+              <button
+                key={num}
+                type="button"
+                onClick={() => {
+                  handleThresholdChange(num);
+                  setIsThresholdPopoverOpen(false);
+                }}
+                className={`py-2.5 px-3 rounded-lg text-xs font-bold border transition cursor-pointer ${
+                  threshold === num
+                    ? 'bg-amber-500 text-slate-950 border-amber-400'
+                    : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                }`}
+              >
+                <div className="flex items-center justify-center gap-1.5">
+                  <Sliders className="w-3.5 h-3.5" />
+                  <span>{num}x Kirim</span>
+                </div>
+              </button>
+            ))}
           </div>
         </div>
-      )}
+      </UiPopover>
 
-      {/* Reusable Area Approval Pop-Up Modal */}
+      {/* 7. MODAL: Reusable Area Approval Pop-Up Modal */}
       <AreaApprovalModal
         isOpen={modalData.isOpen}
         onClose={() => setModalData(prev => ({ ...prev, isOpen: false }))}
@@ -596,6 +1124,16 @@ export const CrewDeliveryHistoryView: React.FC = () => {
           setFeedbackMessage(`Pengiriman ke ${modalData.areaName} dialihkan untuk rotasi supir baru.`);
           setTimeout(() => setFeedbackMessage(null), 3500);
         }}
+      />
+
+      {/* 7. MODAL: PDF Performance Report Download Modal */}
+      <CrewReportDownloadModal
+        isOpen={isReportModalOpen}
+        onClose={() => setIsReportModalOpen(false)}
+        allHistory={history}
+        crews={crews}
+        fleets={fleets}
+        currentThreshold={threshold}
       />
     </div>
   );

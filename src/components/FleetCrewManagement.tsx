@@ -621,144 +621,130 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
   });
 
   return (
-    <div className="space-y-6">
-      {/* Header & Tabs */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 sm:p-6 shadow-sm">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-blue-500/10 text-blue-400 text-xs font-semibold mb-2">
+    <div className="space-y-4">
+      {/* Compact Header & Sub-Tabs Toolbar */}
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xs">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
+              <span className="font-semibold text-blue-400">Logistik AKK</span>
+              <span>&middot;</span>
+              <span>{!isCrewsMode ? 'Manajemen Armada Terpadu' : 'Manajemen Personel & Rotasi Kru'}</span>
+            </div>
+            <h2 className="text-base sm:text-lg font-bold text-white tracking-tight truncate">
+              {!isCrewsMode
+                ? 'Data Armada Terpadu (Spesifikasi, BBM, Sparepart & Ritase)'
+                : 'Kru Pengiriman & Audit Rotasi Wilayah'}
+            </h2>
+          </div>
+
+          {/* Sub-Tabs & Primary CTA */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
               {!isCrewsMode ? (
                 <>
-                  <Truck className="w-3.5 h-3.5 text-blue-400" />
-                  <span>Logistik AKK &bull; Data Armada Terpadu</span>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('fleets')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
+                      activeTab === 'fleets'
+                        ? 'bg-blue-600 text-white'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Truck className="w-3.5 h-3.5" />
+                    <span>Unit ({fleets.length})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('fuel')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
+                      activeTab === 'fuel'
+                        ? 'bg-amber-600 text-white'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Fuel className="w-3.5 h-3.5" />
+                    <span>BBM</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('spareparts')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
+                      activeTab === 'spareparts'
+                        ? 'bg-amber-600 text-white'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Wrench className="w-3.5 h-3.5" />
+                    <span>Sparepart</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('forms')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
+                      activeTab === 'forms'
+                        ? 'bg-blue-600 text-white'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>Formulir</span>
+                  </button>
                 </>
               ) : (
                 <>
-                  <Users className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="text-emerald-400">Logistik AKK &bull; Kru Pengiriman</span>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('crews')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
+                      activeTab === 'crews'
+                        ? 'bg-emerald-600 text-white'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Users className="w-3.5 h-3.5" />
+                    <span>Daftar Kru ({crews.length})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('history')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
+                      activeTab === 'history'
+                        ? 'bg-blue-600 text-white'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <History className="w-3.5 h-3.5" />
+                    <span>History Kirim &amp; SLA</span>
+                  </button>
                 </>
               )}
             </div>
-            <h2 className="text-xl font-bold text-white tracking-tight">
-              {!isCrewsMode
-                ? 'Data Armada Terpadu (Spesifikasi, BBM, Sparepart & Ritase)'
-                : 'Kru Pengiriman (Data Personil & Riwayat Kirim)'}
-            </h2>
-            <p className="text-slate-400 text-sm mt-1 max-w-2xl">
-              {!isCrewsMode
-                ? 'Integrasi unit kendaraan logistik dengan efisiensi BBM, stok sparepart, formulir operasional armada, akumulasi frekuensi kirim, dan cakupan total area pengiriman.'
-                : 'Pusat data supir & kernet bersertifikasi, jadwal penugasan ritase harian, serta audit history pengiriman dan rotasi wilayah.'}
-            </p>
-          </div>
 
-          <div className="flex items-center gap-2">
             {!isCrewsMode ? (
               <button
                 onClick={() => setIsAddFleetOpen(true)}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow transition cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition cursor-pointer"
               >
-                <Plus className="w-4 h-4" />
-                <span>Registrasi Armada Truk</span>
+                <Plus className="w-3.5 h-3.5" />
+                <span>Tambah Armada</span>
               </button>
             ) : (
               <button
                 onClick={() => setIsAddCrewOpen(true)}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow transition cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition cursor-pointer"
               >
-                <Plus className="w-4 h-4" />
-                <span>Tambah Kru / Pengemudi</span>
+                <Plus className="w-3.5 h-3.5" />
+                <span>Tambah Kru</span>
               </button>
             )}
           </div>
         </div>
 
-        {/* Sub-Tabs: Clean and specific to Armada or Kru (No redundant cross-toggle) */}
-        <div className="flex flex-wrap items-center gap-2 mt-5 pt-5 border-t border-slate-800">
-          {!isCrewsMode ? (
-            <>
-              <button
-                type="button"
-                onClick={() => setActiveTab('fleets')}
-                className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                  activeTab === 'fleets'
-                    ? 'bg-blue-600 text-white shadow'
-                    : 'bg-slate-950/60 text-slate-400 hover:text-white border border-slate-800'
-                }`}
-              >
-                <Truck className="w-4 h-4" />
-                <span>Semua Unit &amp; Spek ({fleets.length})</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('fuel')}
-                className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                  activeTab === 'fuel'
-                    ? 'bg-amber-600 text-white shadow'
-                    : 'bg-slate-950/60 text-slate-400 hover:text-white border border-slate-800'
-                }`}
-              >
-                <Fuel className="w-4 h-4 text-amber-400" />
-                <span>Efisiensi BBM</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('spareparts')}
-                className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                  activeTab === 'spareparts'
-                    ? 'bg-amber-600 text-white shadow'
-                    : 'bg-slate-950/60 text-slate-400 hover:text-white border border-slate-800'
-                }`}
-              >
-                <Wrench className="w-4 h-4 text-amber-400" />
-                <span>Spare Part &amp; Servis</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('forms')}
-                className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                  activeTab === 'forms'
-                    ? 'bg-blue-600 text-white shadow'
-                    : 'bg-slate-950/60 text-slate-400 hover:text-white border border-slate-800'
-                }`}
-              >
-                <FileText className="w-4 h-4 text-blue-400" />
-                <span>Formulir Armada</span>
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                type="button"
-                onClick={() => setActiveTab('crews')}
-                className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                  activeTab === 'crews'
-                    ? 'bg-emerald-600 text-white shadow'
-                    : 'bg-slate-950/60 text-slate-400 hover:text-white border border-slate-800'
-                }`}
-              >
-                <Users className="w-4 h-4" />
-                <span>Daftar Kru ({crews.length})</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('history')}
-                className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                  activeTab === 'history'
-                    ? 'bg-emerald-600 text-white shadow'
-                    : 'bg-slate-950/60 text-slate-400 hover:text-white border border-slate-800'
-                }`}
-              >
-                <History className="w-4 h-4 text-emerald-300" />
-                <span>History Kirim &amp; SLA</span>
-              </button>
-            </>
-          )}
-        </div>
-
-        {/* Filter, Search & View Switcher */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mt-4 pt-4 border-t border-slate-800/60">
-
-          {(activeTab === 'fleets' || activeTab === 'crews') && (
+        {/* Filter, Search & View Switcher (Only shown on fleets or crews list tab) */}
+        {(activeTab === 'fleets' || activeTab === 'crews') && (
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mt-3 pt-3 border-t border-slate-800/80">
             <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
               <div className="relative flex-1 sm:w-56">
                 <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
@@ -892,8 +878,8 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                 <span className="hidden sm:inline">{isSyncingSupabase ? 'Sinkron...' : 'Sync Supabase'}</span>
               </button>
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {/* Supabase Sync Feedback Banner */}
