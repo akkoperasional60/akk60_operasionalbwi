@@ -29,9 +29,11 @@ import {
   HelpCircle,
   FileText,
   AlertOctagon,
-  ArrowRight
+  ArrowRight,
+  WifiOff,
+  Wifi
 } from 'lucide-react';
-import { driverReportService, DriverHelperReport } from '../services/driverReportService';
+import { driverReportService, DriverHelperReport, getLocalDateStr } from '../services/driverReportService';
 import { useToast } from '../context/ToastContext';
 import { logisticsStore } from '../services/store';
 import { FleetChecklistReportView } from './FleetChecklistReportView';
@@ -57,21 +59,40 @@ export const DriverReportsManagement: React.FC = () => {
     );
   }, [currentUser]);
 
-  // Sub-menu switcher: Laporan Kendala Lapangan vs Laporan Checklist Armada
-  const [activeSubMenu, setActiveSubMenu] = useState<'operasional' | 'checklist_armada'>('operasional');
+  // Sub-menu switcher: Laporan Kendala Lapangan vs Laporan Checklist Armada vs Laporan Peringatan Mode Offline
+  const [activeSubMenu, setActiveSubMenu] = useState<'operasional' | 'checklist_armada' | 'peringatan_offline'>('operasional');
+  const [offlineStatusFilter, setOfflineStatusFilter] = useState<'all' | 'masih_offline' | 'sudah_online'>('all');
+  const [offlineSearchQuery, setOfflineSearchQuery] = useState<string>('');
 
   const [reports, setReports] = useState<DriverHelperReport[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState<'all' | 'kendala_jalan' | 'akhir_kiriman' | 'istirahat' | 'presensi_shift' | 'pin_keamanan' | 'update_lokasi'>('all');
+  const [categoryFilter, setCategoryFilter] = useState<'all' | 'kendala_jalan' | 'akhir_kiriman' | 'istirahat' | 'presensi_shift' | 'pin_keamanan' | 'update_lokasi' | 'mode_offline'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'verified' | 'follow_up' | 'resolved'>('all');
   const [selectedPhotoModal, setSelectedPhotoModal] = useState<DriverHelperReport | null>(null);
   const [revealedPinIds, setRevealedPinIds] = useState<Record<string, boolean>>({});
 
-  // Calendar Date Filter State: Pertanggal, Minggu Ini, Bulan Ini, atau Semua
+  // Calendar Date Filter State: Fokus Pertanggal saat diklik
   const [dateFilterMode, setDateFilterMode] = useState<DateFilterMode>('single_date');
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<string>(() => {
-    return new Date().toISOString().slice(0, 10);
+    return getLocalDateStr();
   });
+  const [calendarMonth, setCalendarMonth] = useState<number>(() => new Date().getMonth());
+  const [calendarYear, setCalendarYear] = useState<number>(() => new Date().getFullYear());
+
+  const CALENDAR_MONTH_NAMES = [
+    'Januari',
+    'Februari',
+    'Maret',
+    'April',
+    'Mei',
+    'Juni',
+    'Juli',
+    'Agustus',
+    'September',
+    'Oktober',
+    'November',
+    'Desember'
+  ];
 
   // Rentang Minggu Ini (Senin s/d Minggu kalender berjalan)
   const currentWeekRange = useMemo(() => {
@@ -82,8 +103,8 @@ export const DriverReportsManagement: React.FC = () => {
     const sunday = new Date(monday);
     sunday.setDate(monday.getDate() + 6);
 
-    const startIso = monday.toISOString().slice(0, 10);
-    const endIso = sunday.toISOString().slice(0, 10);
+    const startIso = getLocalDateStr(monday);
+    const endIso = getLocalDateStr(sunday);
     const startStr = monday.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
     const endStr = sunday.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
 
@@ -94,27 +115,26 @@ export const DriverReportsManagement: React.FC = () => {
     };
   }, []);
 
-  // Rentang Bulan Ini (Awal s/d Akhir bulan kalender berjalan)
+  // Rentang Bulan Terpilih pada Kalender (Awal s/d Akhir bulan terpilih)
   const currentMonthRange = useMemo(() => {
-    const today = new Date();
-    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
-    const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+    const firstDay = new Date(calendarYear, calendarMonth, 1);
+    const lastDay = new Date(calendarYear, calendarMonth + 1, 0);
 
-    const startIso = firstDay.toISOString().slice(0, 10);
-    const endIso = lastDay.toISOString().slice(0, 10);
-    const monthName = today.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+    const startIso = getLocalDateStr(firstDay);
+    const endIso = getLocalDateStr(lastDay);
+    const monthName = `${CALENDAR_MONTH_NAMES[calendarMonth]} ${calendarYear}`;
 
     return {
       startIso,
       endIso,
       monthName
     };
-  }, []);
+  }, [calendarMonth, calendarYear]);
 
   // SPV Solution Modal State
   const [solutionModalReport, setSolutionModalReport] = useState<DriverHelperReport | null>(null);
   const [solutionText, setSolutionText] = useState<string>('');
-  const [solutionStatus, setSolutionStatus] = useState<'follow_up' | 'verified' | 'resolved'>('follow_up');
+  const [solutionStatus, setSolutionStatus] = useState<'follow_up' | 'verified' | 'resolved'>('resolved');
 
   // Notifikasi Perubahan Jadwal (Hanya muncul di Laporan Kiriman Kru)
   const [scheduleChangeNotifs, setScheduleChangeNotifs] = useState<
@@ -166,20 +186,89 @@ export const DriverReportsManagement: React.FC = () => {
     };
   }, []);
 
-  // Map of reports count per calendar date
+  // Map of reports count & solution status per calendar date
   const reportsByDateMap = useMemo(() => {
-    const map = new Map<string, { total: number; kendala: number }>();
+    const map = new Map<
+      string,
+      {
+        total: number;
+        kendala: number;
+        needsActionCount: number;
+        sentToPortalCount: number;
+        otherReportsCount: number;
+      }
+    >();
     reports.forEach(r => {
-      const d = r.date || (r.timestamp ? r.timestamp.slice(0, 10) : '');
+      const d = r.date || (r.timestamp ? getLocalDateStr(new Date(r.timestamp)) : '');
       if (d) {
-        const curr = map.get(d) || { total: 0, kendala: 0 };
+        const curr = map.get(d) || {
+          total: 0,
+          kendala: 0,
+          needsActionCount: 0,
+          sentToPortalCount: 0,
+          otherReportsCount: 0
+        };
         curr.total += 1;
-        if (r.category === 'kendala_jalan') curr.kendala += 1;
+        const hasSolution = Boolean(r.solution && r.solution.trim());
+        if (r.category === 'kendala_jalan' || r.category === 'mode_offline') {
+          curr.kendala += 1;
+          if (hasSolution || r.offlineStatus === 'sudah_online') {
+            curr.sentToPortalCount += 1;
+          } else {
+            curr.needsActionCount += 1;
+          }
+        } else {
+          curr.otherReportsCount += 1;
+          if (hasSolution) {
+            curr.sentToPortalCount += 1;
+          }
+        }
         map.set(d, curr);
       }
     });
     return map;
   }, [reports]);
+
+  // Daftar laporan siapa saja yang mengaktifkan Mode Offline
+  const offlineModeReports = useMemo(() => {
+    return reports.filter(r => r.category === 'mode_offline');
+  }, [reports]);
+
+  const activeOfflineCrewReports = useMemo(() => {
+    return offlineModeReports.filter(r => r.offlineStatus === 'masih_offline');
+  }, [offlineModeReports]);
+
+  const handleForceOnlineCrew = (rep: DriverHelperReport) => {
+    const spvName = currentUser.fullName
+      ? `${currentUser.fullName} (${currentUser.role === 'super_admin' ? 'Super Admin' : 'SPV Logistik'})`
+      : 'SPV Logistik DC PT AKK';
+    driverReportService.markOfflineModeRestored({
+      reportId: rep.id,
+      driverId: rep.driverId,
+      driverName: rep.driverName,
+      restoredBy: spvName
+    });
+    loadReports();
+    addNotification(
+      'schedule',
+      '✓ Kru Berhasil Di-Online-kan Kembali',
+      `Perangkat ${rep.driverName} (${rep.plateNumber}) telah di-online-kan kembali dan status peringatan berubah hijau.`
+    );
+  };
+
+  const handleSendOfflineWarningToPortal = (rep: DriverHelperReport) => {
+    const spvName = currentUser.fullName
+      ? `${currentUser.fullName} (${currentUser.role === 'super_admin' ? 'Super Admin' : 'SPV Logistik'})`
+      : 'SPV Logistik DC PT AKK';
+    const warningMsg = `PERINGATAN TIM PENGIRIMAN: Harap segera matikan Mode Offline dan onlinekan kembali perangkat Anda (${rep.plateNumber}) sekarang agar posisi GPS serta status kiriman area ${rep.areaName} terpantau real-time!`;
+    driverReportService.updateReportSolution(rep.id, warningMsg, spvName, 'follow_up');
+    loadReports();
+    addNotification(
+      'sla_warning',
+      'Peringatan Segera Online Terkirim',
+      `Peringatan wajib online telah dikirim langsung ke Portal Driver (${rep.driverName}).`
+    );
+  };
 
   // Statistik Cepat Berdasarkan Rentang Waktu
   const timeRangeStats = useMemo(() => {
@@ -189,7 +278,7 @@ export const DriverReportsManagement: React.FC = () => {
     let monthKendala = 0;
 
     reports.forEach(r => {
-      const d = r.date || (r.timestamp ? r.timestamp.slice(0, 10) : '');
+      const d = r.date || (r.timestamp ? getLocalDateStr(new Date(r.timestamp)) : '');
       if (d) {
         if (d >= currentWeekRange.startIso && d <= currentWeekRange.endIso) {
           weekTotal++;
@@ -210,34 +299,75 @@ export const DriverReportsManagement: React.FC = () => {
     };
   }, [reports, currentWeekRange, currentMonthRange]);
 
-  // Calendar Day Pills (7 days: from 5 days ago to tomorrow)
-  const calendarDays = useMemo(() => {
-    const days = [];
-    const today = new Date();
-    for (let i = -5; i <= 1; i++) {
-      const target = new Date(today);
-      target.setDate(today.getDate() + i);
-      const iso = target.toISOString().slice(0, 10);
-      const dayName = target.toLocaleDateString('id-ID', { weekday: 'short' });
-      const dayNum = target.getDate();
-      const monthName = target.toLocaleDateString('id-ID', { month: 'short' });
-      const stats = reportsByDateMap.get(iso) || { total: 0, kendala: 0 };
-      days.push({
+  // 7-Column Monthly Calendar Grid (MINGGU s/d SABTU) seperti pada Jadwal & Penugasan
+  const monthlyCalendarGrid = useMemo(() => {
+    const todayIso = getLocalDateStr();
+    const firstDayOfMonth = new Date(calendarYear, calendarMonth, 1);
+    const startDayOfWeek = firstDayOfMonth.getDay(); // 0 = Minggu, 6 = Sabtu
+    const daysInMonth = new Date(calendarYear, calendarMonth + 1, 0).getDate();
+
+    type CalendarCell =
+      | { type: 'padding'; key: string }
+      | {
+          type: 'day';
+          key: string;
+          dayNumber: number;
+          iso: string;
+          isToday: boolean;
+          totalReports: number;
+          kendalaCount: number;
+          needsActionCount: number;
+          sentToPortalCount: number;
+          otherReportsCount: number;
+        };
+
+    const cells: CalendarCell[] = [];
+
+    for (let i = 0; i < startDayOfWeek; i++) {
+      cells.push({ type: 'padding', key: `pad-start-${i}` });
+    }
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const iso = `${calendarYear}-${String(calendarMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const stats = reportsByDateMap.get(iso) || {
+        total: 0,
+        kendala: 0,
+        needsActionCount: 0,
+        sentToPortalCount: 0,
+        otherReportsCount: 0
+      };
+      cells.push({
+        type: 'day',
+        key: `day-${iso}`,
+        dayNumber: day,
         iso,
-        dayName,
-        dayNum,
-        monthName,
-        isToday: i === 0,
+        isToday: iso === todayIso,
         totalReports: stats.total,
-        kendalaCount: stats.kendala
+        kendalaCount: stats.kendala,
+        needsActionCount: stats.needsActionCount,
+        sentToPortalCount: stats.sentToPortalCount,
+        otherReportsCount: stats.otherReportsCount
       });
     }
-    return days;
-  }, [reportsByDateMap]);
+
+    const remainder = cells.length % 7;
+    if (remainder !== 0) {
+      const endPad = 7 - remainder;
+      for (let i = 0; i < endPad; i++) {
+        cells.push({ type: 'padding', key: `pad-end-${i}` });
+      }
+    }
+
+    return {
+      monthName: CALENDAR_MONTH_NAMES[calendarMonth] || 'Oktober',
+      year: calendarYear,
+      cells
+    };
+  }, [calendarMonth, calendarYear, reportsByDateMap]);
 
   // Filtered reports berdasarkan DateFilterMode
   const filteredReports = reports.filter((rep) => {
-    const rDate = rep.date || (rep.timestamp ? rep.timestamp.slice(0, 10) : '');
+    const rDate = rep.date || (rep.timestamp ? getLocalDateStr(new Date(rep.timestamp)) : '');
 
     if (dateFilterMode === 'single_date') {
       if (selectedCalendarDate && rDate !== selectedCalendarDate) return false;
@@ -293,7 +423,7 @@ export const DriverReportsManagement: React.FC = () => {
     }
     setSolutionModalReport(report);
     setSolutionText(report.solution || '');
-    setSolutionStatus((report.status as any) || 'follow_up');
+    setSolutionStatus(report.status === 'verified' ? 'verified' : 'resolved');
   };
 
   const handleSaveSolution = () => {
@@ -330,6 +460,8 @@ export const DriverReportsManagement: React.FC = () => {
       new Date(r.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }),
       r.category === 'kendala_jalan'
         ? 'Kendala Jalan'
+        : r.category === 'mode_offline'
+        ? `Peringatan Mode Offline (${r.offlineStatus === 'sudah_online' ? 'Sudah Online' : 'Masih Offline'})`
         : r.category === 'akhir_kiriman'
         ? 'Akhir Kiriman'
         : r.category === 'presensi_shift'
@@ -362,52 +494,94 @@ export const DriverReportsManagement: React.FC = () => {
     addNotification('schedule', 'Export Selesai', 'Data laporan kiriman berhasil diekspor ke file CSV.');
   };
 
+  const filteredOfflineReports = useMemo(() => {
+    return offlineModeReports.filter(rep => {
+      if (offlineStatusFilter !== 'all' && rep.offlineStatus !== offlineStatusFilter) return false;
+      if (offlineSearchQuery.trim()) {
+        const q = offlineSearchQuery.toLowerCase();
+        const matchDriver = rep.driverName.toLowerCase().includes(q);
+        const matchPlate = rep.plateNumber.toLowerCase().includes(q);
+        const matchArea = rep.areaName.toLowerCase().includes(q);
+        const matchHelper = (rep.helperName || '').toLowerCase().includes(q);
+        return matchDriver || matchPlate || matchArea || matchHelper;
+      }
+      return true;
+    });
+  }, [offlineModeReports, offlineStatusFilter, offlineSearchQuery]);
+
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-200">
       
-      {/* 🌟 SUB-MENU SELECTOR: Laporan & Kendala Lapangan vs Laporan Checklist Armada */}
-      <div className="flex items-center justify-between bg-slate-900 border border-slate-800 p-2 rounded-2xl shadow-sm">
-        <div className="flex items-center gap-2">
+      {/* 🌟 SUB-MENU SELECTOR: Laporan & Kendala Lapangan | Laporan Checklist Armada | Laporan Peringatan Mode Offline */}
+      <div className="flex flex-wrap items-center justify-between gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-2 rounded-2xl shadow-xs">
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={() => setActiveSubMenu('operasional')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer shadow-xs ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
               activeSubMenu === 'operasional'
-                ? 'bg-blue-600 text-white font-black shadow-md shadow-blue-600/30 ring-1 ring-blue-400'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                ? 'bg-blue-600 text-white font-black shadow-sm'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60'
             }`}
           >
             <MapPin className="w-4 h-4" />
             <span>Laporan &amp; Kendala Lapangan</span>
-            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${activeSubMenu === 'operasional' ? 'bg-white/20 text-white font-bold' : 'bg-slate-800 text-slate-400'}`}>
+            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${activeSubMenu === 'operasional' ? 'bg-white/20 text-white font-bold' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>
               {totalCount}
             </span>
           </button>
 
           <button
             onClick={() => setActiveSubMenu('checklist_armada')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer shadow-xs ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
               activeSubMenu === 'checklist_armada'
-                ? 'bg-cyan-500 text-slate-950 font-black shadow-md shadow-cyan-500/20'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                ? 'bg-blue-600 text-white font-black shadow-sm'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60'
             }`}
           >
             <ShieldCheck className="w-4 h-4" />
             <span>Laporan Checklist Armada</span>
-            <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 uppercase font-mono font-bold">
-              Sub-Menu Baru
+          </button>
+
+          {/* Di sebelah Laporan Checklist Armada: Laporan Peringatan Mode Offline */}
+          <button
+            onClick={() => setActiveSubMenu('peringatan_offline')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+              activeSubMenu === 'peringatan_offline'
+                ? 'bg-rose-600 text-white font-black shadow-sm'
+                : activeOfflineCrewReports.length > 0
+                ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-300 border border-rose-300 dark:border-rose-500/40 hover:bg-rose-100 dark:hover:bg-rose-950/70'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60'
+            }`}
+          >
+            {activeOfflineCrewReports.length > 0 ? (
+              <WifiOff className="w-4 h-4 animate-pulse" />
+            ) : (
+              <Wifi className="w-4 h-4" />
+            )}
+            <span>Laporan Peringatan Mode Offline</span>
+            <span
+              className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                activeSubMenu === 'peringatan_offline'
+                  ? 'bg-white/20 text-white font-bold'
+                  : activeOfflineCrewReports.length > 0
+                  ? 'bg-rose-600 text-white font-black animate-pulse'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+              }`}
+            >
+              {activeOfflineCrewReports.length > 0 ? activeOfflineCrewReports.length : offlineModeReports.length}
             </span>
           </button>
         </div>
 
         {/* Security Role Access Badge */}
-        <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px]">
+        <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-[11px]">
           {isAuthorizedSpvOrAdmin ? (
-            <div className="flex items-center gap-1.5 text-emerald-400 font-bold">
+            <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-bold">
               <ShieldCheck className="w-3.5 h-3.5" />
               <span>Otorisasi SPV Logistik / Super Admin Aktif</span>
             </div>
           ) : (
-            <div className="flex items-center gap-1.5 text-amber-400">
+            <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
               <Lock className="w-3.5 h-3.5" />
               <span>Mode Lihat (Akses Status Khusus SPV/Admin)</span>
             </div>
@@ -418,6 +592,299 @@ export const DriverReportsManagement: React.FC = () => {
       {/* RENDER VIEW BERDASARKAN SUB-MENU AKTIF */}
       {activeSubMenu === 'checklist_armada' ? (
         <FleetChecklistReportView onBackToOperationalReports={() => setActiveSubMenu('operasional')} />
+      ) : activeSubMenu === 'peringatan_offline' ? (
+        /* 🚨 DESAIN BARU UI/UX: LAPORAN PERINGATAN AKTIVASI MODE OFFLINE TIM PENGIRIMAN */
+        <div className="space-y-5 animate-in fade-in duration-200">
+          {/* Top Hero Card */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-start sm:items-center gap-3.5">
+              <div
+                className={`w-12 h-12 rounded-2xl flex items-center justify-center border shrink-0 shadow-xs ${
+                  activeOfflineCrewReports.length > 0
+                    ? 'bg-rose-50 dark:bg-rose-500/15 border-rose-200 dark:border-rose-500/30 text-rose-600 dark:text-rose-400'
+                    : 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-200 dark:border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+                }`}
+              >
+                {activeOfflineCrewReports.length > 0 ? (
+                  <WifiOff className="w-6 h-6 animate-pulse" />
+                ) : (
+                  <Wifi className="w-6 h-6" />
+                )}
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
+                    Laporan Peringatan Aktivasi Mode Offline Tim Pengiriman
+                  </h2>
+                  {activeOfflineCrewReports.length > 0 ? (
+                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-black bg-rose-600 text-white animate-pulse">
+                      ⚠️ {activeOfflineCrewReports.length} Kru Masih Offline
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/30">
+                      ✓ Semua Kru Online
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+                  Memantau siapa saja driver/helper yang mengaktifkan Mode Offline agar menjadi peringatan bagi Tim Pengiriman untuk segera di-online-kan kembali.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={loadReports}
+                className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 border border-slate-200 dark:border-slate-700 cursor-pointer transition"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Segarkan Data</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveSubMenu('operasional')}
+                className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer transition shadow-xs"
+              >
+                <MapPin className="w-3.5 h-3.5" />
+                <span>Ke Kalender Kendala</span>
+              </button>
+            </div>
+          </div>
+
+          {/* 3 Summary KPI Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex items-center justify-between">
+              <div>
+                <span className="text-xs font-bold text-slate-500 dark:text-slate-400 block">
+                  Total Riwayat Aktivasi Offline
+                </span>
+                <div className="text-2xl font-black text-slate-900 dark:text-white font-mono mt-1">
+                  {offlineModeReports.length}
+                </div>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Log tercatat di sistem pengiriman
+                </span>
+              </div>
+              <div className="w-11 h-11 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300">
+                <Layers className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div
+              className={`rounded-2xl p-4 shadow-xs flex items-center justify-between border ${
+                activeOfflineCrewReports.length > 0
+                  ? 'bg-rose-50 dark:bg-rose-950/30 border-rose-300 dark:border-rose-500/50'
+                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800'
+              }`}
+            >
+              <div>
+                <span className="text-xs font-bold text-rose-700 dark:text-rose-300 block">
+                  Kru Masih Mode Offline (Aktif)
+                </span>
+                <div className="text-2xl font-black text-rose-600 dark:text-rose-400 font-mono mt-1">
+                  {activeOfflineCrewReports.length}
+                </div>
+                <span className="text-[11px] text-rose-600/80 dark:text-rose-300/80 font-semibold">
+                  {activeOfflineCrewReports.length > 0
+                    ? 'Wajib segera di-online-kan kembali!'
+                    : 'Tidak ada kru yang sedang offline'}
+                </span>
+              </div>
+              <div className="w-11 h-11 rounded-2xl bg-rose-100 dark:bg-rose-500/20 flex items-center justify-center text-rose-600 dark:text-rose-400">
+                <WifiOff className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex items-center justify-between">
+              <div>
+                <span className="text-xs font-bold text-emerald-700 dark:text-emerald-300 block">
+                  Sudah Kembali Online
+                </span>
+                <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 font-mono mt-1">
+                  {offlineModeReports.filter(r => r.offlineStatus === 'sudah_online').length}
+                </div>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Sinkronisasi perangkat pulih normal
+                </span>
+              </div>
+              <div className="w-11 h-11 rounded-2xl bg-emerald-50 dark:bg-emerald-500/15 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+                <Wifi className="w-5 h-5" />
+              </div>
+            </div>
+          </div>
+
+          {/* Search & Status Filter Bar */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={offlineSearchQuery}
+                onChange={(e) => setOfflineSearchQuery(e.target.value)}
+                placeholder="Cari nama supir, helper, plat armada, atau area kirim..."
+                className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-rose-500"
+              />
+            </div>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {[
+                { key: 'all', label: `Semua (${offlineModeReports.length})` },
+                { key: 'masih_offline', label: `Masih Offline (${activeOfflineCrewReports.length})` },
+                {
+                  key: 'sudah_online',
+                  label: `Sudah Online (${offlineModeReports.filter(r => r.offlineStatus === 'sudah_online').length})`
+                }
+              ].map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setOfflineStatusFilter(tab.key as any)}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+                    offlineStatusFilter === tab.key
+                      ? 'bg-slate-900 dark:bg-blue-600 text-white shadow-xs'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* List of Offline Mode Reports */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
+            {filteredOfflineReports.length === 0 ? (
+              <div className="p-10 text-center space-y-3">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400 mx-auto">
+                  <CheckCircle2 className="w-6 h-6" />
+                </div>
+                <div className="text-sm font-black text-slate-900 dark:text-white">
+                  Semua Perangkat Kru Pengiriman Dalam Kondisi Online
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto leading-relaxed">
+                  Saat ini belum ada kru pengiriman yang mengaktifkan Mode Offline. Jika ada kru yang menekan tombol <strong>Mode Offline</strong> di Portal Driver, datanya akan langsung muncul di halaman ini sebagai peringatan.
+                </p>
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-200 dark:divide-slate-800">
+                {filteredOfflineReports.map((rep) => {
+                  const isStillOffline = rep.offlineStatus === 'masih_offline';
+                  return (
+                    <div
+                      key={rep.id}
+                      className={`p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4 transition ${
+                        isStillOffline
+                          ? 'bg-rose-50/60 dark:bg-rose-950/25'
+                          : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
+                      }`}
+                    >
+                      <div className="flex items-start gap-3.5 min-w-0">
+                        <div
+                          className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border mt-0.5 ${
+                            isStillOffline
+                              ? 'bg-rose-100 dark:bg-rose-500/20 border-rose-300 dark:border-rose-500/40 text-rose-600 dark:text-rose-400'
+                              : 'bg-emerald-100 dark:bg-emerald-500/20 border-emerald-300 dark:border-emerald-500/40 text-emerald-600 dark:text-emerald-400'
+                          }`}
+                        >
+                          {isStillOffline ? (
+                            <WifiOff className="w-5 h-5 animate-pulse" />
+                          ) : (
+                            <Wifi className="w-5 h-5" />
+                          )}
+                        </div>
+
+                        <div className="space-y-1.5 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-black text-slate-900 dark:text-white text-sm">
+                              {rep.driverName}
+                            </span>
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-amber-300 border border-slate-200 dark:border-slate-700">
+                              {rep.userRole || 'Driver'} • {rep.plateNumber}
+                            </span>
+                            {rep.helperName && (
+                              <span className="text-xs text-slate-600 dark:text-slate-300">
+                                Helper: <strong>{rep.helperName}</strong>
+                              </span>
+                            )}
+                            {isStillOffline ? (
+                              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-rose-600 text-white animate-pulse">
+                                ⚠️ MASIH OFFLINE
+                              </span>
+                            ) : (
+                              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/40">
+                                ✓ SUDAH ONLINE
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-3 flex-wrap text-xs text-slate-600 dark:text-slate-300">
+                            <span>
+                              Area Kirim: <strong className="text-slate-900 dark:text-white">{rep.areaName}</strong>
+                            </span>
+                            <span className="text-slate-300 dark:text-slate-700">•</span>
+                            <span className="font-mono text-[11px]">
+                              Waktu Offline:{' '}
+                              <strong className="text-rose-600 dark:text-rose-400">
+                                {rep.offlineActivatedAt ||
+                                  new Date(rep.timestamp).toLocaleTimeString('id-ID', {
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  }) + ' WIB'}
+                              </strong>
+                            </span>
+                            {rep.onlineRestoredAt && (
+                              <>
+                                <span className="text-slate-300 dark:text-slate-700">•</span>
+                                <span className="font-mono text-[11px]">
+                                  Kembali Online:{' '}
+                                  <strong className="text-emerald-600 dark:text-emerald-400">
+                                    {rep.onlineRestoredAt}
+                                  </strong>
+                                </span>
+                              </>
+                            )}
+                          </div>
+
+                          <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                            {rep.notes}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0 self-end lg:self-center">
+                        {isStillOffline ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleSendOfflineWarningToPortal(rep)}
+                              className="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center gap-1.5 cursor-pointer transition shadow-xs active:scale-95"
+                            >
+                              <Send className="w-3.5 h-3.5" />
+                              <span>Kirim Peringatan</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleForceOnlineCrew(rep)}
+                              className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center gap-1.5 cursor-pointer transition shadow-xs active:scale-95"
+                            >
+                              <Wifi className="w-3.5 h-3.5" />
+                              <span>Onlinekan Sekarang</span>
+                            </button>
+                          </>
+                        ) : (
+                          <div className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-semibold flex items-center gap-1.5">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                            <span>Dipulihkan oleh {rep.verifiedBy || 'Tim Pengiriman'}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
       ) : (
         <>
           {/* Header Section */}
@@ -501,215 +968,7 @@ export const DriverReportsManagement: React.FC = () => {
             </div>
           )}
 
-          {/* 📅 RINCIAN KALENDER: Navigasi Pertanggal & Filter Cepat Rentang Waktu (Minggu Ini & Bulan Ini) */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm space-y-3">
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-slate-800">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
-                  <Calendar className="w-4 h-4" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs font-bold text-white">Kalender Laporan &amp; Filter Waktu:</span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 font-mono">
-                      {dateFilterMode === 'single_date' && `Pertanggal: ${selectedCalendarDate}`}
-                      {dateFilterMode === 'this_week' && `Minggu Ini: ${currentWeekRange.label}`}
-                      {dateFilterMode === 'this_month' && `Bulan Ini: ${currentMonthRange.monthName}`}
-                      {dateFilterMode === 'all' && 'Semua Tanggal'}
-                    </span>
-                  </div>
-                  <span className="text-[11px] text-slate-400 block mt-0.5">
-                    Gunakan filter cepat 'Minggu Ini' atau 'Bulan Ini' untuk memfokuskan kendala operasional kru
-                  </span>
-                </div>
-              </div>
-
-              {/* Group Tombol Filter Cepat */}
-              <div className="flex items-center gap-1.5 flex-wrap">
-                {/* 1. Pertanggal */}
-                <button
-                  type="button"
-                  onClick={() => setDateFilterMode('single_date')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs ${
-                    dateFilterMode === 'single_date'
-                      ? 'bg-blue-600 text-white font-black shadow-md shadow-blue-600/30 ring-1 ring-blue-400'
-                      : 'bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700/60'
-                  }`}
-                  title="Tampilkan laporan pada tanggal spesifik"
-                >
-                  <span>Pertanggal</span>
-                  <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded font-bold ${
-                    dateFilterMode === 'single_date' ? 'bg-white/20 text-white' : 'bg-slate-900 text-slate-300'
-                  }`}>
-                    {selectedCalendarDate}
-                  </span>
-                </button>
-
-                {/* 2. Filter Cepat: Minggu Ini */}
-                <button
-                  type="button"
-                  onClick={() => setDateFilterMode('this_week')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs ${
-                    dateFilterMode === 'this_week'
-                      ? 'bg-blue-600 text-white font-black shadow-md shadow-blue-600/30 ring-1 ring-blue-400'
-                      : 'bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700/60'
-                  }`}
-                  title={`Fokus ke rentang operasional Minggu Ini (${currentWeekRange.label})`}
-                >
-                  <Clock className="w-3.5 h-3.5 text-blue-300" />
-                  <span>Minggu Ini</span>
-                  <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full font-bold ${
-                    dateFilterMode === 'this_week'
-                      ? 'bg-white/20 text-white'
-                      : 'bg-blue-500/15 text-blue-300 border border-blue-500/30'
-                  }`}>
-                    {timeRangeStats.weekTotal}
-                  </span>
-                  {timeRangeStats.weekKendala > 0 && (
-                    <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40 font-bold">
-                      {timeRangeStats.weekKendala} ⚠️
-                    </span>
-                  )}
-                </button>
-
-                {/* 3. Filter Cepat: Bulan Ini */}
-                <button
-                  type="button"
-                  onClick={() => setDateFilterMode('this_month')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs ${
-                    dateFilterMode === 'this_month'
-                      ? 'bg-emerald-600 text-white font-black shadow-md shadow-emerald-600/30 ring-1 ring-emerald-400'
-                      : 'bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700/60'
-                  }`}
-                  title={`Fokus ke seluruh kendala & laporan Bulan Ini (${currentMonthRange.monthName})`}
-                >
-                  <Calendar className="w-3.5 h-3.5 text-emerald-300" />
-                  <span>Bulan Ini</span>
-                  <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full font-bold ${
-                    dateFilterMode === 'this_month'
-                      ? 'bg-white/20 text-white'
-                      : 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
-                  }`}>
-                    {timeRangeStats.monthTotal}
-                  </span>
-                  {timeRangeStats.monthKendala > 0 && (
-                    <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40 font-bold">
-                      {timeRangeStats.monthKendala} ⚠️
-                    </span>
-                  )}
-                </button>
-
-                {/* 4. Semua Tanggal */}
-                <button
-                  type="button"
-                  onClick={() => setDateFilterMode('all')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer shadow-xs ${
-                    dateFilterMode === 'all'
-                      ? 'bg-blue-600 text-white font-black shadow-md shadow-blue-600/30 ring-1 ring-blue-400'
-                      : 'bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700/60'
-                  }`}
-                >
-                  Semua ({totalCount})
-                </button>
-
-                {/* 5. Custom Date Input */}
-                <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-1 text-slate-200">
-                  <span className="text-[10px] text-slate-400 font-medium hidden sm:inline">Pilih Tgl:</span>
-                  <input
-                    type="date"
-                    value={selectedCalendarDate}
-                    onChange={(e) => {
-                      setSelectedCalendarDate(e.target.value);
-                      setDateFilterMode('single_date');
-                    }}
-                    className="bg-transparent text-slate-200 text-xs focus:outline-none font-mono cursor-pointer"
-                    title="Pilih tanggal tertentu dari kalender"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Horizontal Day Selector Pills */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-2">
-              {calendarDays.map((day) => {
-                const isSelected = dateFilterMode === 'single_date' && selectedCalendarDate === day.iso;
-                const isInCurrentWeek = day.iso >= currentWeekRange.startIso && day.iso <= currentWeekRange.endIso;
-                return (
-                  <button
-                    key={day.iso}
-                    onClick={() => {
-                      setSelectedCalendarDate(day.iso);
-                      setDateFilterMode('single_date');
-                    }}
-                    className={`p-2.5 rounded-xl border text-center transition cursor-pointer flex flex-col items-center justify-between relative ${
-                      isSelected
-                        ? 'bg-amber-500/20 border-amber-500 text-amber-300 shadow-sm'
-                        : dateFilterMode === 'this_week' && isInCurrentWeek
-                        ? 'bg-blue-950/40 border-blue-500/50 text-blue-200 hover:border-blue-400'
-                        : 'bg-slate-950/70 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200'
-                    }`}
-                  >
-                    <span className="text-[10px] uppercase font-bold tracking-wider">
-                      {day.dayName} {day.isToday && <span className="text-amber-400 font-black">(Hari Ini)</span>}
-                    </span>
-                    <span className={`text-base font-black font-mono my-0.5 ${isSelected ? 'text-white' : 'text-slate-200'}`}>
-                      {day.dayNum} {day.monthName}
-                    </span>
-                    <div className="flex items-center gap-1 text-[10px] font-mono font-bold mt-0.5">
-                      <span className="text-slate-400">{day.totalReports} Lap</span>
-                      {day.kendalaCount > 0 && (
-                        <span className="px-1 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40">
-                          {day.kendalaCount} ⚠️
-                        </span>
-                      )}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Quick Context Active Filter Bar */}
-            <div className="bg-slate-950/60 px-3.5 py-2.5 rounded-xl border border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-              <div className="flex items-center gap-2 text-slate-300 flex-wrap">
-                <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-                <span>
-                  {dateFilterMode === 'single_date' && (
-                    <>Menampilkan laporan per tanggal <strong>{selectedCalendarDate}</strong></>
-                  )}
-                  {dateFilterMode === 'this_week' && (
-                    <>Memfokuskan kendala operasional <strong>Minggu Ini ({currentWeekRange.label})</strong></>
-                  )}
-                  {dateFilterMode === 'this_month' && (
-                    <>Memfokuskan kendala operasional <strong>Bulan Ini ({currentMonthRange.monthName})</strong></>
-                  )}
-                  {dateFilterMode === 'all' && (
-                    <>Menampilkan seluruh histori laporan operasional (Semua Tanggal)</>
-                  )}
-                </span>
-                <span className="text-slate-500">•</span>
-                <span className="text-emerald-400 font-bold font-mono">
-                  {inScopeTotal} laporan aktif
-                </span>
-                {inScopeKendala > 0 && (
-                  <span className="text-rose-400 font-bold font-mono">
-                    ({inScopeKendala} kendala jalan)
-                  </span>
-                )}
-              </div>
-
-              {dateFilterMode !== 'all' && (
-                <button
-                  type="button"
-                  onClick={() => setDateFilterMode('all')}
-                  className="text-amber-400 hover:text-amber-300 text-[11px] font-semibold underline cursor-pointer self-start sm:self-auto"
-                >
-                  Tampilkan Semua Tanggal
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* KPI Stats Cards (Responsif Terhadap Filter Waktu) */}
+          {/* 📊 KPI STATS CARDS (DILETAKKAN DI ATAS TAMPILAN KALENDER) */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm relative overflow-hidden">
               <div className="flex items-center justify-between">
@@ -724,14 +983,8 @@ export const DriverReportsManagement: React.FC = () => {
                   <span className="text-xs text-slate-500 font-medium font-sans">/ {totalCount} total</span>
                 )}
               </div>
-              <div className="text-[10px] text-slate-500 mt-1">
-                {dateFilterMode === 'all'
-                  ? 'Total riwayat keseluruhan'
-                  : dateFilterMode === 'this_week'
-                  ? 'Periode Minggu Ini'
-                  : dateFilterMode === 'this_month'
-                  ? 'Periode Bulan Ini'
-                  : `Tanggal ${selectedCalendarDate}`}
+              <div className="text-[10px] text-slate-400 mt-1">
+                Tanggal {selectedCalendarDate}
               </div>
             </div>
 
@@ -748,7 +1001,7 @@ export const DriverReportsManagement: React.FC = () => {
                   <span className="text-xs text-slate-500 font-medium font-sans">/ {kendalaCount} total</span>
                 )}
               </div>
-              <div className="text-[10px] text-slate-500 mt-1">Macet, perbaikan jalan &amp; rute</div>
+              <div className="text-[10px] text-slate-400 mt-1">Macet, antri customer &amp; rute</div>
             </div>
 
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm relative overflow-hidden">
@@ -764,7 +1017,7 @@ export const DriverReportsManagement: React.FC = () => {
                   <span className="text-xs text-slate-500 font-medium font-sans">/ {akhirCount} total</span>
                 )}
               </div>
-              <div className="text-[10px] text-slate-500 mt-1">Selesai serah terima outlet</div>
+              <div className="text-[10px] text-slate-400 mt-1">Selesai serah terima outlet</div>
             </div>
 
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm relative overflow-hidden">
@@ -780,7 +1033,159 @@ export const DriverReportsManagement: React.FC = () => {
                   <span className="text-xs text-slate-500 font-medium font-sans">/ {pendingCount} total</span>
                 )}
               </div>
-              <div className="text-[10px] text-slate-500 mt-1">Khusus SPV Logistik DC</div>
+              <div className="text-[10px] text-slate-400 mt-1">Khusus SPV Logistik DC</div>
+            </div>
+          </div>
+
+          {/* 📅 KALENDER LAPORAN & KENDALA KIRIMAN (Desain Kalender Bulanan 7-Kolom Seperti Pada Jadwal) */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
+            {/* Calendar Header & Periode Selector (Tanpa 5 Laporan Ditampilkan, Semua, Hari Ini, Minggu Ini, Bulan Ini) */}
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold shadow-md shrink-0">
+                  <Calendar className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2 flex-wrap">
+                    <span>KALENDER LAPORAN &amp; KENDALA - {monthlyCalendarGrid.monthName.toUpperCase()} {monthlyCalendarGrid.year}</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Klik pada salah satu tanggal untuk melihat keterangan rincian kendala jalan dan laporan pada tanggal tersebut.
+                  </p>
+                </div>
+              </div>
+
+              {/* Pilihan Bulan & Tahun Saja */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-950 p-1 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-semibold">
+                  <select
+                    value={calendarMonth}
+                    onChange={(e) => {
+                      const nextMonth = Number(e.target.value);
+                      setCalendarMonth(nextMonth);
+                      const nextIso = `${calendarYear}-${String(nextMonth + 1).padStart(2, '0')}-01`;
+                      setSelectedCalendarDate(nextIso);
+                      setDateFilterMode('single_date');
+                    }}
+                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-lg px-2.5 py-1 text-xs font-bold focus:outline-none focus:border-emerald-500 cursor-pointer"
+                  >
+                    {CALENDAR_MONTH_NAMES.map((m, idx) => (
+                      <option key={m} value={idx}>{m}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={calendarYear}
+                    onChange={(e) => {
+                      const nextYear = Number(e.target.value);
+                      setCalendarYear(nextYear);
+                      const nextIso = `${nextYear}-${String(calendarMonth + 1).padStart(2, '0')}-01`;
+                      setSelectedCalendarDate(nextIso);
+                      setDateFilterMode('single_date');
+                    }}
+                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-lg px-2.5 py-1 text-xs font-bold focus:outline-none focus:border-emerald-500 cursor-pointer"
+                  >
+                    {[2024, 2025, 2026, 2027, 2028].map(yr => (
+                      <option key={yr} value={yr}>{yr}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Legend Badges (Indikator Kendala Masuk vs Terkirim ke Portal Driver) */}
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <span className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                Tanggal Terpilih: <strong className="text-emerald-600 dark:text-emerald-400 font-mono">{selectedCalendarDate}</strong>
+              </span>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-rose-100 dark:bg-rose-950/80 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-800 shadow-2xs">
+                  <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+                  <span>Ada Kendala Masuk (Segera Beri Solusi)</span>
+                </span>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 shadow-2xs">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                  <span>Solusi Sudah Terkirim ke Portal Driver (Hijau)</span>
+                </span>
+              </div>
+            </div>
+
+            {/* 7-Column Calendar Grid Header (MINGGU s/d SABTU seperti pada Jadwal) */}
+            <div className="grid grid-cols-7 gap-1.5 sm:gap-2 text-center text-xs font-black uppercase text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800/90 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700">
+              <div className="text-rose-600 dark:text-rose-400">MINGGU</div>
+              <div>SENIN</div>
+              <div>SELASA</div>
+              <div>RABU</div>
+              <div>KAMIS</div>
+              <div>JUMAT</div>
+              <div className="text-blue-600 dark:text-blue-400">SABTU</div>
+            </div>
+
+            {/* Calendar Cells Grid (01 s/d 31) — Bersih tanpa pop-up keterangan di dalam kotak tanggal */}
+            <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
+              {monthlyCalendarGrid.cells.map((cell) => {
+                if (cell.type === 'padding') {
+                  return (
+                    <div
+                      key={cell.key}
+                      className="min-h-[60px] sm:min-h-[72px] bg-slate-50/50 dark:bg-slate-950/20 rounded-xl border border-dashed border-slate-200 dark:border-slate-800/50"
+                    />
+                  );
+                }
+
+                const isSelected = selectedCalendarDate === cell.iso;
+                const hasUnhandled = cell.needsActionCount > 0;
+                const isAllResolvedGreen = !hasUnhandled && cell.sentToPortalCount > 0;
+
+                return (
+                  <div
+                    key={cell.key}
+                    onClick={() => {
+                      setSelectedCalendarDate(cell.iso);
+                      setDateFilterMode('single_date');
+                    }}
+                    className={`min-h-[60px] sm:min-h-[72px] p-2.5 rounded-xl border transition cursor-pointer flex flex-col justify-between select-none relative ${
+                      isSelected
+                        ? hasUnhandled
+                          ? 'bg-rose-100/90 dark:bg-rose-950/60 border-rose-500 ring-2 ring-rose-500 shadow-md z-10'
+                          : 'bg-emerald-100/90 dark:bg-emerald-950/60 border-emerald-500 ring-2 ring-emerald-500 shadow-md z-10'
+                        : hasUnhandled
+                        ? 'bg-rose-50/90 dark:bg-rose-950/40 hover:bg-rose-100/80 dark:hover:bg-rose-950/60 border-rose-400 dark:border-rose-500/70 shadow-2xs'
+                        : isAllResolvedGreen
+                        ? 'bg-emerald-50/80 dark:bg-emerald-950/35 hover:bg-emerald-100/70 dark:hover:bg-emerald-950/55 border-emerald-400 dark:border-emerald-500/60 shadow-2xs'
+                        : 'bg-slate-50/80 dark:bg-slate-950/40 hover:bg-slate-100 dark:hover:bg-slate-900 border-slate-200 dark:border-slate-800'
+                    }`}
+                  >
+                    {/* Day Number & Status Dot Indicator */}
+                    <div className="flex items-center justify-between gap-1">
+                      <span
+                        className={`text-xs font-black px-1.5 py-0.5 rounded-md ${
+                          hasUnhandled
+                            ? 'bg-rose-600 text-white font-extrabold'
+                            : isAllResolvedGreen || isSelected
+                            ? 'bg-emerald-600 text-white font-extrabold'
+                            : 'text-slate-500 dark:text-slate-400'
+                        }`}
+                      >
+                        {String(cell.dayNumber).padStart(2, '0')}
+                      </span>
+
+                      {hasUnhandled ? (
+                        <span
+                          className="w-3 h-3 rounded-full bg-rose-500 animate-pulse ring-4 ring-rose-500/20"
+                          title="Ada kendala masuk — segera perbarui status & solusi!"
+                        />
+                      ) : isAllResolvedGreen ? (
+                        <span
+                          className="w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-2xs"
+                          title="Solusi sudah terkirim ke Portal Driver"
+                        >
+                          <Check className="w-2.5 h-2.5 stroke-[3]" />
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -814,9 +1219,10 @@ export const DriverReportsManagement: React.FC = () => {
                 className="bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-amber-500 cursor-pointer"
               >
                 <option value="all">Semua Kategori Laporan</option>
+                <option value="mode_offline">📴 Peringatan Mode Offline Kru</option>
                 <option value="presensi_shift">🕒 Check-In &amp; Check-Out Shift (Gabungan)</option>
                 <option value="pin_keamanan">🔐 Data PIN Keamanan (2x Verifikasi)</option>
-                <option value="kendala_jalan">⚠️ Kendala di Jalan</option>
+                <option value="kendala_jalan">⚠️ Kendala di Jalan &amp; Antri Customer</option>
                 <option value="akhir_kiriman">📦 Akhir Kiriman (POD &amp; Argo)</option>
                 <option value="istirahat">☕ Istirahat Kru</option>
                 <option value="update_lokasi">📍 Update Titik GMaps</option>
@@ -836,7 +1242,7 @@ export const DriverReportsManagement: React.FC = () => {
             </div>
           </div>
 
-          {/* Reports Table / Card List */}
+          {/* Reports Table / Card List (Hanya Menampilkan Laporan Pada Tanggal yang Diklik) */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
             {filteredReports.length === 0 ? (
               <div className="p-12 text-center space-y-3">
@@ -844,35 +1250,11 @@ export const DriverReportsManagement: React.FC = () => {
                   <Calendar className="w-6 h-6" />
                 </div>
                 <div className="text-sm font-bold text-white">
-                  {dateFilterMode !== 'all'
-                    ? `Tidak Ada Laporan Pada Periode ${
-                        dateFilterMode === 'this_week'
-                          ? 'Minggu Ini'
-                          : dateFilterMode === 'this_month'
-                          ? 'Bulan Ini'
-                          : `Tanggal ${selectedCalendarDate}`
-                      }`
-                    : 'Tidak Ada Laporan Ditemukan'}
+                  Tidak Ada Laporan Pada Tanggal {selectedCalendarDate}
                 </div>
                 <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                  {dateFilterMode !== 'all'
-                    ? `Tidak ada laporan atau kendala yang tercatat pada ${
-                        dateFilterMode === 'this_week'
-                          ? `rentang Minggu Ini (${currentWeekRange.label})`
-                          : dateFilterMode === 'this_month'
-                          ? `Bulan Ini (${currentMonthRange.monthName})`
-                          : `tanggal ${selectedCalendarDate}`
-                      }. Silakan pilih filter rentang lain atau klik "Tampilkan Semua Tanggal".`
-                    : 'Tidak ada laporan yang sesuai dengan filter pencarian Anda saat ini.'}
+                  Tidak ada laporan atau kendala yang tercatat pada tanggal {selectedCalendarDate}. Silakan klik tanggal lain pada kalender yang memiliki tanda indikator laporan.
                 </p>
-                {dateFilterMode !== 'all' && (
-                  <button
-                    onClick={() => setDateFilterMode('all')}
-                    className="px-3 py-1.5 rounded-xl bg-amber-500 text-slate-950 font-bold text-xs shadow hover:bg-amber-400 transition cursor-pointer"
-                  >
-                    Tampilkan Semua Tanggal
-                  </button>
-                )}
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -934,11 +1316,62 @@ export const DriverReportsManagement: React.FC = () => {
 
                           {/* 3. Jenis Laporan */}
                           <td className="p-3.5 align-top space-y-1">
+                            {item.category === 'mode_offline' && (
+                              <div className="space-y-1">
+                                <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black border ${
+                                  item.offlineStatus === 'masih_offline'
+                                    ? 'bg-rose-500/20 text-rose-200 border-rose-500/50 animate-pulse'
+                                    : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                                }`}>
+                                  {item.offlineStatus === 'masih_offline' ? (
+                                    <WifiOff className="w-3 h-3 text-rose-400 shrink-0" />
+                                  ) : (
+                                    <Wifi className="w-3 h-3 text-emerald-400 shrink-0" />
+                                  )}
+                                  <span>Peringatan Mode Offline</span>
+                                </span>
+                                <div className="text-[10px] font-mono bg-slate-950 p-1.5 rounded-lg border border-slate-800 space-y-0.5">
+                                  <div className="text-rose-400 font-bold">
+                                    Off: {item.offlineActivatedAt || new Date(item.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB'}
+                                  </div>
+                                  <div className={item.onlineRestoredAt ? 'text-emerald-400 font-bold' : 'text-amber-400 font-bold'}>
+                                    On: {item.onlineRestoredAt || 'Masih Offline!'}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
                             {item.category === 'kendala_jalan' && (
-                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold bg-rose-500/15 text-rose-300 border border-rose-500/30">
-                                <AlertTriangle className="w-3 h-3 text-rose-400" />
-                                <span>Kendala Jalan</span>
-                              </span>
+                              <div className="space-y-1">
+                                {item.customerQueueStatus ? (
+                                  <>
+                                    <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold border ${
+                                      item.customerQueueStatus === 'sedang_mengantri'
+                                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse'
+                                        : 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
+                                    }`}>
+                                      <Clock className="w-3 h-3 shrink-0" />
+                                      <span>
+                                        {item.customerQueueStatus === 'sedang_mengantri'
+                                          ? 'Mengantri di Customer'
+                                          : `Selesai Antri (${item.customerQueueDurationMinutes || 15} Menit)`}
+                                      </span>
+                                    </span>
+                                    <div className="text-[10px] font-mono bg-slate-950 p-1.5 rounded-lg border border-slate-800 space-y-0.5">
+                                      <div className="text-amber-400 font-bold">
+                                        Antri: {item.customerQueueStartFormatted || '-'}
+                                      </div>
+                                      <div className={item.customerQueueExitFormatted ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
+                                        Keluar: {item.customerQueueExitFormatted || 'Sedang Mengantri'}
+                                      </div>
+                                    </div>
+                                  </>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold bg-rose-500/15 text-rose-300 border border-rose-500/30">
+                                    <AlertTriangle className="w-3 h-3 text-rose-400" />
+                                    <span>Kendala Jalan</span>
+                                  </span>
+                                )}
+                              </div>
                             )}
                             {item.category === 'akhir_kiriman' && (
                               <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
@@ -1034,79 +1467,123 @@ export const DriverReportsManagement: React.FC = () => {
                             </p>
                           </td>
 
-                          {/* 7. Solusi & Arahan SPV Logistik / Super Admin (Tersambung ke Portal Driver) */}
+                          {/* 7. Solusi & Arahan SPV Logistik / Super Admin (Kontras Tinggi Terbaca Jelas) */}
                           <td className="p-3.5 align-top max-w-[280px]">
-                            {item.solution ? (
-                              <div className="bg-slate-950 p-2.5 rounded-xl border border-amber-500/30 space-y-1.5 shadow-inner">
+                            {item.solution && item.solution.trim() ? (
+                              <div className="bg-slate-950 p-2.5 rounded-xl border border-emerald-500/50 space-y-1.5 shadow-sm">
                                 <div className="flex items-center justify-between text-[10px]">
-                                  <span className="font-bold text-amber-400 flex items-center gap-1">
-                                    <Sparkles className="w-3 h-3 text-amber-400" />
+                                  <span className="font-bold text-emerald-400 flex items-center gap-1">
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                                     <span>Arahan SPV:</span>
                                   </span>
-                                  {item.driverAcknowledged ? (
-                                    <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
-                                      ✓ Driver Dijalankan
-                                    </span>
-                                  ) : (
-                                    <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse">
-                                      Tersambung di HP Driver
-                                    </span>
-                                  )}
+                                  <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+                                    <Check className="w-2.5 h-2.5" />
+                                    <span>{item.driverAcknowledged ? 'Dijalankan Driver' : 'Terkirim ke Portal Driver'}</span>
+                                  </span>
                                 </div>
-                                <p className="text-slate-200 text-xs leading-tight font-medium">
+                                <p className="text-white text-xs leading-tight font-bold">
                                   "{item.solution}"
                                 </p>
-                                <div className="text-[9px] text-slate-400 border-t border-slate-800/80 pt-1 flex items-center justify-between">
-                                  <span>Oleh: {item.solutionBy}</span>
+                                <div className="text-[9px] text-emerald-300 border-t border-slate-800 pt-1 flex items-center justify-between">
+                                  <span>Oleh: {item.solutionBy || 'SPV Logistik'}</span>
                                   {item.solutionAt && (
                                     <span>{new Date(item.solutionAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</span>
                                   )}
                                 </div>
                               </div>
+                            ) : item.category === 'mode_offline' && item.offlineStatus === 'masih_offline' ? (
+                              <div className="bg-rose-950/40 p-2.5 rounded-xl border border-rose-500/50 text-[11px] space-y-1.5">
+                                <div className="flex items-center gap-1.5 text-rose-200 font-black text-[10px]">
+                                  <WifiOff className="w-3.5 h-3.5 text-rose-400 shrink-0 animate-pulse" />
+                                  <span>Kru Mengaktifkan Mode Offline — Segera Onlinekan!</span>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSendOfflineWarningToPortal(item)}
+                                    className="flex-1 py-1 px-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[10px] flex items-center justify-center gap-1 cursor-pointer transition"
+                                  >
+                                    <Send className="w-3 h-3" />
+                                    <span>Kirim Peringatan</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleForceOnlineCrew(item)}
+                                    className="flex-1 py-1 px-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-[10px] flex items-center justify-center gap-1 cursor-pointer transition"
+                                  >
+                                    <Wifi className="w-3 h-3" />
+                                    <span>Onlinekan</span>
+                                  </button>
+                                </div>
+                              </div>
+                            ) : item.category === 'kendala_jalan' ? (
+                              <div className="bg-rose-950/30 p-2.5 rounded-xl border border-rose-500/40 text-[11px] space-y-1.5">
+                                <div className="flex items-center gap-1.5 text-rose-300 font-bold text-[10px]">
+                                  <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0 animate-pulse" />
+                                  <span>Segera Perbarui Status &amp; Tindakan Solusi!</span>
+                                </div>
+                                {isAuthorizedSpvOrAdmin && (
+                                  <button
+                                    onClick={() => handleOpenSolutionModal(item)}
+                                    className="w-full py-1 px-2 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-[10px] text-rose-200 font-bold flex items-center justify-center gap-1 cursor-pointer transition"
+                                  >
+                                    <span>Beri Solusi &amp; Kirim ke Portal</span>
+                                    <ArrowRight className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </div>
                             ) : (
                               <div className="bg-slate-950/60 p-2 rounded-xl border border-dashed border-slate-800 text-[11px] text-slate-500 flex items-center justify-between">
-                                <span>Belum ada solusi SPV</span>
+                                <span>Tidak memerlukan solusi khusus</span>
                                 {isAuthorizedSpvOrAdmin && (
                                   <button
                                     onClick={() => handleOpenSolutionModal(item)}
                                     className="text-[10px] text-amber-400 hover:text-amber-300 font-bold underline cursor-pointer"
                                   >
-                                    Beri Arahan &rarr;
+                                    Tambah Arahan &rarr;
                                   </button>
                                 )}
                               </div>
                             )}
                           </td>
 
-                          {/* 8. Status */}
+                          {/* 8. Status (Otomatis Hijau jika solusi sudah terkirim ke Portal Driver) */}
                           <td className="p-3.5 align-top">
-                            {item.status === 'verified' ? (
-                              <div>
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                                  <Check className="w-3 h-3" />
-                                  <span>Terverifikasi</span>
+                            {(item.solution && item.solution.trim()) || item.status === 'verified' || item.status === 'resolved' || item.offlineStatus === 'sudah_online' ? (
+                              <div className="space-y-1">
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
+                                  <span>
+                                    {item.category === 'mode_offline' && item.offlineStatus === 'sudah_online'
+                                      ? 'Sudah Online'
+                                      : item.solution && item.solution.trim()
+                                      ? 'Terkirim ke Portal'
+                                      : 'Terverifikasi'}
+                                  </span>
                                 </span>
-                                {item.verifiedBy && (
-                                  <div className="text-[9px] text-slate-500 mt-0.5" title={item.verifiedBy}>
-                                    Oleh: {item.verifiedBy}
+                                {(item.verifiedBy || item.solutionBy) && (
+                                  <div className="text-[9px] text-emerald-400/80 font-medium" title={item.solutionBy || item.verifiedBy}>
+                                    ✓ {item.solution && item.solution.trim() ? 'Solusi Aktif di HP' : `Oleh: ${item.verifiedBy}`}
                                   </div>
                                 )}
                               </div>
-                            ) : item.status === 'resolved' ? (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-400 border border-cyan-500/30">
-                                <CheckCircle2 className="w-3 h-3" />
-                                <span>Solusi Diberikan</span>
-                              </span>
                             ) : item.status === 'follow_up' ? (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-400 border border-rose-500/30">
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40">
                                 <AlertTriangle className="w-3 h-3" />
                                 <span>Tindak Lanjut</span>
                               </span>
                             ) : (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 animate-pulse">
-                                <Clock className="w-3 h-3" />
-                                <span>Menunggu SPV</span>
-                              </span>
+                              <div className="space-y-1">
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse">
+                                  <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" />
+                                  <span>
+                                    {item.category === 'mode_offline' ? 'Masih Offline!' : 'Perlu Update & Solusi'}
+                                  </span>
+                                </span>
+                                <div className="text-[9px] text-amber-400 font-semibold">
+                                  {item.category === 'mode_offline' ? 'Segera Onlinekan Kembali' : 'Menunggu Tindakan SPV'}
+                                </div>
+                              </div>
                             )}
                           </td>
 
@@ -1114,6 +1591,40 @@ export const DriverReportsManagement: React.FC = () => {
                           <td className="p-3.5 pr-4 align-top text-center">
                             {isAuthorizedSpvOrAdmin ? (
                               <div className="flex flex-col gap-1.5 items-center justify-center">
+                                {item.category === 'mode_offline' && item.offlineStatus === 'masih_offline' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleForceOnlineCrew(item)}
+                                    className="px-2.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-[10px] flex items-center gap-1 shadow-sm transition active:scale-95 cursor-pointer whitespace-nowrap"
+                                    title="Onlinekan kembali perangkat kru pengiriman sekarang"
+                                  >
+                                    <Wifi className="w-3 h-3" />
+                                    <span>Onlinekan Kembali</span>
+                                  </button>
+                                )}
+                                {item.customerQueueStatus === 'sedang_mengantri' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      driverReportService.completeCustomerQueueExit({
+                                        reportId: item.id,
+                                        driverId: item.driverId,
+                                        driverName: item.driverName,
+                                        simulatedExtraMinutes: 15
+                                      });
+                                      loadReports();
+                                      addNotification(
+                                        'schedule',
+                                        'Kru Selesai Antri & Keluar Customer',
+                                        `Status antrean ${item.driverName} di ${item.customerOutletName || item.areaName} telah diperbarui menjadi Keluar dari Customer.`
+                                      );
+                                    }}
+                                    className="px-2.5 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-[10px] flex items-center gap-1 shadow-sm transition active:scale-95 cursor-pointer whitespace-nowrap"
+                                  >
+                                    <Clock className="w-3 h-3" />
+                                    <span>Keluar Customer</span>
+                                  </button>
+                                )}
                                 <button
                                   onClick={() => handleOpenSolutionModal(item)}
                                   className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[10px] flex items-center gap-1 shadow-sm transition active:scale-95 cursor-pointer whitespace-nowrap"

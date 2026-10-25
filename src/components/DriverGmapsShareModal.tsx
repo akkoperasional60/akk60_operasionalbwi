@@ -12,11 +12,15 @@ import {
   CameraOff,
   Coffee,
   FileText,
-  Maximize2
+  Maximize2,
+  Clock,
+  LogOut,
+  Play,
+  Store
 } from 'lucide-react';
 import { Schedule } from '../types';
 import { driverChecklistService } from '../services/driverChecklistService';
-import { driverReportService } from '../services/driverReportService';
+import { driverReportService, DriverHelperReport } from '../services/driverReportService';
 import { driverWaybillService } from '../services/driverWaybillService';
 import { logisticsStore } from '../services/store';
 
@@ -54,12 +58,20 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   onReportSubmitted
 }) => {
   const [category, setCategory] = useState<GmapsReportCategory>('kendala_jalan');
+  const [reportSubMode, setReportSubMode] = useState<'kendala_umum' | 'antri_customer'>('kendala_umum');
   const [notes, setNotes] = useState<string>('');
   const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null);
   const [isCapturing, setIsCapturing] = useState<boolean>(false);
   const [isFullPhotoPreviewOpen, setIsFullPhotoPreviewOpen] = useState<boolean>(false);
 
-  // Live Camera Stream State (Full Screen)
+  // State Fitur Baru: Kendala Sedang Mengantri di Customer -> Selang Beberapa Menit Baru Keluar dari Customer
+  const [activeQueueReport, setActiveQueueReport] = useState<DriverHelperReport | null>(null);
+  const [customerOutletInput, setCustomerOutletInput] = useState<string>('');
+  const [simulatedExtraMin, setSimulatedExtraMin] = useState<number>(0);
+  const [elapsedQueueSeconds, setElapsedQueueSeconds] = useState<number>(0);
+  const [queueCompletedToast, setQueueCompletedToast] = useState<string | null>(null);
+
+  // Live Camera Stream State
   const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -87,7 +99,6 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   const todayStr = new Date().toISOString().split('T')[0];
   const activeDelivery: Schedule | null = React.useMemo(() => {
     if (!deliveries || deliveries.length === 0) return null;
-    // Prioritaskan yang sedang in_transit / picked_up atau jadwal hari ini
     const inTransit = deliveries.find(d => d.status === 'in_transit' || d.status === 'picked_up');
     if (inTransit) return inTransit;
     const todayMatch = deliveries.find(d => d.departureDate <= todayStr && d.status !== 'delivered');
@@ -120,9 +131,29 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
 
   const currentWaybillNo = activeWaybill?.waybillNumber || activeDelivery?.trackingNumber || 'SJ-OUT/AKK/AKTIF';
 
+  // Cek apakah ada antrean customer yang sedang aktif untuk kru ini
+  const refreshActiveQueue = () => {
+    const allReports = driverReportService.getReports();
+    const found = allReports.find(
+      r =>
+        r.customerQueueStatus === 'sedang_mengantri' &&
+        ((driverId && r.driverId === driverId) ||
+          r.driverName.toLowerCase() === (driverName || '').toLowerCase() ||
+          r.plateNumber === autoPlateNumber)
+    );
+    setActiveQueueReport(found || null);
+    if (found) {
+      setCategory('kendala_jalan');
+      setReportSubMode('antri_customer');
+      if (found.customerOutletName) {
+        setCustomerOutletInput(found.customerOutletName);
+      }
+    }
+  };
+
   useEffect(() => {
     if (isOpen) {
-      // 1. Ambil nomor kendaraan otomatis sesuai data checklist terbaru
+      setQueueCompletedToast(null);
       try {
         const checklists = driverChecklistService.getChecklists();
         const activeChecklist = driverId
@@ -137,7 +168,12 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
         setAutoPlateNumber(plateNumber);
       }
 
-      // 2. Rekam koordinat GPS di background
+      if (!customerOutletInput) {
+        setCustomerOutletInput(currentAreaName);
+      }
+
+      refreshActiveQueue();
+
       if (typeof navigator !== 'undefined' && navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
           (pos) => {
@@ -154,7 +190,82 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     } else {
       stopLiveCamera();
     }
-  }, [isOpen, driverId, plateNumber]);
+  }, [isOpen, driverId, plateNumber, currentAreaName]);
+
+  // Timer detikan real-time selama kru sedang mengantri di customer
+  useEffect(() => {
+    if (!activeQueueReport) {
+      setElapsedQueueSeconds(0);
+      return;
+    }
+    const startMs = activeQueueReport.customerQueueStartIso
+      ? new Date(activeQueueReport.customerQueueStartIso).getTime()
+      : new Date(activeQueueReport.timestamp).getTime();
+
+    const updateTimer = () => {
+      const diffSec = Math.max(0, Math.floor((Date.now() - startMs) / 1000));
+      setElapsedQueueSeconds(diffSec);
+    };
+    updateTimer();
+    const interval = setInterval(updateTimer, 1000);
+    return () => clearInterval(interval);
+  }, [activeQueueReport]);
+
+  const totalQueueMinutesDisplay = Math.max(1, Math.floor(elapsedQueueSeconds / 60) + simulatedExtraMin);
+
+  // Mulai Mengantri di Customer
+  const handleStartQueueAtCustomer = () => {
+    const outletName = customerOutletInput.trim() || currentAreaName;
+    const created = driverReportService.startCustomerQueueReport({
+      driverId: driverId || 'crew-driver',
+      driverName,
+      plateNumber: autoPlateNumber,
+      areaName: currentAreaName,
+      customerOutletName: outletName,
+      deliveryId: activeDelivery?.id,
+      notes: notes.trim() || `Sedang mengantri bongkar muatan di customer (${outletName})`,
+      photoUrl: photoDataUrl,
+      latitude: driverLat,
+      longitude: driverLng,
+      gmapsUrl: gmapsLink
+    });
+    setActiveQueueReport(created);
+    setSimulatedExtraMin(0);
+    setQueueCompletedToast(null);
+  };
+
+  // Selesai Mengantri & Keluar dari Customer (Selang Beberapa Menit)
+  const handleExitCustomerQueue = () => {
+    if (!activeQueueReport) return;
+    const completed = driverReportService.completeCustomerQueueExit({
+      reportId: activeQueueReport.id,
+      driverId: driverId || 'crew-driver',
+      driverName,
+      simulatedExtraMinutes: simulatedExtraMin,
+      exitNotes: notes.trim()
+    });
+
+    if (completed) {
+      setActiveQueueReport(null);
+      setSimulatedExtraMin(0);
+      setQueueCompletedToast(
+        `Tercatat! Kru keluar dari customer pukul ${completed.customerQueueExitFormatted} (Selang antri: ${completed.customerQueueDurationMinutes} menit).`
+      );
+      onReportSubmitted({
+        category: 'kendala_jalan',
+        delivery: activeDelivery,
+        notes: completed.notes,
+        photoUrl: completed.photoUrl || photoDataUrl,
+        distanceMeters: null,
+        isWithinRadius: true,
+        driverLat,
+        driverLng,
+        gmapsUrl: gmapsLink,
+        plateNumber: autoPlateNumber,
+        areaName: currentAreaName
+      });
+    }
+  };
 
   // Automatically attach stream to video element when camera is active
   useEffect(() => {
@@ -167,7 +278,6 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     }
   }, [isCameraActive]);
 
-  // Start live webcam / mobile camera stream in FULL SCREEN mode
   const startLiveCamera = async (mode: 'environment' | 'user' = facingMode) => {
     stopLiveCamera();
     setCameraError(null);
@@ -235,21 +345,11 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
         // ignore
       }
 
-      if (
-        errName === 'NotAllowedError' ||
-        errName === 'PermissionDeniedError' ||
-        msg.includes('Permission') ||
-        msg.includes('denied') ||
-        msg.includes('NotAllowedError') ||
-        msg.includes('SecurityError')
-      ) {
-        setCameraError('Akses kamera ditolak oleh Perangkat / OS. Buka Pengaturan HP (Settings -> Apps -> Browser -> Permissions -> Kamera) dan pilih "Izinkan", atau gunakan tombol "Kamera Bawaan HP" di bawah.');
-      } else if (errName === 'NotFoundError' || errName === 'DevicesNotFoundError' || msg.includes('NotFound')) {
-        setCameraError('Hardware kamera tidak ditemukan. Silakan gunakan tombol "Kamera Bawaan HP".');
-      } else if (errName === 'NotReadableError' || errName === 'TrackStartError' || msg.includes('NotReadable')) {
-        setCameraError('Kamera sedang digunakan aplikasi lain. Silakan gunakan tombol "Kamera Bawaan HP".');
+      // Jika kamera WebRTC ditolak, otomatis buka input kamera perangkat
+      if (cameraInputRef.current) {
+        cameraInputRef.current.click();
       } else {
-        setCameraError('Kamera tidak dapat dimulai otomatis. Anda dapat mengetuk tombol Kamera Bawaan HP di bawah.');
+        setCameraError('Akses kamera terkendala izin perangkat. Silakan izinkan akses kamera pada browser Anda.');
       }
     }
   };
@@ -258,14 +358,6 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     const nextMode = facingMode === 'environment' ? 'user' : 'environment';
     setFacingMode(nextMode);
     startLiveCamera(nextMode);
-  };
-
-  const openDeviceCameraNative = () => {
-    if (cameraInputRef.current) {
-      cameraInputRef.current.click();
-    } else if (fileInputRef.current) {
-      fileInputRef.current.click();
-    }
   };
 
   const stopLiveCamera = () => {
@@ -292,30 +384,29 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     ctx.fillStyle = grad;
     ctx.fillRect(0, bannerY, w, bannerHeight);
 
-    // Accent line
     ctx.fillStyle = category === 'kendala_jalan' ? '#f43f5e' : category === 'akhir_kiriman' ? '#10b981' : '#f59e0b';
     ctx.fillRect(0, bannerY, w, 4);
 
     const fontSize = Math.max(12, Math.floor(w * 0.024));
     ctx.textBaseline = 'top';
 
-    // Line 1: Header
     ctx.fillStyle = '#38bdf8';
     ctx.font = `bold ${fontSize}px system-ui, sans-serif`;
-    const titleTag = category === 'kendala_jalan'
-      ? '⚠️ KENDALA DI JALAN'
-      : category === 'akhir_kiriman'
-      ? '📦 AKHIR KIRIMAN (POD)'
-      : '☕ LAPORAN ISTIRAHAT KRU';
+    const titleTag =
+      category === 'kendala_jalan' && reportSubMode === 'antri_customer'
+        ? '⏳ ANTRI DI CUSTOMER'
+        : category === 'kendala_jalan'
+        ? '⚠️ KENDALA DI JALAN'
+        : category === 'akhir_kiriman'
+        ? '📦 AKHIR KIRIMAN (POD)'
+        : '☕ LAPORAN ISTIRAHAT KRU';
     ctx.fillText(`${titleTag} • PT ANUGRAH KEMASAN KREATIF`, 16, bannerY + 10);
 
-    // Line 2: Nama Area Kirim, Nomor Kendaraan & Inisial Armada
     ctx.fillStyle = '#ffffff';
     ctx.font = `bold ${fontSize - 1}px system-ui, sans-serif`;
     const initialText = fleetInitial ? ` [${fleetInitial}]` : '';
     ctx.fillText(`Area: ${currentAreaName} | Driver: ${driverName} [${autoPlateNumber}${initialText}]`, 16, bannerY + 12 + fontSize);
 
-    // Line 3: Waktu & GPS
     const nowStr = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' WIB';
     ctx.fillStyle = '#f59e0b';
     ctx.font = `bold ${fontSize - 2}px monospace`;
@@ -339,7 +430,6 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
     applyWatermarkToCanvas(canvas);
   };
 
-  // Handle Photo File Upload
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -380,11 +470,14 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   const gmapsLink = `https://www.google.com/maps?q=${driverLat},${driverLng}`;
 
   const getWhatsAppShareText = () => {
-    const categoryLabel = category === 'kendala_jalan'
-      ? '🚨 LAPORAN KENDALA DI JALAN'
-      : category === 'akhir_kiriman'
-      ? '📦 LAPORAN AKHIR KIRIMAN (SELESAI BONGKAR)'
-      : '📍 UPDATE TITIK LOKASI GMAPS';
+    const categoryLabel =
+      category === 'kendala_jalan' && reportSubMode === 'antri_customer'
+        ? '⏳ LAPORAN ANTRI DI CUSTOMER'
+        : category === 'kendala_jalan'
+        ? '🚨 LAPORAN KENDALA DI JALAN'
+        : category === 'akhir_kiriman'
+        ? '📦 LAPORAN AKHIR KIRIMAN (SELESAI BONGKAR)'
+        : '📍 UPDATE TITIK LOKASI GMAPS';
 
     return encodeURIComponent(
       `*${categoryLabel}*\n` +
@@ -404,6 +497,16 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
   };
 
   const handleSubmit = () => {
+    if (category === 'kendala_jalan' && reportSubMode === 'antri_customer') {
+      if (!activeQueueReport) {
+        handleStartQueueAtCustomer();
+        return;
+      } else {
+        handleExitCustomerQueue();
+        return;
+      }
+    }
+
     driverReportService.addReport({
       driverId: driverId || 'crew-driver',
       driverName: driverName,
@@ -439,7 +542,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
 
   return (
     <>
-      {/* FULL SCREEN LIVE CAMERA OVERLAY WHEN TAKING PHOTO */}
+      {/* LIVE CAMERA OVERLAY WHEN TAKING PHOTO */}
       {isCameraActive && (
         <div className="fixed inset-0 z-[80] w-screen h-screen bg-black flex flex-col justify-between p-0 animate-in fade-in duration-150">
           {/* Top Camera Bar */}
@@ -448,7 +551,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
               <span className="w-3 h-3 rounded-full bg-rose-500 animate-ping" />
               <div>
                 <div className="text-xs font-black text-white">
-                  KAMERA FULL SCREEN • {category === 'kendala_jalan' ? 'KENDALA JALAN' : category === 'akhir_kiriman' ? 'AKHIR KIRIMAN' : 'ISTIRAHAT'}
+                  KAMERA • {category === 'kendala_jalan' && reportSubMode === 'antri_customer' ? 'ANTRI CUSTOMER' : category === 'kendala_jalan' ? 'KENDALA JALAN' : category === 'akhir_kiriman' ? 'AKHIR KIRIMAN' : 'ISTIRAHAT'}
                 </div>
                 <div className="text-[10px] text-amber-300 font-mono">
                   Area: {currentAreaName} ({autoPlateNumber})
@@ -475,7 +578,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
             </div>
           </div>
 
-          {/* Full Screen Video Viewfinder */}
+          {/* Video Viewfinder */}
           <div className="flex-1 relative w-full h-full flex items-center justify-center overflow-hidden bg-black">
             <video
               ref={videoRef}
@@ -496,16 +599,8 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
             </div>
           </div>
 
-          {/* Bottom Full Screen Shutter Bar */}
-          <div className="p-6 bg-gradient-to-t from-black via-black/90 to-transparent flex items-center justify-between px-8 z-20">
-            <button
-              type="button"
-              onClick={openDeviceCameraNative}
-              className="px-3.5 py-2 rounded-xl bg-slate-800 text-white text-xs font-bold border border-slate-700 cursor-pointer"
-            >
-              Kamera HP
-            </button>
-
+          {/* Bottom Shutter Bar */}
+          <div className="p-6 bg-gradient-to-t from-black via-black/90 to-transparent flex items-center justify-center gap-8 px-8 z-20">
             <button
               type="button"
               onClick={captureLivePhoto}
@@ -527,7 +622,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
         </div>
       )}
 
-      {/* FULL SCREEN PHOTO PREVIEW MODAL */}
+      {/* PHOTO PREVIEW MODAL */}
       {isFullPhotoPreviewOpen && photoDataUrl && (
         <div
           className="fixed inset-0 z-[85] w-screen h-screen bg-black/95 flex flex-col justify-between p-4 animate-in fade-in duration-150"
@@ -535,7 +630,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
         >
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-white bg-slate-900/90 px-3 py-1.5 rounded-xl border border-slate-700">
-              Pratinjau Foto Bukti Full Screen (Utuh Tanpa Terpotong)
+              Pratinjau Foto Bukti
             </span>
             <button
               type="button"
@@ -548,12 +643,12 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
           <div className="flex-1 flex items-center justify-center overflow-hidden my-2">
             <img
               src={photoDataUrl}
-              alt="Full Screen Bukti"
+              alt="Bukti"
               className="w-full h-full object-contain"
             />
           </div>
           <div className="text-center text-xs text-slate-300 pb-2">
-            Ketuk di mana saja untuk menutup tampilan penuh
+            Ketuk di mana saja untuk menutup tampilan
           </div>
         </div>
       )}
@@ -572,7 +667,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                   Lapor Kendala &amp; Istirahat Kru
                 </h3>
                 <p className="text-[11px] text-slate-300 font-medium">
-                  Dokumentasi kendala rute perjalanan dan waktu istirahat kru
+                  Dokumentasi kendala jalan, antri di customer, dan waktu istirahat kru
                 </p>
               </div>
             </div>
@@ -588,39 +683,187 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
           {/* Scrollable Body */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
             
-            {/* Category Selector Tabs (Tanpa Akhir Kiriman) */}
+            {/* Category Selector Tabs: Kendala Jalan, Antri di Customer, Istirahat */}
             <div className="space-y-1.5">
               <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                 Pilih Jenis Laporan:
               </label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 <button
                   type="button"
-                  onClick={() => setCategory('kendala_jalan')}
-                  className={`py-2.5 px-2 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer ${
-                    category === 'kendala_jalan'
+                  onClick={() => {
+                    setCategory('kendala_jalan');
+                    setReportSubMode('kendala_umum');
+                  }}
+                  className={`py-2.5 px-2 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                    category === 'kendala_jalan' && reportSubMode === 'kendala_umum'
                       ? 'bg-rose-500/20 border-rose-500 text-rose-400 shadow-sm'
                       : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                  <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
                   <span>Kendala Jalan</span>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => setCategory('istirahat')}
-                  className={`py-2.5 px-2 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer ${
+                  onClick={() => {
+                    setCategory('kendala_jalan');
+                    setReportSubMode('antri_customer');
+                  }}
+                  className={`py-2.5 px-2 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer relative ${
+                    category === 'kendala_jalan' && reportSubMode === 'antri_customer'
+                      ? 'bg-cyan-500/20 border-cyan-500 text-cyan-300 shadow-sm'
+                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Clock className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                  <span>Antri Customer</span>
+                  {activeQueueReport && (
+                    <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping absolute top-1.5 right-1.5" />
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCategory('istirahat');
+                    setReportSubMode('kendala_umum');
+                  }}
+                  className={`py-2.5 px-2 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
                     category === 'istirahat' || category === 'update_lokasi'
                       ? 'bg-amber-500/20 border-amber-500 text-amber-400 shadow-sm'
                       : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  <Coffee className="w-4 h-4 text-amber-400 shrink-0" />
+                  <Coffee className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                   <span>Istirahat</span>
                 </button>
               </div>
             </div>
+
+            {/* ⏳ FITUR BARU: KENDALA SEDANG MENGANTRI DI CUSTOMER -> SELANG BEBERAPA MENIT BARU KELUAR DARI CUSTOMER */}
+            {category === 'kendala_jalan' && (
+              <div className={`p-3.5 rounded-2xl border space-y-3 transition ${
+                activeQueueReport
+                  ? 'bg-cyan-950/40 border-cyan-500/60 shadow-lg shadow-cyan-500/10'
+                  : reportSubMode === 'antri_customer'
+                  ? 'bg-slate-950 border-cyan-500/50'
+                  : 'bg-slate-950/80 border-slate-800'
+              }`}>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center border shrink-0 ${
+                      activeQueueReport
+                        ? 'bg-cyan-500/20 border-cyan-400 text-cyan-300 animate-pulse'
+                        : 'bg-amber-500/15 border-amber-500/30 text-amber-400'
+                    }`}>
+                      <Store className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="font-black text-white text-xs flex items-center gap-1.5">
+                        <span>Status Antrean Bongkar di Customer</span>
+                        {activeQueueReport && (
+                          <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-rose-500 text-white animate-pulse">
+                            SEDANG MENGANTRI
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-400">
+                        Catat waktu mulai mengantri di customer hingga selang beberapa menit keluar dari customer
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Input Nama Customer / Toko */}
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-400">
+                    Nama Customer / Toko Tempat Mengantri:
+                  </label>
+                  <input
+                    type="text"
+                    value={customerOutletInput}
+                    onChange={(e) => setCustomerOutletInput(e.target.value)}
+                    placeholder={currentAreaName}
+                    disabled={Boolean(activeQueueReport)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-semibold focus:outline-none focus:border-cyan-500 disabled:opacity-75"
+                  />
+                </div>
+
+                {queueCompletedToast && (
+                  <div className="p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>{queueCompletedToast}</span>
+                  </div>
+                )}
+
+                {activeQueueReport ? (
+                  <div className="space-y-3 pt-1">
+                    <div className="grid grid-cols-2 gap-2 bg-slate-950 p-2.5 rounded-xl border border-cyan-500/30">
+                      <div>
+                        <span className="text-[10px] text-slate-400 block">Mulai Mengantri:</span>
+                        <span className="font-mono font-black text-amber-300 text-xs">
+                          {activeQueueReport.customerQueueStartFormatted}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-400 block">Selang Waktu Antri:</span>
+                        <span className="font-mono font-black text-cyan-300 text-xs">
+                          {totalQueueMinutesDisplay} Menit ({elapsedQueueSeconds % 60} dtk)
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Simulasi Tambah Selang Menit agar mudah ditrial langsung */}
+                    <div className="flex items-center justify-between gap-2 bg-slate-900/90 px-2.5 py-2 rounded-xl border border-slate-800">
+                      <span className="text-[10px] text-slate-300 font-semibold">
+                        Simulasi Selang Menit Keluar:
+                      </span>
+                      <div className="flex items-center gap-1">
+                        {[5, 15, 30].map((minVal) => (
+                          <button
+                            key={minVal}
+                            type="button"
+                            onClick={() => setSimulatedExtraMin(prev => prev + minVal)}
+                            className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-[10px] font-mono font-bold cursor-pointer transition"
+                          >
+                            +{minVal}m
+                          </button>
+                        ))}
+                        {simulatedExtraMin > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setSimulatedExtraMin(0)}
+                            className="px-2 py-1 rounded-lg bg-rose-500/20 text-rose-300 text-[10px] font-bold cursor-pointer"
+                          >
+                            Reset
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleExitCustomerQueue}
+                      className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 cursor-pointer active:scale-95 transition"
+                    >
+                      <LogOut className="w-4 h-4" />
+                      <span>Selesai Antri &amp; Keluar dari Customer ({totalQueueMinutesDisplay} Menit)</span>
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleStartQueueAtCustomer}
+                    className="w-full py-2.5 px-3 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/50 text-cyan-300 font-black text-xs flex items-center justify-center gap-2 cursor-pointer active:scale-95 transition"
+                  >
+                    <Play className="w-3.5 h-3.5 fill-current" />
+                    <span>Mulai Mengantri di Customer Sekarang</span>
+                  </button>
+                )}
+              </div>
+            )}
 
             {/* Nomor Kendaraan Armada (Otomatis Terkunci Sesuai Pilihan Armada Setelah Check-In) */}
             <div className="space-y-1">
@@ -669,11 +912,11 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
               </div>
             </div>
 
-            {/* Photo Capture & Upload Section */}
+            {/* Photo Capture & Upload Section (Tanpa Kata Full Screen & Tanpa Fitur Alternatif Buka Kamera) */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                  Unggah Foto Bukti (Kamera Full Screen / Galeri):
+                  Unggah Foto Bukti (Kamera):
                 </label>
                 {photoDataUrl && (
                   <div className="flex items-center gap-2">
@@ -683,21 +926,13 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                       className="text-[10px] text-amber-400 font-bold hover:underline cursor-pointer flex items-center gap-1"
                     >
                       <Camera className="w-3 h-3" />
-                      <span>Foto Ulang Full Screen</span>
-                    </button>
-                    <span className="text-slate-600">&bull;</span>
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      className="text-[10px] text-blue-400 font-bold hover:underline cursor-pointer"
-                    >
-                      Pilih Galeri
+                      <span>Buka Kamera</span>
                     </button>
                   </div>
                 )}
               </div>
 
-              {/* Native Device Camera Trigger */}
+              {/* Hidden Native Device Camera Trigger */}
               <input
                 type="file"
                 ref={cameraInputRef}
@@ -707,7 +942,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                 className="hidden"
               />
 
-              {/* Gallery / File Picker */}
+              {/* Hidden Gallery / File Picker */}
               <input
                 type="file"
                 ref={fileInputRef}
@@ -716,7 +951,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                 className="hidden"
               />
 
-              {/* ERROR ALERT & RECOVERY IF CAMERA PERMISSION DENIED */}
+              {/* ERROR ALERT IF CAMERA PERMISSION DENIED */}
               {cameraError && !isCameraActive && (
                 <div className="p-3 rounded-2xl bg-amber-500/15 border border-amber-500/40 text-amber-200 space-y-2">
                   <div className="flex items-start gap-2">
@@ -733,15 +968,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                       className="px-3 py-1.5 rounded-lg bg-amber-500 text-slate-950 font-bold text-[11px] flex items-center gap-1.5 cursor-pointer hover:bg-amber-400 active:scale-95 transition"
                     >
                       <RefreshCw className="w-3.5 h-3.5" />
-                      <span>Izinkan &amp; Buka Kamera Ulang</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={openDeviceCameraNative}
-                      className="px-2.5 py-1.5 rounded-lg bg-slate-800 text-cyan-300 font-bold text-[11px] border border-slate-700 hover:bg-slate-700 cursor-pointer transition flex items-center gap-1"
-                    >
-                      <Camera className="w-3.5 h-3.5" />
-                      <span>Kamera Bawaan HP</span>
+                      <span>Buka Kamera</span>
                     </button>
                   </div>
                 </div>
@@ -751,7 +978,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                 <div className="relative rounded-2xl overflow-hidden border border-slate-700 bg-black shadow-lg group">
                   <img
                     src={photoDataUrl}
-                    alt="Foto Bukti Full"
+                    alt="Foto Bukti"
                     onClick={() => setIsFullPhotoPreviewOpen(true)}
                     className="w-full max-h-64 object-contain bg-black cursor-pointer"
                   />
@@ -765,10 +992,10 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                     className="absolute top-2 right-2 bg-black/80 hover:bg-black text-white px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 border border-white/20 cursor-pointer"
                   >
                     <Maximize2 className="w-3 h-3 text-amber-400" />
-                    <span>Layar Penuh</span>
+                    <span>Perbesar</span>
                   </button>
                   <div className="p-2 bg-slate-950 border-t border-slate-800 flex items-center justify-between gap-2">
-                    <span className="text-[10px] text-slate-400">Ketuk gambar untuk layar penuh</span>
+                    <span className="text-[10px] text-slate-400">Ketuk gambar untuk memperbesar</span>
                     <div className="flex items-center gap-1.5">
                       <button
                         type="button"
@@ -776,14 +1003,7 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                         className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-amber-400 font-bold text-[10px] border border-amber-500/30 cursor-pointer flex items-center gap-1"
                       >
                         <Camera className="w-3 h-3" />
-                        <span>Kamera Full Screen</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={openDeviceCameraNative}
-                        className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-cyan-400 font-bold text-[10px] border border-cyan-500/30 cursor-pointer flex items-center gap-1"
-                      >
-                        <span>Kamera HP</span>
+                        <span>Buka Kamera</span>
                       </button>
                     </div>
                   </div>
@@ -801,24 +1021,13 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                     </div>
                     <div className="text-left">
                       <div className="font-black text-white text-sm">
-                        Buka Kamera Full Screen
+                        Buka Kamera
                       </div>
                       <div className="text-[11px] text-amber-400 font-medium mt-0.5">
-                        Layar penuh otomatis &amp; foto berstempel resmi operasional
+                        Ambil foto bukti berstempel resmi operasional
                       </div>
                     </div>
                   </button>
-
-                  <div className="grid grid-cols-1 gap-2">
-                    <button
-                      type="button"
-                      onClick={openDeviceCameraNative}
-                      className="py-2.5 px-3 rounded-xl bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold text-[11px] flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-95"
-                    >
-                      <Camera className="w-3.5 h-3.5 text-cyan-400" />
-                      <span>Alternatif: Buka Kamera Bawaan HP</span>
-                    </button>
-                  </div>
                 </div>
               )}
             </div>
@@ -832,7 +1041,9 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder={
-                  category === 'kendala_jalan'
+                  category === 'kendala_jalan' && reportSubMode === 'antri_customer'
+                    ? 'Contoh: Sedang mengantri bongkar di gudang customer karena ada 2 armada di depan...'
+                    : category === 'kendala_jalan'
                     ? 'Contoh: Macet perbaikan jalan di jalur Rogojampi, perkiraan keterlambatan 25 menit...'
                     : category === 'akhir_kiriman'
                     ? 'Contoh: Muatan diterima lengkap di gudang toko dalam keadaan baik...'
@@ -862,7 +1073,13 @@ export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
               className="flex-1 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-black text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md shadow-amber-500/20 cursor-pointer"
             >
               <Send className="w-4 h-4" />
-              <span>Simpan Laporan</span>
+              <span>
+                {category === 'kendala_jalan' && reportSubMode === 'antri_customer'
+                  ? activeQueueReport
+                    ? 'Selesai & Keluar Customer'
+                    : 'Mulai Antri Customer'
+                  : 'Simpan Laporan'}
+              </span>
             </button>
           </div>
 

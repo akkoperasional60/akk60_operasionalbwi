@@ -243,7 +243,7 @@ class DriverChecklistService {
     fleetId: string,
     plateNumber: string,
     vehicleType: string,
-    odometerKm: number = 120000,
+    odometerKm: number = 0,
     fuelPercent: number = 80
   ): DriverVehicleChecklist {
     const now = new Date();

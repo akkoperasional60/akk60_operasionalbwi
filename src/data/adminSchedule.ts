@@ -113,7 +113,7 @@ export const ADMIN_SCHEDULE_WEEKS: AdminScheduleWeek[] = [
         dateString: '08 Januari 2026',
         pengiriman: [
           { driver: 'BUDI', helper: 'YUSUF', area: 'JEMBER BARAT', armada: 'DS2' },
-          { driver: 'ARIS', helper: 'ROHMAN', area: 'DENPASAR', armada: 'DS3' },
+          { driver: 'ARIS', helper: 'ROHMAN', area: 'DENPASAR 1', armada: 'DS3' },
           { driver: 'TIAR', helper: 'TEGUH, AHMAD', area: 'GROSIR GENDOH - GENTENG', armada: 'DS1' },
           { driver: 'HADI', helper: 'FARIS', area: 'GROSIR GENDOH - GENTENG', armada: 'NL2' },
           { driver: 'WIBI', helper: 'RIFAL', area: 'SONGGON RETAIL', armada: 'NS1' },
@@ -186,7 +186,7 @@ Tanggal,No,Driver,Helper,,Area Kirim,Armada
 ,6,ALDI,WAHYU,,KETAPANG WONGSOREJO,NS3
 ------,BLACK_ROW_SEPARATOR,,,,,
 08/01/2026,1,BUDI,YUSUF,,JEMBER BARAT,DS2
-,2,ARIS,ROHMAN,,DENPASAR,DS3
+,2,ARIS,ROHMAN,,DENPASAR 1,DS3
 ,3,TIAR,TEGUH,AHMAD,GROSIR GENDOH - GENTENG,DS1
 ,4,HADI,FARIS,,GROSIR GENDOH - GENTENG,NL2
 ,5,WIBI,RIFAL,,SONGGON RETAIL,NS1
@@ -262,8 +262,8 @@ export function buildMonthSpecificSchedule(year: number, month: number): AdminSc
     ],
     // 2: Maret (12 Unique Areas)
     2: [
-      { driver: 'Supri', helper: 'Rifal, Aldi', area: 'DENPASAR 1 & 2', armada: 'DS3' },
-      { driver: 'Wahyu', helper: 'Yusuf', area: 'KUTA - NUSA DUA', armada: 'DS1' },
+      { driver: 'Supri', helper: 'Rifal, Aldi', area: 'DENPASAR 1', armada: 'DS3' },
+      { driver: 'Wahyu', helper: 'Yusuf', area: 'DENPASAR 2', armada: 'DS1' },
       { driver: 'Joko', helper: 'Yono', area: 'SINGARAJA NORTH', armada: 'DS5' },
       { driver: 'Tiar', helper: 'Faris', area: 'BONDOWOSO CITY', armada: 'NS3' },
       { driver: 'Aris', helper: 'Rohman', area: 'SITUBONDO PANTURA', armada: 'DS2' },

@@ -206,6 +206,205 @@ async function startServer() {
     }
   });
 
+  // API route for Warehouse Gemini AI Vision Scan
+  app.post("/api/warehouse/ai-vision-scan", async (req, res) => {
+    const { photoDataUrl, mode } = req.body || {};
+    try {
+      if (!genAI) {
+        return res.json({
+          success: true,
+          fallback: true,
+          analysis: {
+            skuCode: 'AKK-KBX-001',
+            skuName: 'Karton Box Corrugated B-Flute 60x40x40 cm (Polos)',
+            category: 'Karton Box',
+            detectedQty: 100,
+            unit: 'Pcs',
+            qcStatus: 'QC Lolos (100%)',
+            suggestedFloor: 1,
+            suggestedBin: 'A-01-L1',
+            suggestedLevel: 'Level 1 (Floor Pallet Heavy)',
+            reasoning: 'Karton Box Corrugated bervolume besar dialokasikan di Lantai 1 Ground Pallet dekat Loading Dock.'
+          }
+        });
+      }
+
+      let mimeType = 'image/jpeg';
+      let base64Data = '';
+      if (typeof photoDataUrl === 'string' && photoDataUrl.includes('base64,')) {
+        const parts = photoDataUrl.split('base64,');
+        const mimeMatch = parts[0].match(/:(.*?);/);
+        if (mimeMatch) mimeType = mimeMatch[1];
+        base64Data = parts[1];
+      }
+
+      const prompt = `
+Anda adalah AI Vision Quality Control & Slotting Inspector untuk pergudangan PT Anugrah Kemasan Kreatif (AKK).
+Gudang AKK memiliki 2 Lantai:
+- Lantai 1 (Ground Floor): Khusus Karton Box Corrugated besar, berat, fast-moving, palet utuh (Bin A-01 s/d A-04, B-01 s/d B-04, C-01 s/d C-04). Rak memiliki 4 level: Level 1 (Ground Pallet), Level 2 (Middle Picking), Level 3 (Buffer), Level 4 (Top Overstock).
+- Lantai 2 (Mezzanine): Khusus Kemasan Food Grade (Ivory/Kraft), Paper Cup & Lid, Lakban, Strapping Band, Aksesoris kemasan ringan (Bin E-01 s/d E-04, F-01 s/d F-04, G-01 s/d G-04). Rak memiliki 3 level: Level 1 (Hand Pick Lower), Level 2 (Hand Pick Upper), Level 3 (Top Shelf).
+
+Analisis foto kemasan barang/karton berikut untuk proses ${mode || 'INBOUND'}:
+Kembalikan respon DALAM FORMAT JSON MURNI TANPA MARKDOWN BACKTICKS:
+{
+  "skuCode": "string (contoh: AKK-KBX-001, AKK-KBX-003, AKK-PLS-014, atau kode barcode terlihat)",
+  "skuName": "string nama spesifikasi barang kemasan",
+  "category": "Karton Box" | "Food Grade" | "Plastik & Wrap" | "Cup & Lid" | "Lakban & Aksesoris",
+  "detectedQty": 100,
+  "unit": "Pcs" | "Roll" | "Ball" | "Karton",
+  "qcStatus": "QC Lolos (100%)",
+  "suggestedFloor": 1,
+  "suggestedBin": "string (misal A-01-L1 untuk lantai 1, atau E-02-L2 untuk lantai 2)",
+  "suggestedLevel": "string level rak",
+  "reasoning": "string alasan penempatan lantai dan rak"
+}
+`;
+
+      const contents: any[] = [
+        {
+          role: 'user',
+          parts: [
+            ...(base64Data ? [{ inlineData: { mimeType, data: base64Data } }] : []),
+            { text: prompt }
+          ]
+        }
+      ];
+
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Gemini API call timed out")), 4500)
+      );
+
+      const result = await Promise.race([
+        genAI.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents,
+          config: {
+            temperature: 0.2,
+            responseMimeType: 'application/json'
+          }
+        }),
+        timeoutPromise
+      ]);
+
+      const text = result.text ? result.text.trim() : '{}';
+      const parsed = JSON.parse(text);
+      return res.json({ success: true, analysis: parsed });
+    } catch (err: any) {
+      console.warn("AI Vision scan error:", err?.message || err);
+      return res.json({
+        success: true,
+        fallback: true,
+        analysis: {
+          skuCode: 'AKK-KBX-001',
+          skuName: 'Karton Box Corrugated B-Flute 60x40x40 cm (Polos)',
+          category: 'Karton Box',
+          detectedQty: 100,
+          unit: 'Pcs',
+          qcStatus: 'QC Lolos (100%)',
+          suggestedFloor: 1,
+          suggestedBin: 'A-01-L1',
+          suggestedLevel: 'Level 1 (Floor Pallet Heavy)',
+          reasoning: 'Karton Box Corrugated volume besar dialokasikan di Lantai 1 Ground Pallet dekat Loading Dock.'
+        }
+      });
+    }
+  });
+
+  // API route for Warehouse Gemini AI Slotting Advisor
+  app.post("/api/warehouse/ai-slotting-advisor", async (req, res) => {
+    const { currentFloor } = req.body || {};
+    try {
+      if (!genAI) {
+        return res.json({
+          success: true,
+          fallback: true,
+          data: {
+            recommendations: [
+              {
+                title: "Pengelompokan Karton Box Fast-Moving di Lorong A",
+                category: "Karton Box",
+                action: "Posisikan SKU AKK-KBX-001 di Lantai 1 Level 1 menghadap Dock 1.",
+                impact: "Memangkas waktu tempuh forklift sebesar 22% saat penyiapan armada pagi."
+              },
+              {
+                title: "Relokasi Kemasan Food Grade ke Lantai 2 Mezzanine",
+                category: "Food Grade",
+                action: "Simpan Box Ivory 22x22 di Rak E-01 Level 2 yang bersih dan bebas debu lantai.",
+                impact: "Menjaga standar higienitas food grade dan memaksimalkan ruang vertikal mezzanine."
+              },
+              {
+                title: "Buffer Stock Material Pendukung di Lantai 2 Lorong G",
+                category: "Lakban & Aksesoris",
+                action: "Karton lakban OPP dan Strapping Band dialokasikan di rak bertingkat Level 2/3.",
+                impact: "Mengurangi kepadatan jalur forklift utama lantai 1."
+              }
+            ]
+          }
+        });
+      }
+
+      const prompt = `
+Sebagai Senior Warehouse Layout & Slotting Engineer untuk PT Anugrah Kemasan Kreatif DC Banyuwangi (2 Lantai: Lantai 1 Ground Floor untuk Karton Box berat & Fast Moving dengan rak 4 tingkat, Lantai 2 Mezzanine untuk Food Grade & Aksesoris Ringan dengan rak 3 tingkat):
+Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat ini pada Lantai ${currentFloor || 1} dalam format JSON murni:
+{
+  "recommendations": [
+    {
+      "title": "string judul optimasi",
+      "category": "string nama kategori",
+      "action": "string langkah aksi",
+      "impact": "string dampak efisiensi (misal waktu muat atau beban tonase)"
+    }
+  ]
+}
+`;
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Gemini API call timed out")), 4500)
+      );
+
+      const result = await Promise.race([
+        genAI.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          config: {
+            temperature: 0.3,
+            responseMimeType: 'application/json'
+          }
+        }),
+        timeoutPromise
+      ]);
+      const parsed = JSON.parse(result.text || '{}');
+      return res.json({ success: true, data: parsed });
+    } catch (err: any) {
+      console.warn("AI Slotting Advisor error:", err?.message || err);
+      return res.json({
+        success: true,
+        fallback: true,
+        data: {
+          recommendations: [
+            {
+              title: "Pengelompokan Karton Box Fast-Moving di Lorong A",
+              category: "Karton Box",
+              action: "Posisikan SKU AKK-KBX-001 di Lantai 1 Level 1 menghadap Dock 1.",
+              impact: "Memangkas waktu tempuh forklift sebesar 22% saat penyiapan armada pagi."
+            },
+            {
+              title: "Relokasi Kemasan Food Grade ke Lantai 2 Mezzanine",
+              category: "Food Grade",
+              action: "Simpan Box Ivory 22x22 di Rak E-01 Level 2 yang higienis.",
+              impact: "Menjaga standar sanitasi food grade dan memaksimalkan ruang vertikal mezzanine."
+            },
+            {
+              title: "Buffer Stock Material Pendukung di Lantai 2 Lorong G",
+              category: "Lakban & Aksesoris",
+              action: "Karton lakban OPP dan Strapping Band dialokasikan di rak bertingkat Level 2/3.",
+              impact: "Mengurangi kepadatan jalur forklift utama lantai 1."
+            }
+          ]
+        }
+      });
+    }
+  });
+
   // API route for WhatsApp notification
   app.post("/api/notify-whatsapp", async (req, res) => {
     const { phoneNumber, message } = req.body;

@@ -41,7 +41,13 @@ import {
   ShieldCheck,
   Video,
   Brush,
-  BarChart3
+  BarChart3,
+  Camera,
+  Package,
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  ClipboardCheck,
+  Map as MapIcon
 } from 'lucide-react';
 import { AkkLogo } from './AkkLogo';
 import { ThemeSwitcher } from './ThemeSwitcher';
@@ -88,6 +94,12 @@ export type NavTab =
   | 'training_karyawan'
   | 'finance_dashboard'
   | 'warehouse_dashboard'
+  | 'warehouse_inventory'
+  | 'warehouse_inbound'
+  | 'warehouse_outbound'
+  | 'warehouse_scanner'
+  | 'warehouse_slotting'
+  | 'warehouse_opname'
   | 'marketing_online'
   | 'marketing_offline'
   | 'activity_log'
@@ -201,15 +213,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
         title={isMinimized ? label : undefined}
         className={`group relative w-full flex items-center ${
           isMinimized ? 'justify-center px-2' : 'justify-between px-3'
-        } py-2 rounded-lg text-xs font-medium cursor-pointer transition-colors duration-150 select-none ${
+        } py-2 rounded-lg text-xs font-medium cursor-pointer transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] select-none overflow-hidden ${
           isActive
             ? 'bg-blue-600 text-white font-semibold shadow-xs'
             : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/70'
         }`}
       >
-        <div className="flex items-center gap-2.5 min-w-0">
+        <div className={`flex items-center min-w-0 transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${isMinimized ? 'gap-0' : 'gap-2.5'}`}>
           <span
-            className={`shrink-0 transition-colors ${
+            className={`shrink-0 transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:scale-105 ${
               isActive
                 ? 'text-white'
                 : 'text-slate-500 dark:text-slate-400 group-hover:text-slate-900 dark:group-hover:text-white'
@@ -217,24 +229,38 @@ export const Sidebar: React.FC<SidebarProps> = ({
           >
             {icon}
           </span>
-          {!isMinimized && (
-            <span className="truncate">
-              {label}
-            </span>
-          )}
+          <span
+            className={`truncate whitespace-nowrap transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] origin-left ${
+              isMinimized
+                ? 'max-w-0 opacity-0 -translate-x-2 pointer-events-none'
+                : 'max-w-[180px] opacity-100 translate-x-0'
+            }`}
+          >
+            {label}
+          </span>
         </div>
 
-        {!isMinimized && badge}
+        {badge && (
+          <span
+            className={`shrink-0 transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+              isMinimized
+                ? 'max-w-0 opacity-0 scale-75 pointer-events-none overflow-hidden'
+                : 'max-w-[60px] opacity-100 scale-100'
+            }`}
+          >
+            {badge}
+          </span>
+        )}
       </button>
     );
   };
 
   const renderSidebarContent = () => (
-    <div className="h-full flex flex-col justify-between overflow-y-auto bg-slate-900 border-r border-slate-800">
-      {/* Brand Header & User Session Card */}
-      <div className={`border-b border-slate-800 ${isMinimized ? 'p-3 flex flex-col items-center justify-center' : 'p-4'}`}>
+    <div className="h-full flex flex-col justify-between overflow-y-auto overflow-x-hidden bg-slate-900 border-r border-slate-800 transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]">
+      {/* Brand Header */}
+      <div className={`border-b border-slate-800 transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] ${isMinimized ? 'p-3 flex flex-col items-center justify-center' : 'p-4'}`}>
         {isMinimized ? (
-          <div className="flex flex-col items-center gap-3 w-full">
+          <div className="flex flex-col items-center gap-2.5 w-full">
             <div
               onClick={() => handleTabClick('dashboard')}
               className="cursor-pointer hover:opacity-85 transition"
@@ -247,143 +273,40 @@ export const Sidebar: React.FC<SidebarProps> = ({
             {onToggleMinimize && (
               <button
                 onClick={onToggleMinimize}
-                className="w-9 h-8 rounded-lg bg-slate-950 border border-slate-800 text-amber-400 hover:bg-amber-500 hover:text-slate-950 hover:border-amber-500 flex items-center justify-center transition-all cursor-pointer shadow-xs"
+                className="w-9 h-8 rounded-lg bg-slate-950 border border-slate-800 text-amber-400 hover:bg-amber-500 hover:text-slate-950 hover:border-amber-500 hover:scale-105 active:scale-95 flex items-center justify-center transition-all duration-200 cursor-pointer shadow-xs"
                 title="Perlebar Sidebar"
                 aria-label="Perlebar Sidebar"
               >
-                <ChevronRight className="w-4 h-4 stroke-[2.5]" />
+                <ChevronRight className="w-4 h-4 stroke-[2.5] transition-transform duration-300" />
               </button>
             )}
-
-            {/* Compact User Avatar */}
-            <div className="relative pt-1">
-              <div
-                onClick={() => onOpenAuth('login')}
-                className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold text-xs cursor-pointer hover:opacity-90 transition shadow-sm"
-                title={`${currentUser.fullName || 'User'} (${currentUser.role})`}
-              >
-                {currentUser.fullName ? currentUser.fullName.substring(0, 1).toUpperCase() : 'U'}
-              </div>
-              <span
-                className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-slate-900 ${
-                  currentUser.status === 'approved'
-                    ? 'bg-emerald-500'
-                    : currentUser.status === 'pending'
-                    ? 'bg-amber-500'
-                    : 'bg-rose-500'
-                }`}
-              />
-            </div>
           </div>
         ) : (
-          <>
-            <div className="flex items-center justify-between w-full gap-2">
-              <div
-                onClick={() => handleTabClick('dashboard')}
-                className="cursor-pointer hover:opacity-90 transition-opacity min-w-0"
+          <div className="flex items-center justify-between w-full gap-2">
+            <div
+              onClick={() => handleTabClick('dashboard')}
+              className="cursor-pointer hover:opacity-90 transition-opacity min-w-0"
+            >
+              <AkkLogo size="sm" showSubtitle={true} />
+            </div>
+
+            {/* Single Sidebar Minimize Arrow Button */}
+            {onToggleMinimize && (
+              <button
+                onClick={onToggleMinimize}
+                className="w-8 h-8 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 hover:bg-amber-500 hover:text-slate-950 hover:border-amber-500 hover:scale-105 active:scale-95 flex items-center justify-center transition-all duration-200 cursor-pointer shrink-0 shadow-xs"
+                title="Minimalkan Sidebar"
+                aria-label="Minimalkan Sidebar"
               >
-                <AkkLogo size="sm" showSubtitle={true} />
-              </div>
-
-              {/* Single Sidebar Minimize Arrow Button */}
-              {onToggleMinimize && (
-                <button
-                  onClick={onToggleMinimize}
-                  className="w-8 h-8 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 hover:bg-amber-500 hover:text-slate-950 hover:border-amber-500 flex items-center justify-center transition-all cursor-pointer shrink-0 shadow-xs"
-                  title="Minimalkan Sidebar"
-                  aria-label="Minimalkan Sidebar"
-                >
-                  <ChevronLeft className="w-4 h-4 stroke-[2.5]" />
-                </button>
-              )}
-            </div>
-
-            {/* User Session Profile Card */}
-            <div className="mt-3.5 p-3 rounded-xl border border-slate-800 bg-slate-950 space-y-2.5">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="relative shrink-0">
-                    <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold text-xs shadow-xs">
-                      {currentUser.fullName ? currentUser.fullName.substring(0, 1).toUpperCase() : 'U'}
-                    </div>
-                    <span
-                      className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ring-2 ring-slate-950 ${
-                        currentUser.status === 'approved'
-                          ? 'bg-emerald-500'
-                          : currentUser.status === 'pending'
-                          ? 'bg-amber-500'
-                          : 'bg-rose-500'
-                      }`}
-                    />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="text-xs font-bold text-white truncate">
-                      {currentUser.fullName}
-                    </div>
-                    <div className="text-[10px] text-slate-400 truncate font-medium">
-                      {currentUser.role === 'super_admin' && 'Super Admin / Mgr'}
-                      {currentUser.role === 'spv_logistik' && 'SPV Logistik'}
-                      {currentUser.role === 'operasional' && 'Operasional'}
-                      {currentUser.role === 'security' && 'Security / Satpam'}
-                      {currentUser.role === 'driver' && 'Kru Supir Utama'}
-                      {currentUser.role === 'sales_admin' && 'Adm. Penjualan'}
-                      {currentUser.role === 'purchasing_admin' && 'Adm. Pembelian'}
-                      {currentUser.role === 'hr_admin' && 'HR Admin'}
-                      {currentUser.role === 'finance_tax_admin' && 'Finance & Tax'}
-                      {currentUser.role === 'warehouse_admin' && 'Admin Gudang'}
-                      {currentUser.role === 'marketing_online' && 'Marketing Online'}
-                      {currentUser.role === 'marketing_offline' && 'Marketing Offline'}
-                      {currentUser.role === 'crew_helper' && 'Kru Helper'}
-                      {currentUser.role === 'unassigned' && 'Perlu Diisi'}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Status Indicator */}
-                <div className="shrink-0">
-                  {currentUser.status === 'approved' ? (
-                    <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                      Aktif
-                    </span>
-                  ) : currentUser.status === 'pending' ? (
-                    <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                      Pending
-                    </span>
-                  ) : currentUser.status === 'inactive' ? (
-                    <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
-                      Nonaktif
-                    </span>
-                  ) : (
-                    <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
-                      Ditolak
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Quick Actions */}
-              <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-[10px]">
-                <button
-                  onClick={() => onOpenAuth('login')}
-                  className="text-blue-400 hover:underline font-bold flex items-center gap-1 cursor-pointer"
-                >
-                  <LogIn className="w-3 h-3" />
-                  <span>Ganti Akun</span>
-                </button>
-                <button
-                  onClick={() => onOpenAuth('register')}
-                  className="text-slate-400 hover:text-white font-semibold cursor-pointer"
-                >
-                  Daftar Baru
-                </button>
-              </div>
-            </div>
-          </>
+                <ChevronLeft className="w-4 h-4 stroke-[2.5] transition-transform duration-300" />
+              </button>
+            )}
+          </div>
         )}
       </div>
 
       {/* Structured Navigation Menu */}
-      <nav className={`${isMinimized ? 'p-2 space-y-1.5' : 'p-3 space-y-3'} flex-1 overflow-x-hidden`}>
+      <nav className={`${isMinimized ? 'p-2 space-y-1.5' : 'p-3 space-y-3'} flex-1 overflow-x-hidden transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]`}>
         {/* ============================================================ */}
         {/* MENU UTAMA PALING ATAS: DASHBOARD                            */}
         {/* ============================================================ */}
@@ -593,7 +516,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
               {(!isMinimized ? isWarehouseOpen : true) && (
                 <div className={`space-y-0.5 ${!isMinimized ? 'pl-2 border-l border-slate-800 ml-2.5 my-1' : ''}`}>
-                  {renderNavItem('warehouse_dashboard', 'Dashboard Gudang', <Building2 className="w-4 h-4" />)}
+                  {renderNavItem('warehouse_dashboard', 'Dashboard', <Building2 className="w-4 h-4" />)}
+                  {canAccess(currentUser, 'warehouse', 'stok_barang') && renderNavItem('warehouse_inventory', 'Master SKU & Stok Bin', <Package className="w-4 h-4" />)}
+                  {canAccess(currentUser, 'warehouse', 'permintaan_barang') && renderNavItem('warehouse_inbound', 'Inbound (Barang Masuk)', <ArrowDownToLine className="w-4 h-4" />)}
+                  {canAccess(currentUser, 'warehouse', 'ceklis_muat') && renderNavItem('warehouse_outbound', 'Outbound (Picking & Muat)', <ArrowUpFromLine className="w-4 h-4" />)}
+                  {renderNavItem(
+                    'warehouse_scanner',
+                    'Pemindaian Foto Barang',
+                    <Camera className="w-4 h-4 text-cyan-400" />,
+                    <span className="px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-extrabold text-[9px] uppercase tracking-wide">
+                      Scan
+                    </span>
+                  )}
+                  {canAccess(currentUser, 'warehouse', 'stok_barang') && renderNavItem('warehouse_slotting', 'Denah Rak & Kapasitas', <MapIcon className="w-4 h-4" />)}
+                  {canAccess(currentUser, 'warehouse', 'opname_stok') && renderNavItem('warehouse_opname', 'Stok Opname & Kartu Stok', <ClipboardCheck className="w-4 h-4" />)}
                 </div>
               )}
             </div>
@@ -964,7 +900,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {/* Desktop Sidebar (Fixed on lg+) */}
-      <aside className={`hidden lg:block fixed inset-y-0 left-0 z-30 transition-all duration-300 ease-in-out ${isMinimized ? 'w-20' : 'w-72'}`}>
+      <aside className={`hidden lg:block fixed inset-y-0 left-0 z-30 transition-[width] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[width] overflow-hidden ${isMinimized ? 'w-20' : 'w-72'}`}>
         {renderSidebarContent()}
       </aside>
 

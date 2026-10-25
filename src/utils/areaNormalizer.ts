@@ -74,8 +74,18 @@ export function standardizeAreaName(rawArea: string | undefined | null): string 
   if (!rawArea) return 'RITEL ROGOJAMPI';
   const clean = rawArea.trim().toUpperCase();
 
-  // 1. Direct matches
-  if (clean === 'DENPASAR 1' || clean === 'DENPASAR1') return 'DENPASAR 1';
+  // 1. Direct matches (Denpasar 1 dan Denpasar 2 terpisah per keberangkatan, bukan digabung DENPASAR 1 & 2)
+  if (
+    clean === 'DENPASAR 1' ||
+    clean === 'DENPASAR1' ||
+    clean === 'DENPASAR' ||
+    clean === 'DENPASAR 1 & 2' ||
+    clean === 'DENPASAR 1&2' ||
+    clean === 'DENPASAR 1 / 2' ||
+    clean === 'DENPASAR 1/2'
+  ) {
+    return 'DENPASAR 1';
+  }
   if (clean === 'DENPASAR 2' || clean === 'DENPASAR2') return 'DENPASAR 2';
   if (clean === 'BONDOWOSO') return 'BONDOWOSO';
   if (clean === 'JAJAG RETAIL' || clean === 'JAJAG' || clean === 'JAJAG ( RITEL )') return 'JAJAG RETAIL';

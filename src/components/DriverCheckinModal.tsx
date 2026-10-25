@@ -109,12 +109,24 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
     setPinError(null);
     setPinSuccessMsg(null);
 
+    if (mode === 'checkin') {
+      // Check-In Shift cukup 1 kali input PIN (4 digit)
+      if (firstPin.length < 4) {
+        const nextPin = firstPin + digit;
+        setFirstPin(nextPin);
+        if (nextPin.length === 4) {
+          handleVerifyCheckinSingleStep(nextPin);
+        }
+      }
+      return;
+    }
+
+    // Mode 'change_pin' (Ubah / Buat PIN Baru) menggunakan 2 kali input (Step 1 & Step 2)
     if (step === 1) {
       if (firstPin.length < 4) {
         const nextPin = firstPin + digit;
         setFirstPin(nextPin);
         if (nextPin.length === 4) {
-          // Lanjut ke Verifikasi Ke-2 setelah 180ms
           setTimeout(() => {
             setStep(2);
           }, 180);
@@ -125,11 +137,7 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
         const nextPin2 = secondPin + digit;
         setSecondPin(nextPin2);
         if (nextPin2.length === 4) {
-          if (mode === 'checkin') {
-            handleVerifyCheckinTwoStep(firstPin, nextPin2);
-          } else {
-            handleSaveNewPinTwoStep(firstPin, nextPin2);
-          }
+          handleSaveNewPinTwoStep(firstPin, nextPin2);
         }
       }
     }
@@ -137,7 +145,7 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
 
   const handleKeypadDelete = () => {
     setPinError(null);
-    if (step === 2) {
+    if (mode === 'change_pin' && step === 2) {
       if (secondPin.length > 0) {
         setSecondPin(secondPin.slice(0, -1));
       } else {
@@ -154,18 +162,10 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
     resetPinInputs();
   };
 
-  // Proses Verifikasi 2 Kali untuk Check-In
-  const handleVerifyCheckinTwoStep = async (pin1: string, pin2: string) => {
-    if (pin1.length !== 4 || pin2.length !== 4) {
-      setPinError('Masukkan 4 digit PIN pada kedua tahap verifikasi.');
-      return;
-    }
-
-    if (pin1 !== pin2) {
-      setPinError('Verifikasi PIN ke-1 dan ke-2 tidak cocok! Silakan ulangi kembali.');
-      setStep(1);
-      setFirstPin('');
-      setSecondPin('');
+  // Proses Verifikasi 1 Kali untuk Check-In Shift
+  const handleVerifyCheckinSingleStep = async (pin: string) => {
+    if (pin.length !== 4) {
+      setPinError('Masukkan 4 digit PIN Keamanan Anda.');
       return;
     }
 
@@ -179,15 +179,15 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
       vehicleType,
       areaName,
       verificationMethod: 'pin',
-      pin: pin2,
-      notes: `Presensi masuk terverifikasi 2x PIN Keamanan (${userRole}).`
+      pin,
+      notes: `Presensi masuk terverifikasi PIN Keamanan (${userRole}).`
     });
     setIsSubmitting(false);
 
     if (res.success && res.shift) {
       addNotification(
         'schedule',
-        'Check-In PIN (2x Verifikasi) Berhasil',
+        'Check-In Shift Berhasil',
         `Shift resmi dimulai pukul ${res.shift.checkinTimeFormatted} dan tercatat di Laporan Kiriman Kru.`
       );
       onCheckinSuccess(res.shift);
@@ -252,7 +252,7 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
             </div>
             <div>
               <div className="text-sm font-black text-white uppercase tracking-tight">
-                {mode === 'checkin' ? 'Presensi Masuk Kru (PIN 2x)' : 'Ubah / Buat PIN Keamanan'}
+                {mode === 'checkin' ? 'Check-In Shift Kru (PIN)' : 'Ubah / Buat PIN Baru (2x)'}
               </div>
               <div className="text-[11px] text-slate-300 flex items-center gap-1.5 mt-0.5">
                 <span className="font-bold text-amber-300">{driverName}</span>
@@ -331,47 +331,54 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
               }`}
             >
               <RefreshCw className="w-3.5 h-3.5" />
-              <span>Ubah / Buat PIN Baru</span>
+              <span>Ubah / Buat PIN Baru (2x)</span>
             </button>
           </div>
 
-          {/* PIN KEYPAD VIEW (2X VERIFICATION) */}
+          {/* PIN KEYPAD VIEW (1X UNTUK CHECK-IN, 2X UNTUK UBAH / BUAT PIN BARU) */}
           <div className="p-4 bg-slate-950 rounded-2xl border border-slate-800 space-y-4">
-            {/* Step Progress Indicator (Verifikasi 1 & Verifikasi 2) */}
-            <div className="flex items-center justify-center gap-2">
-              <div className={`px-3 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1.5 border ${
-                step === 1
-                  ? 'bg-amber-500/20 border-amber-500 text-amber-300'
-                  : 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
-              }`}>
-                {step > 1 ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> : <span className="w-4 h-4 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center text-[10px] font-black">1</span>}
-                <span>{mode === 'checkin' ? 'Verifikasi PIN 1' : 'Input PIN Baru 1'}</span>
+            {/* Step Progress Indicator */}
+            {mode === 'checkin' ? (
+              <div className="flex items-center justify-center">
+                <div className="px-3.5 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1.5 border bg-amber-500/20 border-amber-500 text-amber-300">
+                  <Lock className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Verifikasi PIN Masuk Shift (1x Input)</span>
+                </div>
               </div>
+            ) : (
+              <div className="flex items-center justify-center gap-2">
+                <div className={`px-3 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1.5 border ${
+                  step === 1
+                    ? 'bg-amber-500/20 border-amber-500 text-amber-300'
+                    : 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                }`}>
+                  {step > 1 ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> : <span className="w-4 h-4 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center text-[10px] font-black">1</span>}
+                  <span>Input PIN Baru 1</span>
+                </div>
 
-              <div className="w-4 h-0.5 bg-slate-700" />
+                <div className="w-4 h-0.5 bg-slate-700" />
 
-              <div className={`px-3 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1.5 border ${
-                step === 2
-                  ? 'bg-amber-500/20 border-amber-500 text-amber-300'
-                  : 'bg-slate-900 border-slate-800 text-slate-400'
-              }`}>
-                <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-black ${
-                  step === 2 ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-400'
-                }`}>2</span>
-                <span>{mode === 'checkin' ? 'Konfirmasi PIN 2' : 'Ulangi PIN Baru 2'}</span>
+                <div className={`px-3 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1.5 border ${
+                  step === 2
+                    ? 'bg-amber-500/20 border-amber-500 text-amber-300'
+                    : 'bg-slate-900 border-slate-800 text-slate-400'
+                }`}>
+                  <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-black ${
+                    step === 2 ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-400'
+                  }`}>2</span>
+                  <span>Ulangi PIN Baru 2</span>
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Masked PIN Dots Indicator */}
             <div className="text-center space-y-2.5">
               <div className="text-xs font-bold text-white">
                 {mode === 'checkin'
-                  ? step === 1
-                    ? 'Tahap 1/2: Masukkan 4-Digit PIN Keamanan Anda'
-                    : 'Tahap 2/2: Masukkan Ulang 4-Digit PIN Keamanan (Verifikasi Ke-2)'
+                  ? 'Masukkan 4-Digit PIN Keamanan Anda (1x Input)'
                   : step === 1
                   ? 'Tahap 1/2: Masukkan 4-Digit PIN Keamanan Baru'
-                  : 'Tahap 2/2: Ketik Ulang 4-Digit PIN Baru untuk Konfirmasi'}
+                  : 'Tahap 2/2: Ketik Ulang 4-Digit PIN Baru untuk Konfirmasi (2x)'}
               </div>
 
               <div className="flex items-center justify-center gap-3.5 py-1">
@@ -451,7 +458,7 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
               <span>SOP Keselamatan &amp; Keamanan Distribusi PT AKK:</span>
             </div>
             <p className="text-slate-200 text-[11px] leading-relaxed font-medium">
-              Verifikasi PIN Keamanan dilakukan <strong className="text-white">2 kali</strong> untuk memastikan validitas identitas kru. Bagi pengguna baru, silakan pilih menu <strong className="text-cyan-300">Ubah / Buat PIN Baru</strong> dengan 2 kali input. Seluruh data PIN, Check-In, dan Check-Out otomatis tercatat ke dalam <strong className="text-amber-300">Sub-Menu Laporan Kiriman Kru</strong>.
+              Check-In Shift dilakukan cukup <strong className="text-white">1 kali</strong> input PIN Keamanan. Sedangkan untuk <strong className="text-cyan-300">Ubah / Buat PIN Baru</strong> dilakukan dengan <strong className="text-white">2 kali</strong> input konfirmasi. Seluruh data PIN, Check-In, dan Check-Out otomatis tercatat ke dalam <strong className="text-amber-300">Sub-Menu Laporan Kiriman Kru</strong>.
             </p>
           </div>
 
@@ -470,12 +477,12 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
           {mode === 'checkin' ? (
             <button
               type="button"
-              onClick={() => handleVerifyCheckinTwoStep(firstPin, secondPin)}
-              disabled={firstPin.length !== 4 || secondPin.length !== 4 || isSubmitting}
+              onClick={() => handleVerifyCheckinSingleStep(firstPin)}
+              disabled={firstPin.length !== 4 || isSubmitting}
               className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 text-slate-950 disabled:text-slate-500 font-black text-xs flex items-center gap-1.5 transition active:scale-95 cursor-pointer disabled:cursor-not-allowed shadow-md"
             >
               <Check className="w-4 h-4" />
-              <span>{isSubmitting ? 'Memverifikasi...' : 'Konfirmasi Masuk (2x PIN)'}</span>
+              <span>{isSubmitting ? 'Memverifikasi...' : 'Konfirmasi Masuk (PIN)'}</span>
             </button>
           ) : (
             <button

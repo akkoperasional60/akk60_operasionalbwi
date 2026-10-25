@@ -35,6 +35,7 @@ interface DriverVehicleChecklistModalProps {
   vehicleType: string;
   initialChecklist?: DriverVehicleChecklist | null;
   defaultInspectionType?: 'pre_trip' | 'post_trip';
+  canSelectPostTrip?: boolean;
   onSaved?: (saved: DriverVehicleChecklist) => void;
   onOpenDeviceCamera?: () => void;
 }
@@ -49,6 +50,7 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
   vehicleType,
   initialChecklist,
   defaultInspectionType,
+  canSelectPostTrip = false,
   onSaved,
   onOpenDeviceCamera
 }) => {
@@ -69,12 +71,17 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
   });
 
   const [notes, setNotes] = useState<string>(initialChecklist?.notes || '');
-  const [odometerKm, setOdometerKm] = useState<number>(initialChecklist?.odometerKm || 124500);
+  const [odometerInput, setOdometerInput] = useState<string>(
+    initialChecklist && initialChecklist.odometerKm > 0 ? String(initialChecklist.odometerKm) : ''
+  );
   const [fuelPercent, setFuelPercent] = useState<number>(initialChecklist?.fuelLevelPercent || 80);
-  const [inspectionType, setInspectionType] = useState<'pre_trip' | 'post_trip'>(defaultInspectionType || initialChecklist?.inspectionType || 'pre_trip');
+  const [inspectionType, setInspectionType] = useState<'pre_trip' | 'post_trip'>(
+    defaultInspectionType || initialChecklist?.inspectionType || 'pre_trip'
+  );
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [photoUrl, setPhotoUrl] = useState<string | null>(initialChecklist?.photoEvidenceUrl || null);
   const cameraInputRef = React.useRef<HTMLInputElement>(null);
+  const odometerRef = React.useRef<HTMLInputElement>(null);
 
   const handlePhotoCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -113,9 +120,10 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
     if (initialChecklist) {
       setChecklist(initialChecklist);
       setNotes(initialChecklist.notes || '');
-      setOdometerKm(initialChecklist.odometerKm || 124500);
+      setOdometerInput(initialChecklist.odometerKm > 0 ? String(initialChecklist.odometerKm) : '');
       setFuelPercent(initialChecklist.fuelLevelPercent || 80);
-      setInspectionType(defaultInspectionType || initialChecklist.inspectionType || 'pre_trip');
+      const nextType = defaultInspectionType || initialChecklist.inspectionType || 'pre_trip';
+      setInspectionType(!canSelectPostTrip && nextType === 'post_trip' ? 'pre_trip' : nextType);
       setPhotoUrl(initialChecklist.photoEvidenceUrl || null);
     } else {
       const fresh = driverChecklistService.createNewChecklistTemplate(
@@ -125,14 +133,19 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
         plateNumber,
         vehicleType
       );
-      if (defaultInspectionType) fresh.inspectionType = defaultInspectionType;
+      const nextType = defaultInspectionType || 'pre_trip';
+      const allowedType = !canSelectPostTrip && nextType === 'post_trip' ? 'pre_trip' : nextType;
+      fresh.inspectionType = allowedType;
       setChecklist(fresh);
-      setInspectionType(defaultInspectionType || 'pre_trip');
+      setOdometerInput('');
+      setInspectionType(allowedType);
       setPhotoUrl(null);
     }
-  }, [initialChecklist, driverId, fleetId, plateNumber, vehicleType, driverName, defaultInspectionType]);
+  }, [initialChecklist, driverId, fleetId, plateNumber, vehicleType, driverName, defaultInspectionType, canSelectPostTrip]);
 
   if (!isOpen) return null;
+
+  const isPostTripUnlocked = Boolean(canSelectPostTrip || defaultInspectionType === 'post_trip');
 
   const handleItemStatusChange = (itemId: string, newStatus: ChecklistItemStatus) => {
     const updatedItems = checklist.items.map(item => {
@@ -169,12 +182,23 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
   };
 
   const handleSave = () => {
+    const parsedOdo = Number(odometerInput.trim());
+    if (!odometerInput.trim() || isNaN(parsedOdo) || parsedOdo <= 0) {
+      addNotification(
+        'sla_warning',
+        'Isian Odometer (KM) Wajib Diisi',
+        'Silakan ketik angka Odometer (KM) armada terlebih dahulu sebelum menyimpan checklist.'
+      );
+      odometerRef.current?.focus();
+      return;
+    }
+
     setIsSubmitting(true);
     const { overallStatus, passedCount, issueCount } = driverChecklistService.calculateStatus(checklist.items);
     
     const finalChecklist: DriverVehicleChecklist = {
       ...checklist,
-      odometerKm,
+      odometerKm: parsedOdo,
       fuelLevelPercent: fuelPercent,
       inspectionType,
       notes,
@@ -193,7 +217,7 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
       addNotification(
         'checker',
         'Checklist Armada Tersimpan',
-        `Inspeksi ${plateNumber} berhasil dicatat (${passedCount} Lolos, ${issueCount} Perhatian). Status: ${overallStatus.toUpperCase()}`
+        `Inspeksi ${inspectionType === 'pre_trip' ? 'Pra-Jalan (Pagi)' : 'Pasca-Jalan (Pulang)'} ${plateNumber} berhasil dicatat (${passedCount} Lolos, ${issueCount} Perhatian).`
       );
       if (onSaved) onSaved(finalChecklist);
       onClose();
@@ -237,6 +261,13 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
               </div>
             </div>
           </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
 
         {/* Scrollable Content Body */}
@@ -244,26 +275,39 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
           
           {/* Header Summary & Pre-Trip/Post-Trip Switch */}
           <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-3">
-            <div className="flex items-center justify-between">
-              {/* Inspection Type Selector */}
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              {/* Inspection Type Selector: Pra-Jalan Wajib Sebelum Jalan, Pasca-Jalan Tidak Bisa Diklik Sebelum Tiba di Gudang */}
               <div className="flex items-center p-0.5 bg-slate-900 rounded-lg border border-slate-800">
                 <button
                   type="button"
                   onClick={() => setInspectionType('pre_trip')}
-                  className={`px-3 py-1 rounded-md text-[11px] font-semibold transition ${
-                    inspectionType === 'pre_trip' ? 'bg-amber-500 text-slate-950 shadow' : 'text-slate-400 hover:text-white'
+                  className={`px-3 py-1 rounded-md text-[11px] font-semibold transition cursor-pointer ${
+                    inspectionType === 'pre_trip' ? 'bg-amber-500 text-slate-950 shadow font-bold' : 'text-slate-400 hover:text-white'
                   }`}
                 >
                   Pra-Jalan (Pagi)
                 </button>
                 <button
                   type="button"
-                  onClick={() => setInspectionType('post_trip')}
+                  disabled={!isPostTripUnlocked}
+                  onClick={() => {
+                    if (!isPostTripUnlocked) return;
+                    setInspectionType('post_trip');
+                  }}
+                  title={
+                    isPostTripUnlocked
+                      ? 'Pilih Checklist Pasca-Jalan (Pulang)'
+                      : 'Terkunci: Checklist Pasca-Jalan baru dapat dipilih setelah klik Konfirmasi Tiba di Gudang'
+                  }
                   className={`px-3 py-1 rounded-md text-[11px] font-semibold transition ${
-                    inspectionType === 'post_trip' ? 'bg-amber-500 text-slate-950 shadow' : 'text-slate-400 hover:text-white'
+                    inspectionType === 'post_trip'
+                      ? 'bg-amber-500 text-slate-950 shadow font-bold cursor-pointer'
+                      : isPostTripUnlocked
+                      ? 'text-slate-400 hover:text-white cursor-pointer'
+                      : 'text-slate-600 opacity-50 cursor-not-allowed'
                   }`}
                 >
-                  Pasca-Jalan (Pulang)
+                  Pasca-Jalan (Pulang) {!isPostTripUnlocked ? '🔒' : ''}
                 </button>
               </div>
 
@@ -280,18 +324,33 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
               </div>
             </div>
 
-            {/* Quick Metrics: Odometer (Tanpa BBM Solar) */}
+            {!isPostTripUnlocked && (
+              <div className="text-[10px] text-amber-300/90 bg-amber-500/10 border border-amber-500/25 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span>
+                  <strong>Wajib Pra-Jalan (Pagi)</strong> sebelum berangkat. Opsi <strong>Pasca-Jalan (Pulang)</strong> otomatis terbuka setelah klik <strong>Konfirmasi Tiba di Gudang</strong>.
+                </span>
+              </div>
+            )}
+
+            {/* Quick Metrics: Odometer dengan Bayangan (Placeholder, Tidak Langsung Terisi) */}
             <div className="pt-2 border-t border-slate-800/80">
               <div className="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800 space-y-1">
-                <div className="text-[10px] text-slate-400 flex items-center gap-1">
-                  <Gauge className="w-3.5 h-3.5 text-blue-400" />
-                  <span>Odometer (KM):</span>
+                <div className="text-[10px] text-slate-400 flex items-center justify-between">
+                  <span className="flex items-center gap-1 font-semibold text-slate-300">
+                    <Gauge className="w-3.5 h-3.5 text-blue-400" />
+                    <span>Odometer (KM) Wajib Diisi:</span>
+                  </span>
+                  <span className="text-[9px] text-amber-400">Ketik sesuai angka di dashboard</span>
                 </div>
                 <input
+                  ref={odometerRef}
                   type="number"
-                  value={odometerKm}
-                  onChange={(e) => setOdometerKm(Number(e.target.value))}
-                  className="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-slate-200 font-mono font-bold text-xs focus:outline-none focus:border-amber-500"
+                  min={1}
+                  value={odometerInput}
+                  onChange={(e) => setOdometerInput(e.target.value)}
+                  placeholder="Contoh: 120000 (Masukkan KM Odometer Armada)"
+                  className="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-slate-100 placeholder:text-slate-500 font-mono font-bold text-xs focus:outline-none focus:border-amber-500"
                 />
               </div>
             </div>

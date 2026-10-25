@@ -7,7 +7,7 @@ export interface DriverHelperReport {
   userRole?: string;
   helperName?: string;
   plateNumber: string;
-  category: 'kendala_jalan' | 'akhir_kiriman' | 'istirahat' | 'update_lokasi' | 'presensi_shift' | 'pin_keamanan';
+  category: 'kendala_jalan' | 'akhir_kiriman' | 'istirahat' | 'update_lokasi' | 'presensi_shift' | 'pin_keamanan' | 'mode_offline';
   areaName: string;
   deliveryId?: string;
   notes: string;
@@ -23,6 +23,17 @@ export interface DriverHelperReport {
   checkinTimeFormatted?: string;
   checkoutTimeFormatted?: string;
   securityPin?: string;
+  // Data Peringatan Aktivasi Mode Offline Kru Pengiriman
+  offlineStatus?: 'masih_offline' | 'sudah_online';
+  offlineActivatedAt?: string;
+  onlineRestoredAt?: string;
+  // Data Kendala Mengantri di Customer (Mulai Antri -> Selang Beberapa Menit Keluar dari Customer)
+  customerQueueStatus?: 'sedang_mengantri' | 'selesai_antri';
+  customerQueueStartIso?: string;
+  customerQueueStartFormatted?: string;
+  customerQueueExitFormatted?: string;
+  customerQueueDurationMinutes?: number;
+  customerOutletName?: string;
   // Solusi & Arahan dari SPV Logistik / Super Admin
   solution?: string;
   solutionBy?: string;
@@ -33,19 +44,36 @@ export interface DriverHelperReport {
 
 const STORAGE_KEY = 'akk_driver_helper_reports_v2';
 
+export const getLocalDateStr = (input?: string | Date): string => {
+  if (!input) {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  }
+  if (typeof input === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(input.trim())) {
+    return input.trim();
+  }
+  const d = input instanceof Date ? input : new Date(input);
+  if (isNaN(d.getTime())) {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  }
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
 class DriverReportService {
   private memoryReports: DriverHelperReport[] | null = null;
   private seqCounter = 0;
 
   private getInitialReports(): DriverHelperReport[] {
-    const today = new Date().toISOString().slice(0, 10);
-    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    const today = getLocalDateStr(new Date());
+    const yesterdayDate = new Date(Date.now() - 86400000);
+    const yesterday = getLocalDateStr(yesterdayDate);
 
     return [
       {
         id: 'REP-2026-001',
-        timestamp: new Date(Date.now() - 1000 * 60 * 45).toISOString(),
-        date: today,
+        timestamp: new Date(Date.now() - 86400000 - 1000 * 60 * 45).toISOString(),
+        date: yesterday,
         driverId: 'crew-01',
         driverName: 'Zainul Agustiar',
         userRole: 'Driver',
@@ -61,9 +89,9 @@ class DriverReportService {
         status: 'follow_up',
         solution: 'Gunakan jalur alternatif lingkar barat Rogojampi tembus Gladag. SPV sudah mengabari PIC toko bahwa kiriman mundur 20 menit namun tetap tiba sebelum jam 10 pagi.',
         solutionBy: 'Muhammad Syaiful Bahri (SPV Logistik)',
-        solutionAt: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
+        solutionAt: new Date(Date.now() - 86400000 - 1000 * 60 * 30).toISOString(),
         driverAcknowledged: true,
-        driverAcknowledgedAt: new Date(Date.now() - 1000 * 60 * 20).toISOString()
+        driverAcknowledgedAt: new Date(Date.now() - 86400000 - 1000 * 60 * 20).toISOString()
       },
       {
         id: 'REP-2026-002',
@@ -144,10 +172,19 @@ class DriverReportService {
               uniqueId = `${uniqueId}-${index + 1}`;
             }
             seenIds.add(uniqueId);
+            const hasSol = Boolean(r.solution && r.solution.trim());
+            const isConstraintCategory = r.category === 'kendala_jalan' || r.category === 'mode_offline';
+            const resolvedStatus =
+              hasSol && r.status === 'pending'
+                ? 'resolved'
+                : !isConstraintCategory && r.status === 'pending'
+                ? 'verified'
+                : r.status;
             return {
               ...r,
               id: uniqueId,
-              date: r.date || (r.timestamp ? r.timestamp.slice(0, 10) : new Date().toISOString().slice(0, 10))
+              status: resolvedStatus,
+              date: r.timestamp ? getLocalDateStr(new Date(r.timestamp)) : (r.date || getLocalDateStr())
             };
           });
           if (hadDuplicates) {
@@ -195,12 +232,14 @@ class DriverReportService {
     while (list.some(r => r.id === uniqueId)) {
       uniqueId = `REP-${now.getFullYear()}-${Date.now().toString().slice(-4)}${Math.floor(10 + Math.random() * 90)}-${this.seqCounter}`;
     }
+    const isConstraintCategory = report.category === 'kendala_jalan' || report.category === 'mode_offline';
+    const defaultStatus = isConstraintCategory ? 'pending' : 'verified';
     const newReport: DriverHelperReport = {
       ...report,
       id: uniqueId,
       timestamp: now.toISOString(),
-      date: now.toISOString().slice(0, 10),
-      status: report.status || 'pending'
+      date: getLocalDateStr(now),
+      status: report.status || defaultStatus
     };
     list.unshift(newReport);
     this.saveReports(list);
@@ -226,7 +265,7 @@ class DriverReportService {
     securityPin?: string;
   }): DriverHelperReport {
     const list = this.getReports();
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getLocalDateStr();
 
     // Cari laporan presensi aktif untuk shiftId atau driverId pada hari ini
     const existingIdx = list.findIndex(
@@ -240,8 +279,8 @@ class DriverReportService {
       const mergedCheckout = params.checkoutTimeFormatted || existing.checkoutTimeFormatted;
       const mergedPin = params.securityPin || existing.securityPin || '****';
       const updatedNotes = mergedCheckout
-        ? `[PRESENSI SHIFT TERPADU] Check-In: ${existing.checkinTimeFormatted || params.checkinTimeFormatted} | Check-Out: ${mergedCheckout} | PIN Keamanan (2x Verifikasi): ${mergedPin}`
-        : `[PRESENSI CHECK-IN] Waktu Masuk: ${params.checkinTimeFormatted} (Status: Sedang Bertugas) | PIN Keamanan (2x Verifikasi): ${mergedPin}`;
+        ? `[PRESENSI SHIFT TERPADU] Check-In: ${existing.checkinTimeFormatted || params.checkinTimeFormatted} | Check-Out: ${mergedCheckout} | PIN Keamanan: ${mergedPin}`
+        : `[PRESENSI CHECK-IN] Waktu Masuk: ${params.checkinTimeFormatted} (Status: Sedang Bertugas) | PIN Keamanan: ${mergedPin}`;
 
       list[existingIdx] = {
         ...existing,
@@ -252,9 +291,9 @@ class DriverReportService {
         checkoutTimeFormatted: mergedCheckout,
         securityPin: mergedPin,
         notes: updatedNotes,
-        status: mergedCheckout ? 'verified' : existing.status,
-        verifiedBy: mergedCheckout ? 'Sistem Presensi Terpadu' : existing.verifiedBy,
-        verifiedAt: mergedCheckout ? new Date().toISOString() : existing.verifiedAt,
+        status: 'verified',
+        verifiedBy: 'Sistem Presensi Terpadu',
+        verifiedAt: new Date().toISOString(),
         timestamp: new Date().toISOString()
       };
 
@@ -267,8 +306,8 @@ class DriverReportService {
 
     const pinStr = params.securityPin || '****';
     const initialNotes = params.checkoutTimeFormatted
-      ? `[PRESENSI SHIFT TERPADU] Check-In: ${params.checkinTimeFormatted} | Check-Out: ${params.checkoutTimeFormatted} | PIN Keamanan (2x Verifikasi): ${pinStr}`
-      : `[PRESENSI CHECK-IN] Waktu Masuk: ${params.checkinTimeFormatted} (Status: Sedang Bertugas) | PIN Keamanan (2x Verifikasi): ${pinStr}`;
+      ? `[PRESENSI SHIFT TERPADU] Check-In: ${params.checkinTimeFormatted} | Check-Out: ${params.checkoutTimeFormatted} | PIN Keamanan: ${pinStr}`
+      : `[PRESENSI CHECK-IN] Waktu Masuk: ${params.checkinTimeFormatted} (Status: Sedang Bertugas) | PIN Keamanan: ${pinStr}`;
 
     return this.addReport({
       driverId: params.driverId,
@@ -282,7 +321,8 @@ class DriverReportService {
       checkinTimeFormatted: params.checkinTimeFormatted,
       checkoutTimeFormatted: params.checkoutTimeFormatted,
       securityPin: pinStr,
-      status: params.checkoutTimeFormatted ? 'verified' : 'pending'
+      status: 'verified',
+      verifiedBy: 'Sistem Presensi Terpadu'
     });
   }
 
@@ -298,7 +338,7 @@ class DriverReportService {
     newPin: string;
   }): DriverHelperReport {
     const list = this.getReports();
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getLocalDateStr();
 
     // Update juga securityPin pada laporan presensi hari ini jika sudah ada
     const activeShiftIdx = list.findIndex(
@@ -331,7 +371,7 @@ class DriverReportService {
     id: string,
     solution: string,
     solutionBy: string = 'SPV Logistik DC',
-    newStatus: 'verified' | 'follow_up' | 'pending' | 'resolved' = 'follow_up'
+    newStatus: 'verified' | 'follow_up' | 'pending' | 'resolved' = 'resolved'
   ): boolean {
     const list = this.getReports();
     const idx = list.findIndex(r => r.id === id);
@@ -339,7 +379,7 @@ class DriverReportService {
       list[idx].solution = solution;
       list[idx].solutionBy = solutionBy;
       list[idx].solutionAt = new Date().toISOString();
-      list[idx].status = newStatus;
+      list[idx].status = newStatus === 'pending' ? 'resolved' : newStatus;
       list[idx].driverAcknowledged = false;
       this.saveReports(list);
 
@@ -399,12 +439,274 @@ class DriverReportService {
     return true;
   }
 
+  /**
+   * Mencatat siapa saja kru yang mengaktifkan Mode Offline sebagai peringatan bagi Tim Pengiriman
+   * agar segera di-online-kan kembali.
+   */
+  public recordOfflineModeActivation(params: {
+    driverId: string;
+    driverName: string;
+    userRole?: string;
+    helperName?: string;
+    plateNumber: string;
+    areaName?: string;
+    modeType?: 'simulasi' | 'jaringan';
+  }): DriverHelperReport {
+    const list = this.getReports();
+    const today = getLocalDateStr();
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
+
+    const existingIdx = list.findIndex(
+      r =>
+        r.category === 'mode_offline' &&
+        r.date === today &&
+        r.offlineStatus === 'masih_offline' &&
+        (r.driverId === params.driverId || r.driverName.toLowerCase() === params.driverName.toLowerCase())
+    );
+
+    const warningNote = `[PERINGATAN MODE OFFLINE AKTIF] ${params.driverName} (${params.userRole || 'Driver'}${params.helperName ? ` • Helper: ${params.helperName}` : ''}) mengaktifkan Mode Offline pada pukul ${timeStr}. PERINGATAN TIM PENGIRIMAN: Harap segera di-online-kan kembali agar sinkronisasi data & GPS berjalan real-time!`;
+
+    if (existingIdx >= 0) {
+      list[existingIdx] = {
+        ...list[existingIdx],
+        driverName: params.driverName || list[existingIdx].driverName,
+        userRole: params.userRole || list[existingIdx].userRole,
+        helperName: params.helperName || list[existingIdx].helperName,
+        plateNumber: params.plateNumber || list[existingIdx].plateNumber,
+        areaName: params.areaName || list[existingIdx].areaName,
+        offlineStatus: 'masih_offline',
+        offlineActivatedAt: list[existingIdx].offlineActivatedAt || timeStr,
+        onlineRestoredAt: undefined,
+        notes: warningNote,
+        status: 'pending',
+        timestamp: now.toISOString()
+      };
+      this.saveReports(list);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('driver-report-updated', { detail: list[existingIdx] }));
+      }
+      return list[existingIdx];
+    }
+
+    return this.addReport({
+      driverId: params.driverId,
+      driverName: params.driverName,
+      userRole: params.userRole || 'Driver',
+      helperName: params.helperName,
+      plateNumber: params.plateNumber || 'P 8848 U',
+      category: 'mode_offline',
+      areaName: params.areaName || 'Rute Pengiriman Aktif',
+      offlineStatus: 'masih_offline',
+      offlineActivatedAt: timeStr,
+      notes: warningNote,
+      status: 'pending'
+    });
+  }
+
+  /**
+   * Menandai bahwa kru yang sebelumnya mengaktifkan Mode Offline sudah kembali Online
+   */
+  public markOfflineModeRestored(params: {
+    reportId?: string;
+    driverId?: string;
+    driverName?: string;
+    restoredBy?: string;
+  }): DriverHelperReport | null {
+    const list = this.getReports();
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
+    let updatedReport: DriverHelperReport | null = null;
+
+    list.forEach((r, idx) => {
+      if (r.category !== 'mode_offline') return;
+      const matchById = params.reportId && r.id === params.reportId;
+      const matchByDriver =
+        !params.reportId &&
+        r.offlineStatus === 'masih_offline' &&
+        ((params.driverId && r.driverId === params.driverId) ||
+          (params.driverName && r.driverName.toLowerCase() === params.driverName.toLowerCase()));
+
+      if (matchById || matchByDriver) {
+        const cleanBaseNote = r.notes.replace(/\s*\|\s*\[SUDAH ONLINE KEMBALI.*?\]/g, '');
+        list[idx] = {
+          ...r,
+          offlineStatus: 'sudah_online',
+          onlineRestoredAt: timeStr,
+          status: 'verified',
+          verifiedBy: params.restoredBy || 'Tim Pengiriman (Online Kembali)',
+          verifiedAt: now.toISOString(),
+          notes: `${cleanBaseNote} | [SUDAH ONLINE KEMBALI pukul ${timeStr} oleh ${params.restoredBy || r.driverName}]`,
+          solution:
+            r.solution && r.solution.trim()
+              ? r.solution
+              : `Mode Offline telah dimatikan dan perangkat kembali Online pada pukul ${timeStr}.`,
+          solutionBy: r.solutionBy || params.restoredBy || 'Sistem Monitoring Online',
+          solutionAt: r.solutionAt || now.toISOString(),
+          driverAcknowledged: true,
+          driverAcknowledgedAt: now.toISOString()
+        };
+        updatedReport = list[idx];
+      }
+    });
+
+    if (updatedReport) {
+      this.saveReports(list);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('driver-report-updated', { detail: updatedReport }));
+        window.dispatchEvent(new CustomEvent('akk-force-online-mode'));
+      }
+    }
+    return updatedReport;
+  }
+
+  /**
+   * Mencatat ketika kru mengalami kendala sedang mengantri di customer,
+   * lalu beberapa menit kemudian baru keluar dari customer tersebut.
+   */
+  public startCustomerQueueReport(params: {
+    driverId: string;
+    driverName: string;
+    userRole?: string;
+    helperName?: string;
+    plateNumber: string;
+    areaName: string;
+    customerOutletName?: string;
+    deliveryId?: string;
+    notes?: string;
+    photoUrl?: string | null;
+    latitude?: number;
+    longitude?: number;
+    gmapsUrl?: string;
+  }): DriverHelperReport {
+    const list = this.getReports();
+    const today = getLocalDateStr();
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
+    const outlet = params.customerOutletName || params.areaName || 'Customer / Toko Tujuan';
+
+    const existingIdx = list.findIndex(
+      r =>
+        r.category === 'kendala_jalan' &&
+        r.date === today &&
+        r.customerQueueStatus === 'sedang_mengantri' &&
+        (r.driverId === params.driverId || r.driverName.toLowerCase() === params.driverName.toLowerCase())
+    );
+
+    const queueNote = params.notes?.trim()
+      ? `[ANTRI DI CUSTOMER: ${outlet}] Mulai Mengantri: ${timeStr} (Status: Sedang Mengantri di Customer) — ${params.notes.trim()}`
+      : `[ANTRI DI CUSTOMER: ${outlet}] Mulai Mengantri: ${timeStr} (Status: Sedang Mengantri Bongkar/Muat di Customer, menunggu keluar dari customer).`;
+
+    if (existingIdx >= 0) {
+      list[existingIdx] = {
+        ...list[existingIdx],
+        areaName: params.areaName || list[existingIdx].areaName,
+        customerOutletName: outlet,
+        customerQueueStatus: 'sedang_mengantri',
+        customerQueueStartIso: list[existingIdx].customerQueueStartIso || now.toISOString(),
+        customerQueueStartFormatted: list[existingIdx].customerQueueStartFormatted || timeStr,
+        photoUrl: params.photoUrl || list[existingIdx].photoUrl,
+        notes: queueNote,
+        timestamp: now.toISOString()
+      };
+      this.saveReports(list);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('driver-report-updated', { detail: list[existingIdx] }));
+      }
+      return list[existingIdx];
+    }
+
+    return this.addReport({
+      driverId: params.driverId,
+      driverName: params.driverName,
+      userRole: params.userRole || 'Driver',
+      helperName: params.helperName,
+      plateNumber: params.plateNumber,
+      category: 'kendala_jalan',
+      areaName: params.areaName,
+      deliveryId: params.deliveryId,
+      customerOutletName: outlet,
+      customerQueueStatus: 'sedang_mengantri',
+      customerQueueStartIso: now.toISOString(),
+      customerQueueStartFormatted: timeStr,
+      notes: queueNote,
+      photoUrl: params.photoUrl,
+      latitude: params.latitude,
+      longitude: params.longitude,
+      gmapsUrl: params.gmapsUrl,
+      status: 'pending'
+    });
+  }
+
+  /**
+   * Menyelesaikan antrean ketika kru sudah keluar dari customer setelah selang beberapa menit
+   */
+  public completeCustomerQueueExit(params: {
+    reportId?: string;
+    driverId?: string;
+    driverName?: string;
+    simulatedExtraMinutes?: number;
+    exitNotes?: string;
+  }): DriverHelperReport | null {
+    const list = this.getReports();
+    const now = new Date();
+    let targetIdx = -1;
+
+    if (params.reportId) {
+      targetIdx = list.findIndex(r => r.id === params.reportId);
+    }
+    if (targetIdx < 0) {
+      targetIdx = list.findIndex(
+        r =>
+          r.customerQueueStatus === 'sedang_mengantri' &&
+          ((params.driverId && r.driverId === params.driverId) ||
+            (params.driverName && r.driverName.toLowerCase() === params.driverName.toLowerCase()))
+      );
+    }
+
+    if (targetIdx < 0) return null;
+
+    const existing = list[targetIdx];
+    const startMs = existing.customerQueueStartIso ? new Date(existing.customerQueueStartIso).getTime() : new Date(existing.timestamp).getTime();
+    const extraMs = (params.simulatedExtraMinutes || 0) * 60000;
+    const effectiveExitDate = new Date(Math.max(now.getTime(), startMs + 60000) + extraMs);
+    const durationMin = Math.max(1, Math.round((effectiveExitDate.getTime() - startMs) / 60000));
+
+    const startFormatted =
+      existing.customerQueueStartFormatted ||
+      new Date(startMs).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
+    const exitFormatted =
+      effectiveExitDate.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
+    const outlet = existing.customerOutletName || existing.areaName || 'Customer';
+
+    const extraNoteText = params.exitNotes?.trim() ? ` | Catatan Keluar: ${params.exitNotes.trim()}` : '';
+    const updatedNotes = `[SELESAI ANTRI & KELUAR DARI CUSTOMER: ${outlet}] Mulai Antri: ${startFormatted} ➔ Keluar dari Customer: ${exitFormatted} (Selang Waktu Mengantri: ${durationMin} Menit)${extraNoteText}`;
+
+    list[targetIdx] = {
+      ...existing,
+      customerQueueStatus: 'selesai_antri',
+      customerQueueStartFormatted: startFormatted,
+      customerQueueExitFormatted: exitFormatted,
+      customerQueueDurationMinutes: durationMin,
+      notes: updatedNotes,
+      status: existing.solution && existing.solution.trim() ? 'resolved' : 'verified',
+      verifiedBy: existing.verifiedBy || 'Konfirmasi Keluar Customer (Kru)',
+      verifiedAt: now.toISOString()
+    };
+
+    this.saveReports(list);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('driver-report-updated', { detail: list[targetIdx] }));
+    }
+    return list[targetIdx];
+  }
+
   public submitReport(params: {
     driverId: string;
     driverName: string;
     driverPhone?: string;
     plateNumber: string;
-    category: 'kendala_jalan' | 'akhir_kiriman' | 'istirahat' | 'update_lokasi' | 'presensi_shift' | 'pin_keamanan';
+    category: 'kendala_jalan' | 'akhir_kiriman' | 'istirahat' | 'update_lokasi' | 'presensi_shift' | 'pin_keamanan' | 'mode_offline';
     reportText?: string;
     notes?: string;
     latitude?: number;

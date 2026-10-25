@@ -148,6 +148,12 @@ class DriverOfflineSyncService {
       this.isOnline = false;
       this.notify();
     });
+
+    window.addEventListener('akk-force-online-mode', () => {
+      if (this.isSimulatedOffline) {
+        this.setSimulatedOffline(false);
+      }
+    });
   }
 
   /**

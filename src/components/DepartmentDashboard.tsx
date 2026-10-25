@@ -11,14 +11,15 @@ import { TeamCalendar } from './TeamCalendar';
 import { attendanceService } from '../services/attendanceService';
 import { PresenceSummary } from './PresenceSummary';
 import { AbsenceManagementModal } from './AbsenceManagementModal';
+import { WarehouseManagementSystem } from './WarehouseManagementSystem';
 
 const MetricCard = ({ title, value, subtext, icon: Icon, color }: { title: string, value: string, subtext: string, icon: any, color: string }) => (
-  <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl">
+  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 rounded-2xl shadow-xs">
     <div className="flex items-center justify-between mb-3">
-      <h3 className="text-slate-400 text-xs font-semibold uppercase">{title}</h3>
+      <h3 className="text-slate-500 dark:text-slate-400 text-xs font-semibold uppercase">{title}</h3>
       <Icon className={`w-5 h-5 ${color}`} />
     </div>
-    <div className="text-2xl font-black text-white">{value}</div>
+    <div className="text-2xl font-black text-slate-900 dark:text-white">{value}</div>
     <p className="text-slate-500 text-xs mt-1">{subtext}</p>
   </div>
 );
@@ -940,14 +941,7 @@ const HRDashboard: React.FC<{ activeHrTab?: HrSubTab; onSelectHrTab?: (tab: HrSu
 };
 
 const WarehouseDashboard = () => (
-  <div className="space-y-6">
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-      <MetricCard title="Total SKU" value="1,204" subtext="Aktif dalam sistem" icon={Building2} color="text-indigo-400" />
-      <MetricCard title="Pending Outbound" value="28" subtext="Pesanan menunggu kirim" icon={AlertCircle} color="text-amber-400" />
-      <MetricCard title="Akurasi Stok" value="99.2%" subtext="Hasil opname terakhir" icon={CheckCircle2} color="text-emerald-400" />
-    </div>
-    <TeamCalendar role="warehouse_admin" />
-  </div>
+  <WarehouseManagementSystem />
 );
 
 const FinanceDashboard = () => (
@@ -998,9 +992,11 @@ export const DepartmentDashboard: React.FC<{
 
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-black text-white">
-        Dashboard {typeToRender === 'hr' ? 'Human Resources (HR, GA & Training)' : typeToRender === 'warehouse' ? 'Gudang' : typeToRender === 'finance' ? 'Finance' : 'Purchasing'}
-      </h2>
+      {typeToRender !== 'warehouse' && (
+        <h2 className="text-lg font-black text-slate-900 dark:text-white">
+          Dashboard {typeToRender === 'hr' ? 'Human Resources (HR, GA & Training)' : typeToRender === 'finance' ? 'Finance' : 'Purchasing'}
+        </h2>
+      )}
       {renderDashboard()}
     </div>
   );

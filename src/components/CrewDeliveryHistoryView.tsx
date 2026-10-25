@@ -40,6 +40,7 @@ export const CrewDeliveryHistoryView: React.FC = () => {
 
   // Filter & Search States (Text Fields & Selectors)
   const [selectedCrewId, setSelectedCrewId] = useState<string>('all');
+  const [selectedFleetFilter, setSelectedFleetFilter] = useState<string>('all');
   const [selectedMonth, setSelectedMonth] = useState<number>(0); // Default Januari (0)
   const [selectedYear, setSelectedYear] = useState<number>(2026);
   const [selectedAreaFilter, setSelectedAreaFilter] = useState<string>('all');
@@ -189,6 +190,43 @@ export const CrewDeliveryHistoryView: React.FC = () => {
     }));
   };
 
+  // Helper normalisasi string pencarian (menghapus spasi, garis miring '/', tanda hubung '-')
+  // sehingga pencarian "n4/ns2", "n4 / ns2", "n4", atau "ns2" langsung cocok dengan "N4 / NS2"
+  const normalizeSearchToken = (val?: string | null): string =>
+    (val || '').toLowerCase().replace(/[\s/\-_·•]+/g, '');
+
+  // Helper resolusi Armada lengkap dari katalog fleets
+  const resolveCanonicalFleet = useMemo(() => {
+    return (rawInitial?: string, rawPlate?: string) => {
+      const cleanInit = (rawInitial || '').trim().toUpperCase();
+      const cleanPlate = (rawPlate || '').trim().toUpperCase().replace(/\s+/g, '');
+
+      const matched = fleets.find(f => {
+        const fPlate = (f.plateNumber || '').trim().toUpperCase().replace(/\s+/g, '');
+        if (cleanPlate && fPlate === cleanPlate) return true;
+        const fInit = (f.initialCode || '').trim().toUpperCase();
+        if (!cleanInit || !fInit) return false;
+        if (fInit === cleanInit || normalizeSearchToken(fInit) === normalizeSearchToken(cleanInit)) return true;
+        const parts = fInit.split('/').map(p => p.trim());
+        return parts.includes(cleanInit);
+      });
+
+      if (matched) {
+        return {
+          initialCode: matched.initialCode || cleanInit || 'DS3',
+          plateNumber: matched.plateNumber || rawPlate || '-',
+          vehicleType: matched.vehicleType || 'Truk Box'
+        };
+      }
+
+      return {
+        initialCode: cleanInit || 'DS3',
+        plateNumber: rawPlate || '-',
+        vehicleType: 'Truk Box'
+      };
+    };
+  }, [fleets]);
+
   // Filtered raw history list
   const filteredHistory = useMemo(() => {
     return history.filter(item => {
@@ -204,21 +242,34 @@ export const CrewDeliveryHistoryView: React.FC = () => {
       const matchesMonth = selectedMonth === -1 || itemDate.getMonth() === selectedMonth;
       const matchesYear = itemDate.getFullYear() === selectedYear;
 
-      const q = searchQuery.toLowerCase().trim();
-      const initialCode =
+      const rawInitial =
         item.initialCode || item.trackingNumber.match(/PO-AKK-\d+-([A-Za-z0-9]+)/)?.[1] || '';
+      const resolvedFleet = resolveCanonicalFleet(rawInitial, item.vehiclePlate);
+
+      const matchesFleetDropdown =
+        selectedFleetFilter === 'all' ||
+        normalizeSearchToken(resolvedFleet.initialCode) === normalizeSearchToken(selectedFleetFilter) ||
+        normalizeSearchToken(rawInitial) === normalizeSearchToken(selectedFleetFilter) ||
+        resolvedFleet.initialCode.toLowerCase().includes(selectedFleetFilter.toLowerCase()) ||
+        item.vehiclePlate.toLowerCase().includes(selectedFleetFilter.toLowerCase());
+
+      const q = searchQuery.toLowerCase().trim();
+      const qNorm = normalizeSearchToken(q);
+
+      const fleetFullText = `armada ${resolvedFleet.initialCode} ${rawInitial} ${resolvedFleet.plateNumber} ${item.vehiclePlate} ${resolvedFleet.vehicleType}`.toLowerCase();
+      const fleetFullNorm = normalizeSearchToken(fleetFullText);
 
       const matchesSearch =
         !q ||
         item.crewName.toLowerCase().includes(q) ||
-        item.trackingNumber.toLowerCase().includes(q) ||
-        item.storeName.toLowerCase().includes(q) ||
-        item.area.toLowerCase().includes(q) ||
-        item.vehiclePlate.toLowerCase().includes(q) ||
-        initialCode.toLowerCase().includes(q);
+        normalizeSearchToken(item.crewName).includes(qNorm) ||
+        fleetFullText.includes(q) ||
+        (qNorm.length > 0 && fleetFullNorm.includes(qNorm)) ||
+        item.area.toLowerCase().includes(q);
 
       return (
         matchesCrew &&
+        matchesFleetDropdown &&
         matchesArea &&
         matchesQuickArea &&
         matchesMonth &&
@@ -226,7 +277,7 @@ export const CrewDeliveryHistoryView: React.FC = () => {
         matchesSearch
       );
     });
-  }, [history, selectedCrewId, selectedAreaFilter, areaQuickFilter, selectedMonth, selectedYear, searchQuery]);
+  }, [history, selectedCrewId, selectedFleetFilter, selectedAreaFilter, areaQuickFilter, selectedMonth, selectedYear, searchQuery, resolveCanonicalFleet]);
 
   // Integrated Real-time Crew Area Stats from History Log
   const crewAreaStatsList = useMemo(() => {
@@ -239,12 +290,16 @@ export const CrewDeliveryHistoryView: React.FC = () => {
         totalTrips: number;
         exceededCount: number;
         maxSingleAreaTrips: number;
+        fleetsUsed: Set<string>;
         areas: Record<string, { areaName: string; tripCount: number; isExceeded: boolean; lastDate: string }>;
       }
     > = {};
 
     filteredHistory.forEach(item => {
       const key = item.crewId || item.crewName;
+      const rawInit = item.initialCode || item.trackingNumber.match(/PO-AKK-\d+-([A-Za-z0-9]+)/)?.[1] || '';
+      const resolvedFl = resolveCanonicalFleet(rawInit, item.vehiclePlate);
+
       if (!map[key]) {
         map[key] = {
           crewId: item.crewId,
@@ -253,8 +308,12 @@ export const CrewDeliveryHistoryView: React.FC = () => {
           totalTrips: 0,
           exceededCount: 0,
           maxSingleAreaTrips: 0,
+          fleetsUsed: new Set<string>(),
           areas: {}
         };
+      }
+      if (resolvedFl.initialCode) {
+        map[key].fleetsUsed.add(resolvedFl.initialCode);
       }
       map[key].totalTrips += 1;
       const areaKey = item.area;
@@ -279,6 +338,7 @@ export const CrewDeliveryHistoryView: React.FC = () => {
       const maxSingleAreaTrips = areasArr.reduce((acc, a) => Math.max(acc, a.tripCount), 0);
       return {
         ...crew,
+        fleetCodes: Array.from(crew.fleetsUsed),
         exceededCount,
         maxSingleAreaTrips
       };
@@ -289,9 +349,9 @@ export const CrewDeliveryHistoryView: React.FC = () => {
       : list;
 
     return filteredByToggle.sort((a, b) => b.totalTrips - a.totalTrips);
-  }, [filteredHistory, threshold, onlyExceededFilter]);
+  }, [filteredHistory, threshold, onlyExceededFilter, resolveCanonicalFleet]);
 
-  // Integrated Real-time Fleet (Inisial Mobil) Area Stats from History Log
+  // Integrated Real-time Fleet (Inisial Mobil) Area Stats from History Log + Katalog Armada
   const fleetAreaStatsList = useMemo(() => {
     const map: Record<
       string,
@@ -305,23 +365,71 @@ export const CrewDeliveryHistoryView: React.FC = () => {
     > = {};
 
     filteredHistory.forEach(item => {
-      const initialCode =
+      const rawInit =
         item.initialCode || item.trackingNumber.match(/PO-AKK-\d+-([A-Za-z0-9]+)/)?.[1] || 'DS3';
-      if (!map[initialCode]) {
-        map[initialCode] = {
-          initialCode,
-          plateNumber: item.vehiclePlate,
-          vehicleType: item.vehicleType,
+      const resolved = resolveCanonicalFleet(rawInit, item.vehiclePlate);
+      const key = resolved.initialCode;
+
+      if (!map[key]) {
+        map[key] = {
+          initialCode: resolved.initialCode,
+          plateNumber: resolved.plateNumber || item.vehiclePlate,
+          vehicleType: resolved.vehicleType || item.vehicleType,
           totalTrips: 0,
           areas: {}
         };
       }
-      map[initialCode].totalTrips += 1;
-      map[initialCode].areas[item.area] = (map[initialCode].areas[item.area] || 0) + 1;
+      map[key].totalTrips += 1;
+      map[key].areas[item.area] = (map[key].areas[item.area] || 0) + 1;
     });
 
+    // Jika pengguna mencari kode armada tertentu (misal: n4/ns2) atau memilih filter armada yang kebetulan belum memiliki trip pada bulan terpilih, tetap tampilkan kartu armadanya
+    const q = searchQuery.toLowerCase().trim();
+    const qNorm = normalizeSearchToken(q);
+    if (qNorm || selectedFleetFilter !== 'all') {
+      fleets.forEach(fl => {
+        const key = fl.initialCode || fl.plateNumber;
+        if (map[key]) return;
+        const flText = `armada ${fl.initialCode || ''} ${fl.plateNumber} ${fl.vehicleType}`.toLowerCase();
+        const flNorm = normalizeSearchToken(flText);
+
+        const matchDropdown =
+          selectedFleetFilter === 'all' ||
+          normalizeSearchToken(key) === normalizeSearchToken(selectedFleetFilter);
+        const matchQuery =
+          !q || flText.includes(q) || (qNorm.length > 0 && flNorm.includes(qNorm));
+
+        if (matchDropdown && matchQuery) {
+          map[key] = {
+            initialCode: key,
+            plateNumber: fl.plateNumber,
+            vehicleType: fl.vehicleType,
+            totalTrips: 0,
+            areas: {}
+          };
+        }
+      });
+    }
+
     return Object.values(map).sort((a, b) => b.totalTrips - a.totalTrips);
-  }, [filteredHistory]);
+  }, [filteredHistory, fleets, searchQuery, selectedFleetFilter, resolveCanonicalFleet]);
+
+  // Deteksi apakah pengguna sedang mencari kode/nama Armada (misal: "n4/ns2", "n4", "ns2", "ds3", dll.) atau memilih Filter Armada
+  const isSearchingOrFilteringArmada = useMemo(() => {
+    if (selectedFleetFilter !== 'all') return true;
+    const q = searchQuery.trim().toLowerCase();
+    const qNorm = normalizeSearchToken(q);
+    if (!qNorm) return false;
+    return fleets.some(fl => {
+      const fInit = (fl.initialCode || '').toLowerCase();
+      const fPlate = (fl.plateNumber || '').toLowerCase();
+      return (
+        normalizeSearchToken(fInit).includes(qNorm) ||
+        normalizeSearchToken(fPlate).includes(qNorm) ||
+        `armada ${fInit}`.includes(q)
+      );
+    });
+  }, [searchQuery, selectedFleetFilter, fleets]);
 
   // Global summary metrics for Widgets & Badges
   const totalExceededAreasCount = useMemo(() => {
@@ -331,12 +439,13 @@ export const CrewDeliveryHistoryView: React.FC = () => {
   const activeFiltersCount = useMemo(() => {
     let c = 0;
     if (selectedCrewId !== 'all') c++;
+    if (selectedFleetFilter !== 'all') c++;
     if (selectedMonth !== -1) c++;
     if (searchQuery.trim()) c++;
     if (areaQuickFilter.trim()) c++;
     if (onlyExceededFilter) c++;
     return c;
-  }, [selectedCrewId, selectedMonth, searchQuery, areaQuickFilter, onlyExceededFilter]);
+  }, [selectedCrewId, selectedFleetFilter, selectedMonth, searchQuery, areaQuickFilter, onlyExceededFilter]);
 
   const complianceRate = useMemo(() => {
     const totalAreaPairs = crewAreaStatsList.reduce(
@@ -467,10 +576,10 @@ export const CrewDeliveryHistoryView: React.FC = () => {
         >
           {/* 6. TEXT FIELDS */}
           <UiTextField
-            label="Pencarian Kru / Plat / Resi"
+            label="Pencarian Nama Kru / Armada"
             value={searchQuery}
             onChange={setSearchQuery}
-            placeholder="Ketik nama supir, plat..."
+            placeholder="Ketik nama kru atau armada (misal: N4/NS2)..."
             icon={<Search className="w-3.5 h-3.5" />}
           />
 
@@ -532,6 +641,22 @@ export const CrewDeliveryHistoryView: React.FC = () => {
             </select>
           </div>
 
+          <div className="space-y-1">
+            <label className="block text-[11px] font-medium text-slate-400">Pilih Armada</label>
+            <select
+              value={selectedFleetFilter}
+              onChange={(e) => setSelectedFleetFilter(e.target.value)}
+              className="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-blue-500"
+            >
+              <option value="all">Semua Armada ({fleets.length})</option>
+              {fleets.map(fl => (
+                <option key={fl.id} value={fl.initialCode || fl.plateNumber}>
+                  Armada {fl.initialCode ? `${fl.initialCode} · ${fl.plateNumber}` : fl.plateNumber} ({fl.vehicleType})
+                </option>
+              ))}
+            </select>
+          </div>
+
           {/* 5. TOGGLE SWITCHES */}
           <div className="pt-3 border-t border-slate-800 space-y-2.5">
             <div className="text-[11px] font-semibold text-slate-400">Preferensi Tampilan &amp; Filter</div>
@@ -563,6 +688,7 @@ export const CrewDeliveryHistoryView: React.FC = () => {
               type="button"
               onClick={() => {
                 setSelectedCrewId('all');
+                setSelectedFleetFilter('all');
                 setSelectedMonth(0);
                 setSelectedAreaFilter('all');
                 setSearchQuery('');
@@ -675,10 +801,71 @@ export const CrewDeliveryHistoryView: React.FC = () => {
             </div>
           </div>
 
+          {/* HASIL LANGSUNG PENCARIAN / FILTER ARMADA (Muncul otomatis saat mencari kode armada misal: N4/NS2, N4, NS2) */}
+          {activeSubTab === 'area_stats' && isSearchingOrFilteringArmada && fleetAreaStatsList.length > 0 && (
+            <div className="bg-slate-900/90 border border-amber-500/40 rounded-xl p-3 space-y-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-xs font-bold text-amber-300">
+                  <Truck className="w-4 h-4 text-amber-400" />
+                  <span>Hasil Pencarian Armada ({fleetAreaStatsList.length} Unit Ditemukan)</span>
+                </div>
+                <span className="text-[11px] text-slate-400">
+                  Menampilkan langsung unit armada yang cocok
+                </span>
+              </div>
+              <div className="space-y-2">
+                {fleetAreaStatsList.map(fl => {
+                  const isExpanded = expandedIds[fl.initialCode] ?? true;
+                  const areaEntries = Object.entries(fl.areas).sort((a, b) => b[1] - a[1]);
+                  return (
+                    <UiAccordionItem
+                      key={`direct-fleet-${fl.initialCode}`}
+                      id={fl.initialCode}
+                      isExpanded={isExpanded}
+                      onToggle={toggleAccordion}
+                      title={`Armada ${fl.initialCode} · ${fl.plateNumber}`}
+                      subtitle={`${fl.vehicleType} · ${areaEntries.length} Rute Distribusi`}
+                      rightMeta={<UiBadge count={`${fl.totalTrips} Trip`} variant="emerald" />}
+                    >
+                      {areaEntries.length === 0 ? (
+                        <div className="text-xs text-slate-400 py-2">
+                          Belum ada rute perjalanan tercatat pada filter periode ini.
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5">
+                          {areaEntries.map(([areaName, count]) => (
+                            <div
+                              key={areaName}
+                              className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 space-y-1.5"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-semibold text-white text-xs truncate">
+                                  {areaName}
+                                </span>
+                                <UiBadge count={`${count} Trip`} variant="emerald" />
+                              </div>
+                              <UiProgressBar
+                                value={count}
+                                max={Math.max(1, fl.totalTrips)}
+                                label="Porsi Rute Armada"
+                                valueLabel={`${Math.round((count / Math.max(1, fl.totalTrips)) * 100)}%`}
+                                status="success"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </UiAccordionItem>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* TAB 1: FREKUENSI KRU PER AREA */}
           {activeSubTab === 'area_stats' && (
             <>
-              {crewAreaStatsList.length === 0 ? (
+              {crewAreaStatsList.length === 0 && (!isSearchingOrFilteringArmada || fleetAreaStatsList.length === 0) ? (
                 <UiCard title="Tidak Ada Data Pengiriman Kru" subtitle="Sesuaikan filter atau sinkronkan jadwal">
                   <div className="py-6 text-center space-y-3">
                     <p className="text-slate-400 text-xs">
@@ -708,10 +895,15 @@ export const CrewDeliveryHistoryView: React.FC = () => {
                         isExpanded={isExpanded}
                         onToggle={toggleAccordion}
                         title={
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <span>{item.crewName}</span>
                             <span className="text-slate-500">&middot;</span>
                             <span className="text-slate-400 font-normal">{item.role}</span>
+                            {item.fleetCodes && item.fleetCodes.length > 0 && (
+                              <span className="px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[10px] font-mono font-bold">
+                                Armada: {item.fleetCodes.join(', ')}
+                              </span>
+                            )}
                             {item.exceededCount > 0 && (
                               <UiBadge
                                 count={`${item.exceededCount} Batas`}

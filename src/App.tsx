@@ -21,6 +21,7 @@ import { AuthModal } from './components/AuthModal';
 import { ThemeSwitcher } from './components/ThemeSwitcher';
 import { SystemActivityLog } from './components/SystemActivityLog';
 import { DepartmentDashboard } from './components/DepartmentDashboard';
+import { WarehouseManagementSystem, WmsSubTab } from './components/WarehouseManagementSystem';
 import { MarketingDashboard } from './components/MarketingDashboard';
 import { DriverMobileView } from './components/DriverMobileView';
 import { DriverReportsManagement } from './components/DriverReportsManagement';
@@ -181,7 +182,13 @@ export default function App() {
       case 'training_videos': return 'Training & Development: Video Pembelajaran & SOP';
       case 'training_karyawan': return 'Training & Development: Pelatihan & Sertifikasi Kru';
       case 'finance_dashboard': return 'Dashboard Departemen Finance & Tax';
-      case 'warehouse_dashboard': return 'Dashboard Departemen Gudang';
+      case 'warehouse_dashboard': return 'WMS: Ringkasan & Control Tower Gudang';
+      case 'warehouse_inventory': return 'WMS: Master SKU & Stok Bin Gudang';
+      case 'warehouse_inbound': return 'WMS: Inbound (Receiving & Putaway)';
+      case 'warehouse_outbound': return 'WMS: Outbound (Picking & Ceklis Muat)';
+      case 'warehouse_scanner': return 'WMS: Pemindaian Foto Barang & Sinkronisasi Inventaris';
+      case 'warehouse_slotting': return 'WMS: Denah Rak & Kapasitas Zona Gudang';
+      case 'warehouse_opname': return 'WMS: Stok Opname & Kartu Stok Digital';
       case 'purchasing_dashboard': return 'Dashboard Departemen Adm. Pembelian';
       case 'purchasing_stock_overview': return 'Analisa Stok: Ringkasan & Status';
       case 'purchasing_stock_forecast': return 'Analisa Stok: Prediksi Kebutuhan';
@@ -221,19 +228,11 @@ export default function App() {
         onToggleMinimize={toggleSidebar}
       />
 
-      {/* Main Content Area with offset for Sidebar */}
-      <div className={`flex-1 flex flex-col min-h-screen w-full transition-all duration-300 ${isSidebarMinimized ? 'lg:pl-20' : 'lg:pl-72'}`}>
+      {/* Main Content Area with smooth offset transition for Sidebar */}
+      <div className={`flex-1 flex flex-col min-h-screen w-full transition-[padding] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[padding] ${isSidebarMinimized ? 'lg:pl-20' : 'lg:pl-72'}`}>
         {/* Desktop Top Header Bar with High-Contrast Readability */}
         <header className="hidden lg:flex sticky top-0 z-20 h-16 bg-slate-900 border-b border-slate-800 px-6 lg:px-8 items-center justify-between shadow-xs">
           <div className="flex items-center gap-3 min-w-0">
-            <button
-              type="button"
-              onClick={toggleSidebar}
-              className="p-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 hover:text-white hover:bg-slate-800 transition cursor-pointer shrink-0"
-              title={isSidebarMinimized ? 'Tampilkan Sidebar Navigasi' : 'Sembunyikan Sidebar Navigasi'}
-            >
-              {isSidebarMinimized ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
-            </button>
             <div className="min-w-0">
               <div className="text-[11px] font-medium text-slate-400 flex items-center gap-1.5">
                 <span className="text-amber-400 font-semibold">PT Anugrah Kemasan Kreatif</span>
@@ -500,8 +499,42 @@ export default function App() {
           {currentTab === 'finance_dashboard' && (
             <DepartmentDashboard dashboardType="finance" />
           )}
-          {currentTab === 'warehouse_dashboard' && (
-            <DepartmentDashboard dashboardType="warehouse" />
+          {(currentTab === 'warehouse_dashboard' ||
+            currentTab === 'warehouse_inventory' ||
+            currentTab === 'warehouse_inbound' ||
+            currentTab === 'warehouse_outbound' ||
+            currentTab === 'warehouse_scanner' ||
+            currentTab === 'warehouse_slotting' ||
+            currentTab === 'warehouse_opname') && (
+            <WarehouseManagementSystem
+              initialTab={
+                currentTab === 'warehouse_inventory'
+                  ? 'inventory'
+                  : currentTab === 'warehouse_inbound'
+                  ? 'inbound'
+                  : currentTab === 'warehouse_outbound'
+                  ? 'outbound'
+                  : currentTab === 'warehouse_scanner'
+                  ? 'scanner'
+                  : currentTab === 'warehouse_slotting'
+                  ? 'slotting'
+                  : currentTab === 'warehouse_opname'
+                  ? 'opname'
+                  : 'overview'
+              }
+              onNavigateTab={(tab: WmsSubTab) => {
+                const map: Record<WmsSubTab, NavTab> = {
+                  overview: 'warehouse_dashboard',
+                  inventory: 'warehouse_inventory',
+                  inbound: 'warehouse_inbound',
+                  outbound: 'warehouse_outbound',
+                  scanner: 'warehouse_scanner',
+                  slotting: 'warehouse_slotting',
+                  opname: 'warehouse_opname'
+                };
+                setCurrentTab(map[tab] || 'warehouse_dashboard');
+              }}
+            />
           )}
           {currentTab === 'purchasing_dashboard' && (
             <DepartmentDashboard dashboardType="purchasing" />

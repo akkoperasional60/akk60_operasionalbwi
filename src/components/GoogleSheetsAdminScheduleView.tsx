@@ -22,6 +22,7 @@ import {
   Eye,
   SlidersHorizontal,
   ChevronDown,
+  ChevronLeft,
   Info,
   MapPin,
   Ship,
@@ -156,11 +157,52 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
   const [skipDuplicatesUpload, setSkipDuplicatesUpload] = useState<boolean>(false);
   const [skipInvalidUpload, setSkipInvalidUpload] = useState<boolean>(true);
   const [isUploadConfigModalOpen, setIsUploadConfigModalOpen] = useState<boolean>(false);
+  const [activeSubPage, setActiveSubPage] = useState<'schedule' | 'upload_excel' | 'upload_process'>('schedule');
   const [importMonth, setImportMonth] = useState<string>('Januari');
   const [importYear, setImportYear] = useState<string>('2026');
   const [importMode, setImportMode] = useState<'tambahkan' | 'ganti'>('tambahkan');
   const [selectedUploadFile, setSelectedUploadFile] = useState<File | null>(null);
-  const [combinedModalMode, setCombinedModalMode] = useState<'manual' | 'excel'>('manual');
+
+  const getIntegratedDrivers = () => {
+    const users = logisticsStore.getUsers().filter(u => u.role === 'driver' && u.status !== 'rejected');
+    const storeDrivers = logisticsStore.getDriverCrews();
+    const names = new Set<string>();
+    const result: { id: string; name: string; hasAccount?: boolean }[] = [];
+    users.forEach(u => {
+      if (u.fullName && !names.has(u.fullName.toLowerCase())) {
+        names.add(u.fullName.toLowerCase());
+        result.push({ id: u.id, name: u.fullName, hasAccount: true });
+      }
+    });
+    storeDrivers.forEach(c => {
+      if (c.name && !names.has(c.name.toLowerCase())) {
+        names.add(c.name.toLowerCase());
+        result.push({ id: c.id, name: c.name, hasAccount: false });
+      }
+    });
+    return result;
+  };
+
+  const getIntegratedHelpers = () => {
+    const users = logisticsStore.getUsers().filter(u => u.role === 'crew_helper' && u.status !== 'rejected');
+    const storeHelpers = logisticsStore.getHelperCrews();
+    const names = new Set<string>();
+    const result: { id: string; name: string; hasAccount?: boolean }[] = [];
+    users.forEach(u => {
+      if (u.fullName && !names.has(u.fullName.toLowerCase())) {
+        names.add(u.fullName.toLowerCase());
+        result.push({ id: u.id, name: u.fullName, hasAccount: true });
+      }
+    });
+    storeHelpers.forEach(c => {
+      if (c.name && !names.has(c.name.toLowerCase())) {
+        names.add(c.name.toLowerCase());
+        result.push({ id: c.id, name: c.name, hasAccount: false });
+      }
+    });
+    return result;
+  };
+
   const [manualScheduleForm, setManualScheduleForm] = useState<{
     dateIso: string;
     driver: string;
@@ -169,14 +211,18 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     area: string;
     armada: string;
     target: string;
-  }>({
-    dateIso: '2026-01-05',
-    driver: 'Supri',
-    helper: 'Rifal',
-    helper2: '',
-    area: 'DENPASAR 1',
-    armada: 'DS3',
-    target: 'Gudang Pusat AKK Banyuwangi DC'
+  }>(() => {
+    const initDrivers = logisticsStore.getUsers().filter(u => u.role === 'driver' && u.status !== 'rejected');
+    const initHelpers = logisticsStore.getUsers().filter(u => u.role === 'crew_helper' && u.status !== 'rejected');
+    return {
+      dateIso: '2026-01-05',
+      driver: initDrivers[0]?.fullName || 'Budiono',
+      helper: initHelpers[0]?.fullName || 'Saiful Rizal',
+      helper2: '',
+      area: 'DENPASAR 1',
+      armada: 'DS3',
+      target: 'Gudang Pusat AKK Banyuwangi DC'
+    };
   });
   const [stagedCombinedTrips, setStagedCombinedTrips] = useState<Array<ParsedSheetTrip & { source: 'excel' | 'manual'; tempId: string }>>([]);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState<boolean>(false);
@@ -270,14 +316,16 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
   };
 
   const handleOpenAddTripModal = (dayNumber: number, dateString: string) => {
+    const defaultDriver = getIntegratedDrivers()[0]?.name || 'Budiono';
+    const defaultHelper = getIntegratedHelpers()[0]?.name || 'Saiful Rizal';
     setEditingTripModal({
       isOpen: true,
       dayNumber,
       dateString,
       tripIndex: -1,
       scheduleId: undefined,
-      driver: 'Supri',
-      helper: 'Rifal',
+      driver: defaultDriver,
+      helper: defaultHelper,
       helper2: '',
       area: 'DENPASAR 1',
       armada: 'DS3',
@@ -2113,6 +2161,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
   return (
     <div className="space-y-5">
+      {activeSubPage === 'schedule' ? (
+        <>
       {/* 1. Header Card: Excel Delivery Schedule Integrated Banner */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg relative overflow-hidden">
         <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
@@ -2147,17 +2197,27 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   ...prev,
                   dateIso: defaultIso
                 }));
-                setImportMonth(MONTH_NAMES[effectiveMo] || 'Januari');
-                setImportYear(String(selectedYear));
-                setCombinedModalMode('manual');
                 setIsUploadConfigModalOpen(true);
               }}
               className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black border border-emerald-400/40 shadow-md shadow-emerald-950/40 transition cursor-pointer"
-              title="Tambah Jadwal Baru & Unggah Excel (.xlsx / .csv)"
+              title="Pop-up Form Tambah Jadwal Baru (Manual)"
             >
               <Plus className="w-3.5 h-3.5" />
+              <span>Tambah Jadwal Manual</span>
+            </button>
+
+            <button
+              onClick={() => {
+                const effectiveMo = selectedMonth === -1 ? 0 : selectedMonth;
+                setImportMonth(MONTH_NAMES[effectiveMo] || 'Januari');
+                setImportYear(String(selectedYear));
+                setActiveSubPage('upload_excel');
+              }}
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-black border border-blue-400/40 shadow-md shadow-blue-950/40 transition cursor-pointer"
+              title="Halaman Unggah File Jadwal Excel (.xls, .xlsx, .csv)"
+            >
               <Upload className="w-3.5 h-3.5" />
-              <span>Tambah / Unggah Jadwal</span>
+              <span>Unggah File Excel</span>
             </button>
 
             <button
@@ -2318,139 +2378,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         </div>
       </div>
 
-      {/* 2. Filter & Navigation Bar */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs space-y-3">
-        {/* Top: Category Tabs & Active Count */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 text-xs">
-            <button
-              onClick={() => setCategoryFilter('all')}
-              className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer ${
-                categoryFilter === 'all'
-                  ? 'bg-emerald-600 text-white shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-              }`}
-            >
-              Semua Rute ({stats.totalTrips})
-            </button>
-            <button
-              onClick={() => setCategoryFilter('luar_kota')}
-              className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer flex items-center gap-1.5 ${
-                categoryFilter === 'luar_kota'
-                  ? 'bg-blue-600 text-white shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400'
-              }`}
-            >
-              <Ship className="w-3.5 h-3.5" />
-              <span>Bali / Luar Kota ({stats.totalLuarKota})</span>
-            </button>
-            <button
-              onClick={() => setCategoryFilter('lokal')}
-              className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer flex items-center gap-1.5 ${
-                categoryFilter === 'lokal'
-                  ? 'bg-emerald-600 text-white shadow-xs'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400'
-              }`}
-            >
-              <Truck className="w-3.5 h-3.5" />
-              <span>Lokal ({stats.totalLokal})</span>
-            </button>
-          </div>
-
-          {(searchQuery || scheduleStatusFilter !== 'all' || armadaFilter !== 'all' || crewDriverFilter !== 'all' || categoryFilter !== 'all') && (
-            <button
-              onClick={() => {
-                setSearchQuery('');
-                setScheduleStatusFilter('all');
-                setArmadaFilter('all');
-                setCrewDriverFilter('all');
-                setCategoryFilter('all');
-              }}
-              className="text-xs text-rose-600 dark:text-rose-400 hover:underline font-bold flex items-center gap-1 cursor-pointer"
-            >
-              <X className="w-3.5 h-3.5" />
-              <span>Reset Semua Filter</span>
-            </button>
-          )}
-        </div>
-
-        {/* Bottom: Search Input & Filter Dropdowns Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 pt-1">
-          {/* 1. Input Field Pencarian */}
-          <div className="relative">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="Cari driver, helper, area, armada..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-200 text-xs rounded-xl pl-9 pr-7 py-2.5 border border-slate-200 dark:border-slate-800 focus:border-emerald-500 focus:outline-hidden placeholder:text-slate-400 dark:placeholder:text-slate-500"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => setSearchQuery('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 text-xs cursor-pointer"
-              >
-                &times;
-              </button>
-            )}
-          </div>
-
-          {/* 2. Dropdown Filter Status Pengiriman */}
-          <div className="relative">
-            <select
-              value={scheduleStatusFilter}
-              onChange={(e) => setScheduleStatusFilter(e.target.value as any)}
-              className="w-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-200 text-xs font-bold rounded-xl px-3 py-2.5 border border-slate-200 dark:border-slate-800 focus:border-emerald-500 focus:outline-hidden cursor-pointer"
-            >
-              <option value="all">Semua Status Pengiriman</option>
-              <option value="scheduled">Terjadwal (Scheduled)</option>
-              <option value="picked_up">Telah Dimuat (Picked Up)</option>
-              <option value="in_transit">Dalam Perjalanan (In Transit)</option>
-              <option value="delivered">Terkirim (Delivered)</option>
-              <option value="delayed">Tertunda / Kendala (Delayed)</option>
-            </select>
-          </div>
-
-          {/* 3. Dropdown Filter Tipe Kendaraan / Armada */}
-          <div className="relative">
-            <select
-              value={armadaFilter}
-              onChange={(e) => setArmadaFilter(e.target.value)}
-              className="w-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-200 text-xs font-bold rounded-xl px-3 py-2.5 border border-slate-200 dark:border-slate-800 focus:border-emerald-500 focus:outline-hidden cursor-pointer"
-            >
-              <option value="all">Semua Tipe Kendaraan / Armada</option>
-              <option value="DS1">DS1 - Isuzu Giga CDD Long (Bali Spec)</option>
-              <option value="DS2">DS2 - Mitsubishi Canter HDX (6 Roda)</option>
-              <option value="DS3">DS3 - Hino Dutro 130 HD (Bali Spec)</option>
-              <option value="DS4">DS4 - Isuzu Elf NMR 71</option>
-              <option value="NS1">NS1 - Canter FE71 (Engkel 4R)</option>
-              <option value="NS2">NS2 - Isuzu Elf NLR 55 (Engkel 4R)</option>
-              <option value="NS3">NS3 - Hino Dutro 110 SDB (Engkel 4R)</option>
-              <option value="N20">N20 - Mitsubishi L300 Box (Pick Up)</option>
-            </select>
-          </div>
-
-          {/* 4. Dropdown Filter Kru Pengemudi */}
-          <div className="relative">
-            <select
-              value={crewDriverFilter}
-              onChange={(e) => setCrewDriverFilter(e.target.value)}
-              className="w-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-200 text-xs font-bold rounded-xl px-3 py-2.5 border border-slate-200 dark:border-slate-800 focus:border-emerald-500 focus:outline-hidden cursor-pointer"
-            >
-              <option value="all">Semua Kru / Pengemudi</option>
-              {allDriversInWeeks.map(drv => (
-                <option key={`drv-opt-${drv}`} value={drv}>
-                  Supir: {drv}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-      </div>
-
-      {/* 3. Main Content: Interactive Calendar & Selected Day Grid Details */}
+      {/* Main Content: Interactive Calendar & Selected Day Grid Details */}
       <div className="space-y-6">
         {/* Calendar Container - Bright Non-Black Style */}
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
@@ -2480,21 +2408,6 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   <span className="w-2 h-2 rounded-full bg-blue-500" />
                   <span>Area Luar Kota / Bali (Ferry ASDP)</span>
                 </span>
-              </div>
-            </div>
-
-            {/* Intelligent Date Parsing & Black Line Separator Guide Notice */}
-            <div className="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 rounded-xl p-3 flex items-start gap-3 text-xs">
-              <div className="p-1 rounded-lg bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 font-bold shrink-0 mt-0.5">
-                📅
-              </div>
-              <div className="space-y-0.5 text-slate-700 dark:text-slate-300">
-                <div className="font-bold text-emerald-950 dark:text-emerald-200">
-                  Sinkronisasi Tanggal & Pembatas Garis Hitam Terverifikasi Tepat:
-                </div>
-                <p className="text-slate-600 dark:text-slate-400 leading-relaxed">
-                  Sistem membaca ritase di antara <strong>dua garis hitam</strong> per harinya. Format penulisan seperti <strong>&quot;Tanggal 5 Bulan 1&quot;</strong>, <strong>&quot;05/01/2026&quot;</strong>, <strong>&quot;5/1&quot;</strong>, maupun format Google Sheets (<strong>&quot;1/5/2026&quot;</strong>) dipetakan tepat pada <strong>Tanggal 05 Januari</strong> di kalender (tidak lagi tertukar ke tanggal 1).
-                </p>
               </div>
             </div>
 
@@ -2891,6 +2804,364 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             })()}
           </div>
         </div>
+        </>
+      ) : activeSubPage === 'upload_excel' ? (
+        /* HALAMAN BARU 1: FORM UNGGAH FILE JADWAL PENGIRIMAN (Tanpa Cabang Data) */
+        <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 sm:p-8 shadow-sm space-y-6 animate-in fade-in duration-200">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-4">
+            <div>
+              <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white flex items-center gap-2.5">
+                <FileSpreadsheet className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+                <span>Unggah File Jadwal Pengiriman</span>
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
+                Pilih periode bulan, mode import, dan unggah file Excel (.xls, .xlsx, .csv) untuk diproses pada halaman pemrosesan jadwal.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveSubPage('schedule')}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold border border-slate-300 dark:border-slate-700 transition cursor-pointer w-fit shadow-2xs"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              <span>Kembali ke Jadwal Pengiriman</span>
+            </button>
+          </div>
+
+          <div className="max-w-3xl space-y-5">
+            {/* BULAN DATA & TAHUN DATA (Cabang Data Dihapus) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200 mb-2">
+                  BULAN DATA
+                </label>
+                <select
+                  value={importMonth}
+                  onChange={(e) => setImportMonth(e.target.value)}
+                  className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 cursor-pointer shadow-2xs"
+                >
+                  {MONTH_NAMES.map(m => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200 mb-2">
+                  TAHUN DATA
+                </label>
+                <select
+                  value={importYear}
+                  onChange={(e) => setImportYear(e.target.value)}
+                  className="w-full bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-4 py-3 text-sm font-medium text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 cursor-pointer shadow-2xs"
+                >
+                  {['2024', '2025', '2026', '2027', '2028', '2029', '2030'].map(yr => (
+                    <option key={yr} value={yr}>{yr}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* MODE IMPORT */}
+            <div>
+              <label className="block text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200 mb-2">
+                MODE IMPORT
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <label
+                  onClick={() => setImportMode('tambahkan')}
+                  className={`flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition bg-white dark:bg-slate-950 ${
+                    importMode === 'tambahkan'
+                      ? 'border-blue-600 ring-2 ring-blue-500/20'
+                      : 'border-slate-300 dark:border-slate-700 hover:border-slate-400'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="importModeRadio"
+                    checked={importMode === 'tambahkan'}
+                    onChange={() => setImportMode('tambahkan')}
+                    className="mt-1 w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                  />
+                  <div>
+                    <div className="text-sm font-black text-slate-900 dark:text-white">Tambahkan data</div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                      Data bulan yang sama tidak dihapus.
+                    </div>
+                  </div>
+                </label>
+
+                <label
+                  onClick={() => setImportMode('ganti')}
+                  className={`flex items-start gap-3 p-4 rounded-xl border cursor-pointer transition bg-white dark:bg-slate-950 ${
+                    importMode === 'ganti'
+                      ? 'border-blue-600 ring-2 ring-blue-500/20'
+                      : 'border-slate-300 dark:border-slate-700 hover:border-slate-400'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="importModeRadio"
+                    checked={importMode === 'ganti'}
+                    onChange={() => setImportMode('ganti')}
+                    className="mt-1 w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                  />
+                  <div>
+                    <div className="text-sm font-black text-slate-900 dark:text-white">Ganti data bulan ini</div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                      Data lama periode sama dihapus lalu diimport ulang.
+                    </div>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            {/* FILE JADWAL PENGIRIMAN */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                  FILE JADWAL PENGIRIMAN
+                </label>
+                <button
+                  type="button"
+                  onClick={downloadScheduleTemplate}
+                  className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Unduh Template Excel</span>
+                </button>
+              </div>
+
+              <input
+                type="file"
+                ref={modalFileInputRef}
+                accept=".xlsx,.xls,.csv"
+                className="hidden"
+                onChange={async (e) => {
+                  const f = e.target.files?.[0];
+                  if (!f) return;
+                  setSelectedUploadFile(f);
+                  setUploadedFileName(f.name);
+                  try {
+                    const arrayBuffer = await f.arrayBuffer();
+                    const data = new Uint8Array(arrayBuffer);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const sheetName = workbook.SheetNames.find(n => n.toUpperCase() === 'ALL') || workbook.SheetNames[0];
+                    const worksheet = workbook.Sheets[sheetName];
+                    const jsonRows = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
+                    const parsed = googleSheetsApiService.parseScheduleRows(jsonRows);
+                    if (parsed.length > 0) {
+                      const excelEntries = parsed.map((item, idx) => ({
+                        ...item,
+                        source: 'excel' as const,
+                        tempId: `xls-${Date.now()}-${idx}`
+                      }));
+                      setStagedCombinedTrips(excelEntries);
+                    } else {
+                      setStagedCombinedTrips([]);
+                    }
+                  } catch (err) {
+                    console.error('Failed reading excel on upload page:', err);
+                  }
+                }}
+              />
+
+              <div className="bg-blue-50/40 dark:bg-slate-950 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-2xl p-4 space-y-2.5">
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-2 flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => modalFileInputRef.current?.click()}
+                    className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs cursor-pointer transition shrink-0 shadow-xs"
+                  >
+                    Choose File
+                  </button>
+                  <span className="text-sm text-slate-700 dark:text-slate-300 truncate flex-1">
+                    {selectedUploadFile ? selectedUploadFile.name : 'No file chosen'}
+                  </span>
+                  {selectedUploadFile && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedUploadFile(null);
+                        setStagedCombinedTrips([]);
+                        if (modalFileInputRef.current) modalFileInputRef.current.value = '';
+                      }}
+                      className="text-xs font-bold text-rose-500 hover:text-rose-400 px-2 cursor-pointer"
+                    >
+                      Hapus
+                    </button>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Format didukung: .xls, .xlsx, .csv. Maksimal 10MB. Sistem akan menampilkan halaman pemrosesan &amp; preview jadwal sebelum import.
+                </p>
+              </div>
+            </div>
+
+            {/* TOMBOL AKSI: Preview & Proses File (Membuka Halaman Baru Pemrosesan) & Lihat Riwayat Upload */}
+            <div className="flex items-center gap-3 pt-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => {
+                  if (!selectedUploadFile) {
+                    modalFileInputRef.current?.click();
+                    return;
+                  }
+                  setActiveSubPage('upload_process');
+                }}
+                className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-black shadow-md transition cursor-pointer"
+              >
+                <Search className="w-4 h-4" />
+                <span>Preview Dulu</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setScheduleChangeLogs(logisticsStore.getScheduleChangeLogs());
+                  setIsHistoryModalOpen(true);
+                }}
+                className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-white dark:bg-slate-950 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 text-sm font-black border border-slate-300 dark:border-slate-700 transition cursor-pointer"
+              >
+                <span>Lihat Riwayat Upload</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        /* HALAMAN BARU 2: HALAMAN PEMROSESAN & PREVIEW FILE JADWAL EXCEL */
+        <div className="bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 sm:p-8 shadow-sm space-y-6 animate-in fade-in duration-200">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 text-[11px] font-black uppercase tracking-wider border border-blue-300 dark:border-blue-800">
+                  Halaman Pemrosesan File
+                </span>
+              </div>
+              <h2 className="text-lg sm:text-xl font-black text-slate-900 dark:text-white flex items-center gap-2 mt-1.5">
+                <CheckCircle2 className="w-6 h-6 text-emerald-500" />
+                <span>Pemrosesan &amp; Preview Jadwal Excel</span>
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+                Periksa hasil pembacaan file <strong>{selectedUploadFile?.name || '-'}</strong> sebelum disimpan ke jadwal utama.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <button
+                type="button"
+                onClick={() => setActiveSubPage('upload_excel')}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold border border-slate-300 dark:border-slate-700 transition cursor-pointer"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                <span>Kembali ke Form Unggah</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const excelQueue = stagedCombinedTrips.filter(x => x.source === 'excel');
+                  if (excelQueue.length === 0 || !selectedUploadFile) return;
+                  const monthIndex = MONTH_NAMES.findIndex(m => m.toLowerCase() === importMonth.toLowerCase());
+                  if (monthIndex !== -1) {
+                    setSelectedMonth(monthIndex);
+                  }
+                  if (!isNaN(Number(importYear))) {
+                    setSelectedYear(Number(importYear));
+                  }
+                  mergeAndSaveCombinedTrips(
+                    excelQueue,
+                    importMode,
+                    selectedUploadFile.name
+                  );
+                  setStagedCombinedTrips([]);
+                  setSelectedUploadFile(null);
+                  setActiveSubPage('schedule');
+                }}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black shadow-md transition cursor-pointer"
+              >
+                <Save className="w-4 h-4" />
+                <span>Simpan &amp; Import Jadwal ({stagedCombinedTrips.filter(x => x.source === 'excel').length} Baris)</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Ringkasan Parameter Pemrosesan */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="bg-white dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">NAMA FILE EXCEL</span>
+              <span className="text-sm font-black text-slate-900 dark:text-white mt-1 block truncate">
+                {selectedUploadFile?.name || '-'}
+              </span>
+            </div>
+            <div className="bg-white dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">PERIODE BULAN &amp; TAHUN</span>
+              <span className="text-sm font-black text-slate-900 dark:text-white mt-1 block">
+                {importMonth} {importYear}
+              </span>
+            </div>
+            <div className="bg-white dark:bg-slate-950 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">MODE IMPORT &amp; BARIS TERBACA</span>
+              <span className="text-sm font-black text-blue-600 dark:text-blue-400 mt-1 block">
+                {importMode === 'tambahkan' ? 'Tambahkan data' : 'Ganti data bulan ini'} ({stagedCombinedTrips.filter(x => x.source === 'excel').length} Jadwal)
+              </span>
+            </div>
+          </div>
+
+          {/* Tabel Pratinjau Pemrosesan File */}
+          <div className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
+            <div className="max-h-[60vh] overflow-y-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-100 dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-b border-slate-200 dark:border-slate-800 sticky top-0">
+                    <th className="p-3 font-bold">NO</th>
+                    <th className="p-3 font-bold">TANGGAL KIRIM</th>
+                    <th className="p-3 font-bold">DRIVER / SUPIR</th>
+                    <th className="p-3 font-bold">HELPER</th>
+                    <th className="p-3 font-bold">AREA KIRIM TUJUAN</th>
+                    <th className="p-3 font-bold">ARMADA</th>
+                    <th className="p-3 font-bold text-center">HAPUS BARIS</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-800 dark:text-slate-200">
+                  {stagedCombinedTrips.filter(x => x.source === 'excel').length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="p-8 text-center text-slate-500">
+                        Tidak ada baris jadwal yang terbaca dari file ini. Silakan kembali dan pilih file sesuai template.
+                      </td>
+                    </tr>
+                  ) : (
+                    stagedCombinedTrips
+                      .filter(x => x.source === 'excel')
+                      .map((item, idx) => (
+                        <tr key={item.tempId} className="hover:bg-slate-50 dark:hover:bg-slate-900/50">
+                          <td className="p-3 font-mono text-slate-500">{idx + 1}</td>
+                          <td className="p-3 font-mono font-semibold">{item.dateStr || '-'}</td>
+                          <td className="p-3 font-bold text-slate-900 dark:text-white">{item.driver}</td>
+                          <td className="p-3">
+                            {item.helper || '-'}{item.helper2 && item.helper2 !== '-' ? `, ${item.helper2}` : ''}
+                          </td>
+                          <td className="p-3 font-bold text-emerald-700 dark:text-emerald-400">{item.area}</td>
+                          <td className="p-3 font-mono font-bold text-blue-700 dark:text-blue-400">{item.armada}</td>
+                          <td className="p-3 text-center">
+                            <button
+                              type="button"
+                              onClick={() => setStagedCombinedTrips(prev => prev.filter(x => x.tempId !== item.tempId))}
+                              className="text-rose-500 hover:text-rose-400 cursor-pointer p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 transition"
+                              title="Hapus baris ini"
+                            >
+                              <Trash2 className="w-4 h-4 mx-auto" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal Edit / Tambah Ritase Pengiriman */}
       {editingTripModal && editingTripModal.isOpen && (
@@ -2925,19 +3196,17 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
                   Driver / Pengemudi (Integrasi Manajemen User)
                 </label>
-                <input
-                  type="text"
-                  list="driver-options"
+                <select
                   value={editingTripModal.driver}
                   onChange={(e) => setEditingTripModal({ ...editingTripModal, driver: e.target.value })}
-                  placeholder="Pilih / Ketik Nama Supir"
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-emerald-500"
-                />
-                <datalist id="driver-options">
-                  {logisticsStore.getDriverCrews().map(c => (
-                    <option key={c.id} value={c.name} />
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-bold focus:outline-none focus:border-emerald-500 cursor-pointer"
+                >
+                  {getIntegratedDrivers().map(c => (
+                    <option key={c.id} value={c.name}>
+                      {c.name}{c.hasAccount ? ' (Akun Driver)' : ''}
+                    </option>
                   ))}
-                </datalist>
+                </select>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -2945,38 +3214,36 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
                     Helper / Kernet 1 (Integrasi Manajemen User)
                   </label>
-                  <input
-                    type="text"
-                    list="helper1-options"
+                  <select
                     value={editingTripModal.helper}
                     onChange={(e) => setEditingTripModal({ ...editingTripModal, helper: e.target.value })}
-                    placeholder="Nama Helper 1 (atau -)"
-                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-emerald-500"
-                  />
-                  <datalist id="helper1-options">
-                    {logisticsStore.getHelperCrews().map(c => (
-                      <option key={c.id} value={c.name} />
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-bold focus:outline-none focus:border-emerald-500 cursor-pointer"
+                  >
+                    <option value="">- Tanpa Helper 1 -</option>
+                    {getIntegratedHelpers().map(c => (
+                      <option key={c.id} value={c.name}>
+                        {c.name}{c.hasAccount ? ' (Akun Helper)' : ''}
+                      </option>
                     ))}
-                  </datalist>
+                  </select>
                 </div>
 
                 <div>
                   <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
                     Helper / Kernet 2 (Opsional)
                   </label>
-                  <input
-                    type="text"
-                    list="helper2-options"
+                  <select
                     value={editingTripModal.helper2}
                     onChange={(e) => setEditingTripModal({ ...editingTripModal, helper2: e.target.value })}
-                    placeholder="Nama Helper 2 (atau -)"
-                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-emerald-500"
-                  />
-                  <datalist id="helper2-options">
-                    {logisticsStore.getHelperCrews().map(c => (
-                      <option key={c.id} value={c.name} />
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-bold focus:outline-none focus:border-emerald-500 cursor-pointer"
+                  >
+                    <option value="">- Tanpa Helper 2 -</option>
+                    {getIntegratedHelpers().map(c => (
+                      <option key={`edit-h2-${c.id}`} value={c.name}>
+                        {c.name}{c.hasAccount ? ' (Akun Helper)' : ''}
+                      </option>
                     ))}
-                  </datalist>
+                  </select>
                 </div>
               </div>
 
@@ -3064,441 +3331,179 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         </div>
       )}
 
-      {/* Modal: Tambah Jadwal Baru & Unggah File Excel */}
+      {/* Pop-up Modal: Form Tambah Jadwal Baru (Manual) */}
       {isUploadConfigModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-2xl w-full shadow-2xl space-y-4 my-4 max-h-[90vh] flex flex-col">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 max-w-xl w-full shadow-2xl space-y-5 my-4">
             {/* Modal Header */}
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3 shrink-0">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-emerald-500/15 text-emerald-400 flex items-center justify-center border border-emerald-500/30">
-                  {combinedModalMode === 'manual' ? <Plus className="w-4 h-4" /> : <Upload className="w-4 h-4" />}
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shadow-sm">
+                  <Plus className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-black text-white">
-                    Tambah Jadwal Baru &amp; Unggah File Excel (.xlsx / .csv)
+                  <h3 className="text-base font-black text-slate-900 dark:text-white">
+                    Form Tambah Jadwal Baru (Manual)
                   </h3>
-                  <p className="text-[11px] text-slate-400">
-                    Pilih form tambah jadwal baru atau unggah file Excel untuk pratinjau sebelum disimpan ke sistem
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Terintegrasi langsung dengan akun Driver &amp; Helper pada Manajemen User (Budiono, Saiful Rizal, dll.)
                   </p>
                 </div>
               </div>
               <button
+                type="button"
                 onClick={() => setIsUploadConfigModalOpen(false)}
-                className="w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+                className="w-8 h-8 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white flex items-center justify-center transition cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Mode Switcher Tabs (Hanya Input Jadwal Baru & Unggah File Excel) */}
-            <div className="flex items-center gap-1.5 bg-slate-950 p-1.5 rounded-xl border border-slate-800 shrink-0">
-              <button
-                type="button"
-                onClick={() => setCombinedModalMode('manual')}
-                className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 ${
-                  combinedModalMode === 'manual'
-                    ? 'bg-blue-600 text-white shadow-xs'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Input Jadwal Baru</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setCombinedModalMode('excel')}
-                className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 ${
-                  combinedModalMode === 'excel'
-                    ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5" />
-                <span>Unggah File Excel</span>
-              </button>
-            </div>
-
-            {/* Scrollable Body */}
-            <div className="space-y-4 overflow-y-auto pr-1 flex-1 text-xs">
-              {/* Tab 1: Form Tambah Jadwal Baru */}
-              {combinedModalMode === 'manual' && (
-                <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-4 space-y-3.5">
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
-                    <span className="font-black text-blue-400 uppercase tracking-wider text-xs">
-                      Form Tambah Jadwal Baru
-                    </span>
-                    <span className="text-[10px] text-slate-400">Terintegrasi Kru &amp; Armada</span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-[11px] font-bold text-slate-300 block mb-1">Tanggal Kirim *</label>
-                      <input
-                        type="date"
-                        value={manualScheduleForm.dateIso}
-                        onChange={(e) => setManualScheduleForm({ ...manualScheduleForm, dateIso: e.target.value })}
-                        className="w-full bg-slate-900 border border-slate-800 text-white text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-blue-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[11px] font-bold text-slate-300 block mb-1">Armada Truk *</label>
-                      <select
-                        value={manualScheduleForm.armada}
-                        onChange={(e) => setManualScheduleForm({ ...manualScheduleForm, armada: e.target.value })}
-                        className="w-full bg-slate-900 border border-slate-800 text-white text-xs font-bold rounded-xl px-3 py-2.5 focus:outline-none focus:border-blue-500 cursor-pointer"
-                      >
-                        {logisticsStore.getFleets().map(f => (
-                          <option key={f.id} value={f.initialCode || f.plateNumber}>
-                            {f.initialCode ? `[${f.initialCode}] ` : ''}{f.plateNumber}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2.5">
-                    <div>
-                      <label className="text-[11px] font-bold text-slate-300 block mb-1">Driver / Supir *</label>
-                      <input
-                        type="text"
-                        list="combined-driver-options"
-                        value={manualScheduleForm.driver}
-                        onChange={(e) => setManualScheduleForm({ ...manualScheduleForm, driver: e.target.value })}
-                        placeholder="Nama Driver"
-                        className="w-full bg-slate-900 border border-slate-800 text-white text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-blue-500"
-                      />
-                      <datalist id="combined-driver-options">
-                        {logisticsStore.getDriverCrews().map(c => (
-                          <option key={c.id} value={c.name} />
-                        ))}
-                      </datalist>
-                    </div>
-                    <div>
-                      <label className="text-[11px] font-bold text-slate-300 block mb-1">Helper 1</label>
-                      <input
-                        type="text"
-                        list="combined-helper-options"
-                        value={manualScheduleForm.helper}
-                        onChange={(e) => setManualScheduleForm({ ...manualScheduleForm, helper: e.target.value })}
-                        placeholder="Helper 1"
-                        className="w-full bg-slate-900 border border-slate-800 text-white text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-blue-500"
-                      />
-                      <datalist id="combined-helper-options">
-                        {logisticsStore.getHelperCrews().map(c => (
-                          <option key={c.id} value={c.name} />
-                        ))}
-                      </datalist>
-                    </div>
-                    <div>
-                      <label className="text-[11px] font-bold text-slate-300 block mb-1">Helper 2</label>
-                      <input
-                        type="text"
-                        list="combined-helper-options"
-                        value={manualScheduleForm.helper2}
-                        onChange={(e) => setManualScheduleForm({ ...manualScheduleForm, helper2: e.target.value })}
-                        placeholder="Opsional"
-                        className="w-full bg-slate-900 border border-slate-800 text-white text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-blue-500"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-300 block mb-1">Area Kirim Tujuan *</label>
-                    <input
-                      type="text"
-                      list="combined-area-options"
-                      value={manualScheduleForm.area}
-                      onChange={(e) => setManualScheduleForm({ ...manualScheduleForm, area: e.target.value })}
-                      placeholder="Contoh: DENPASAR 1, SITUBONDO, BONDOWOSO"
-                      className="w-full bg-slate-900 border border-slate-800 text-white text-xs uppercase font-bold rounded-xl px-3 py-2.5 focus:outline-none focus:border-blue-500"
-                    />
-                    <datalist id="combined-area-options">
-                      {officialAreasList.map(a => (
-                        <option key={a.id} value={a.name} />
-                      ))}
-                    </datalist>
-                  </div>
-                </div>
-              )}
-
-              {/* Tab 2: Unggah File Excel (.xlsx / .csv) */}
-              {combinedModalMode === 'excel' && (
-                <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-4 space-y-3.5">
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
-                    <span className="font-black text-emerald-400 uppercase tracking-wider text-xs flex items-center gap-1.5">
-                      <FileSpreadsheet className="w-3.5 h-3.5" />
-                      <span>Unggah File Excel (.xlsx / .csv)</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={downloadScheduleTemplate}
-                      className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-400 hover:text-emerald-300 transition cursor-pointer"
-                    >
-                      <Download className="w-3 h-3" />
-                      <span>Unduh Template</span>
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-[11px] font-bold text-slate-300 block mb-1">Bulan Periode</label>
-                      <select
-                        value={importMonth}
-                        onChange={(e) => setImportMonth(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-800 text-slate-200 text-xs rounded-xl p-2.5 focus:outline-none focus:border-emerald-500"
-                      >
-                        {MONTH_NAMES.map(m => (
-                          <option key={m} value={m}>{m}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="text-[11px] font-bold text-slate-300 block mb-1">Tahun</label>
-                      <input
-                        type="text"
-                        value={importYear}
-                        onChange={(e) => setImportYear(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-800 text-slate-200 text-xs rounded-xl p-2.5 focus:outline-none focus:border-emerald-500 font-mono"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Fitur Tambahkan Data & Ganti Data Bulan Ini */}
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-300 block mb-1.5">Mode Impor Data</label>
-                    <div className="grid grid-cols-2 gap-2.5">
-                      <button
-                        type="button"
-                        onClick={() => setImportMode('tambahkan')}
-                        className={`p-3 rounded-xl border text-left transition cursor-pointer ${
-                          importMode === 'tambahkan'
-                            ? 'bg-emerald-500/15 border-emerald-500 text-emerald-300'
-                            : 'bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-800'
-                        }`}
-                      >
-                        <div className="font-bold text-xs">Tambahkan Data</div>
-                        <div className="text-[10px] opacity-80 mt-0.5">Gabung ke jadwal aktif</div>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setImportMode('ganti')}
-                        className={`p-3 rounded-xl border text-left transition cursor-pointer ${
-                          importMode === 'ganti'
-                            ? 'bg-amber-500/15 border-amber-500 text-amber-300'
-                            : 'bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-800'
-                        }`}
-                      >
-                        <div className="font-bold text-xs">Ganti Data Bulan Ini</div>
-                        <div className="text-[10px] opacity-80 mt-0.5">Timpa jadwal periode sama</div>
-                      </button>
-                    </div>
-                  </div>
-
+            {/* Form Body */}
+            <div className="space-y-4 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div>
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1.5">
+                    Tanggal Kirim *
+                  </label>
                   <input
-                    type="file"
-                    ref={modalFileInputRef}
-                    accept=".xlsx,.xls,.csv"
-                    className="hidden"
-                    onChange={async (e) => {
-                      const f = e.target.files?.[0];
-                      if (!f) return;
-                      setSelectedUploadFile(f);
-                      setUploadedFileName(f.name);
-                      try {
-                        const arrayBuffer = await f.arrayBuffer();
-                        const data = new Uint8Array(arrayBuffer);
-                        const workbook = XLSX.read(data, { type: 'array' });
-                        const sheetName = workbook.SheetNames.find(n => n.toUpperCase() === 'ALL') || workbook.SheetNames[0];
-                        const worksheet = workbook.Sheets[sheetName];
-                        const jsonRows = XLSX.utils.sheet_to_json(worksheet, { header: 1 }) as any[][];
-                        const parsed = googleSheetsApiService.parseScheduleRows(jsonRows);
-                        if (parsed.length > 0) {
-                          const excelEntries = parsed.map((item, idx) => ({
-                            ...item,
-                            source: 'excel' as const,
-                            tempId: `xls-${Date.now()}-${idx}`
-                          }));
-                          setStagedCombinedTrips(excelEntries);
-                        } else {
-                          setStagedCombinedTrips([]);
-                        }
-                      } catch (err) {
-                        console.error('Failed reading excel in modal:', err);
-                      }
-                    }}
+                    type="date"
+                    value={manualScheduleForm.dateIso}
+                    onChange={(e) => setManualScheduleForm({ ...manualScheduleForm, dateIso: e.target.value })}
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-emerald-500"
                   />
-
-                  <div className="bg-slate-900 border border-dashed border-slate-700 rounded-xl p-3 space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <button
-                        type="button"
-                        onClick={() => modalFileInputRef.current?.click()}
-                        className="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shrink-0 cursor-pointer transition flex items-center gap-1.5"
-                      >
-                        <Upload className="w-3.5 h-3.5" />
-                        <span>Pilih File Excel</span>
-                      </button>
-                      <span className="text-xs text-slate-300 truncate font-mono flex-1">
-                        {selectedUploadFile ? selectedUploadFile.name : 'Belum ada file dipilih'}
-                      </span>
-                      {selectedUploadFile && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedUploadFile(null);
-                            setStagedCombinedTrips([]);
-                            if (modalFileInputRef.current) modalFileInputRef.current.value = '';
-                          }}
-                          className="text-[11px] font-bold text-rose-400 hover:text-rose-300 cursor-pointer shrink-0"
-                        >
-                          Hapus File
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Pratinjau Jadwal hanya muncul SETELAH diinputkan file Excel, kemudian Simpan */}
-                  {selectedUploadFile && stagedCombinedTrips.filter(x => x.source === 'excel').length > 0 && (
-                    <div className="bg-slate-900 border border-emerald-500/30 rounded-xl p-3 space-y-2.5 animate-in fade-in duration-200">
-                      <div className="flex items-center justify-between flex-wrap gap-2">
-                        <div className="flex items-center gap-2">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                          <span className="font-black text-white text-xs">
-                            Pratinjau Jadwal Excel ({stagedCombinedTrips.filter(x => x.source === 'excel').length} Baris Terbaca)
-                          </span>
-                        </div>
-                        <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold">
-                          Mode: {importMode === 'tambahkan' ? 'Tambahkan Data' : 'Ganti Data Bulan Ini'}
-                        </span>
-                      </div>
-
-                      <div className="max-h-48 overflow-y-auto rounded-lg border border-slate-800">
-                        <table className="w-full text-left border-collapse text-[11px]">
-                          <thead>
-                            <tr className="bg-slate-950 text-slate-400 border-b border-slate-800 sticky top-0">
-                              <th className="p-2 font-bold">NO</th>
-                              <th className="p-2 font-bold">TANGGAL</th>
-                              <th className="p-2 font-bold">DRIVER</th>
-                              <th className="p-2 font-bold">HELPER</th>
-                              <th className="p-2 font-bold">AREA KIRIM</th>
-                              <th className="p-2 font-bold">ARMADA</th>
-                              <th className="p-2 font-bold text-center">HAPUS</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-800/80 text-slate-200">
-                            {stagedCombinedTrips
-                              .filter(x => x.source === 'excel')
-                              .map((item, idx) => (
-                                <tr key={item.tempId} className="hover:bg-slate-800/50">
-                                  <td className="p-2 font-mono text-slate-400">{idx + 1}</td>
-                                  <td className="p-2 font-mono text-slate-300">{item.dateStr || '-'}</td>
-                                  <td className="p-2 font-bold text-white">{item.driver}</td>
-                                  <td className="p-2 text-slate-300">
-                                    {item.helper || '-'}{item.helper2 && item.helper2 !== '-' ? `, ${item.helper2}` : ''}
-                                  </td>
-                                  <td className="p-2 font-bold text-emerald-300">{item.area}</td>
-                                  <td className="p-2 font-mono font-bold text-amber-300">{item.armada}</td>
-                                  <td className="p-2 text-center">
-                                    <button
-                                      type="button"
-                                      onClick={() => setStagedCombinedTrips(prev => prev.filter(x => x.tempId !== item.tempId))}
-                                      className="text-rose-400 hover:text-rose-300 cursor-pointer p-1"
-                                      title="Hapus baris ini"
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5 mx-auto" />
-                                    </button>
-                                  </td>
-                                </tr>
-                              ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
                 </div>
-              )}
+                <div>
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1.5">
+                    Armada Truk *
+                  </label>
+                  <select
+                    value={manualScheduleForm.armada}
+                    onChange={(e) => setManualScheduleForm({ ...manualScheduleForm, armada: e.target.value })}
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-emerald-500 cursor-pointer"
+                  >
+                    {logisticsStore.getFleets().map(f => (
+                      <option key={f.id} value={f.initialCode || f.plateNumber}>
+                        {f.initialCode ? `[${f.initialCode}] ` : ''}{f.plateNumber}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1.5">
+                    Driver / Supir *
+                  </label>
+                  <select
+                    value={manualScheduleForm.driver}
+                    onChange={(e) => setManualScheduleForm({ ...manualScheduleForm, driver: e.target.value })}
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold rounded-xl px-3 py-2.5 focus:outline-none focus:border-emerald-500 cursor-pointer"
+                  >
+                    {getIntegratedDrivers().map(drv => (
+                      <option key={drv.id} value={drv.name}>
+                        {drv.name}{drv.hasAccount ? ' (Akun Driver)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1.5">
+                    Helper 1 *
+                  </label>
+                  <select
+                    value={manualScheduleForm.helper}
+                    onChange={(e) => setManualScheduleForm({ ...manualScheduleForm, helper: e.target.value })}
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold rounded-xl px-3 py-2.5 focus:outline-none focus:border-emerald-500 cursor-pointer"
+                  >
+                    <option value="-">- Tanpa Helper 1 -</option>
+                    {getIntegratedHelpers().map(hlp => (
+                      <option key={hlp.id} value={hlp.name}>
+                        {hlp.name}{hlp.hasAccount ? ' (Akun Helper)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1.5">
+                    Helper 2 (Opsional)
+                  </label>
+                  <select
+                    value={manualScheduleForm.helper2}
+                    onChange={(e) => setManualScheduleForm({ ...manualScheduleForm, helper2: e.target.value })}
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold rounded-xl px-3 py-2.5 focus:outline-none focus:border-emerald-500 cursor-pointer"
+                  >
+                    <option value="">- Tanpa Helper 2 -</option>
+                    {getIntegratedHelpers().map(hlp => (
+                      <option key={`modal-h2-${hlp.id}`} value={hlp.name}>
+                        {hlp.name}{hlp.hasAccount ? ' (Akun Helper)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1.5">
+                  Area Kirim Tujuan *
+                </label>
+                <input
+                  type="text"
+                  list="combined-area-options"
+                  value={manualScheduleForm.area}
+                  onChange={(e) => setManualScheduleForm({ ...manualScheduleForm, area: e.target.value })}
+                  placeholder="Contoh: DENPASAR 1, SITUBONDO, BONDOWOSO"
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs uppercase font-bold rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-emerald-500"
+                />
+                <datalist id="combined-area-options">
+                  {officialAreasList.map(a => (
+                    <option key={a.id} value={a.name} />
+                  ))}
+                </datalist>
+              </div>
             </div>
 
-            {/* Footer Actions */}
-            <div className="flex items-center justify-between pt-3 border-t border-slate-800 shrink-0">
+            {/* Modal Footer */}
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-200 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setIsUploadConfigModalOpen(false)}
+                className="px-4 py-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-bold transition cursor-pointer"
+              >
+                Batal
+              </button>
               <button
                 type="button"
                 onClick={() => {
+                  if (!manualScheduleForm.driver.trim() || !manualScheduleForm.area.trim()) {
+                    return;
+                  }
+                  const manualEntry: ParsedSheetTrip & { source: 'manual'; tempId: string } = {
+                    tempId: `man-direct-${Date.now()}`,
+                    source: 'manual',
+                    dateStr: manualScheduleForm.dateIso,
+                    driver: manualScheduleForm.driver.trim(),
+                    helper: manualScheduleForm.helper.trim() || '-',
+                    helper2: manualScheduleForm.helper2.trim() || '-',
+                    area: standardizeAreaName(manualScheduleForm.area.trim()),
+                    armada: manualScheduleForm.armada.trim() || 'DS3',
+                    target: manualScheduleForm.target.trim() || 'Gudang Pusat AKK Banyuwangi DC'
+                  };
+                  mergeAndSaveCombinedTrips(
+                    [manualEntry],
+                    'tambahkan',
+                    'Form Tambah Jadwal Baru'
+                  );
                   setIsUploadConfigModalOpen(false);
-                  setScheduleChangeLogs(logisticsStore.getScheduleChangeLogs());
-                  setIsHistoryModalOpen(true);
                 }}
-                className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs font-bold transition cursor-pointer flex items-center gap-1.5"
+                className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black transition flex items-center gap-2 cursor-pointer shadow-md"
               >
-                <HistoryIcon className="w-3.5 h-3.5" />
-                <span>Riwayat Log ({scheduleChangeLogs.length})</span>
+                <Save className="w-4 h-4" />
+                <span>Simpan Jadwal Baru</span>
               </button>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsUploadConfigModalOpen(false)}
-                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition cursor-pointer"
-                >
-                  Batal
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (combinedModalMode === 'manual') {
-                      if (!manualScheduleForm.driver.trim() || !manualScheduleForm.area.trim()) {
-                        return;
-                      }
-                      const manualEntry: ParsedSheetTrip & { source: 'manual'; tempId: string } = {
-                        tempId: `man-direct-${Date.now()}`,
-                        source: 'manual',
-                        dateStr: manualScheduleForm.dateIso,
-                        driver: manualScheduleForm.driver.trim(),
-                        helper: manualScheduleForm.helper.trim() || '-',
-                        helper2: manualScheduleForm.helper2.trim() || '-',
-                        area: standardizeAreaName(manualScheduleForm.area.trim()),
-                        armada: manualScheduleForm.armada.trim() || 'DS3',
-                        target: manualScheduleForm.target.trim() || 'Gudang Pusat AKK Banyuwangi DC'
-                      };
-                      mergeAndSaveCombinedTrips(
-                        [manualEntry],
-                        'tambahkan',
-                        'Form Tambah Jadwal Baru'
-                      );
-                      setIsUploadConfigModalOpen(false);
-                      return;
-                    }
-
-                    // Mode Unggah File Excel: pastikan file sudah dipilih & pratinjau tampil
-                    const excelQueue = stagedCombinedTrips.filter(x => x.source === 'excel');
-                    if (!selectedUploadFile || excelQueue.length === 0) {
-                      modalFileInputRef.current?.click();
-                      return;
-                    }
-
-                    mergeAndSaveCombinedTrips(
-                      excelQueue,
-                      importMode,
-                      selectedUploadFile.name
-                    );
-                    setStagedCombinedTrips([]);
-                    setSelectedUploadFile(null);
-                    setIsUploadConfigModalOpen(false);
-                  }}
-                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black transition flex items-center gap-1.5 cursor-pointer shadow-md"
-                >
-                  <Save className="w-3.5 h-3.5" />
-                  <span>
-                    Simpan
-                    {combinedModalMode === 'excel' && stagedCombinedTrips.filter(x => x.source === 'excel').length > 0
-                      ? ` (${stagedCombinedTrips.filter(x => x.source === 'excel').length} Jadwal)`
-                      : ''}
-                  </span>
-                </button>
-              </div>
             </div>
           </div>
         </div>

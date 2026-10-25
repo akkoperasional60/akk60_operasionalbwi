@@ -302,8 +302,12 @@ export function resolveScheduleAreaName(sch: Partial<Schedule>): string {
   // 0. If explicit areaName is provided and valid, prioritize it
   if (sch.areaName && sch.areaName.trim() && !sch.areaName.startsWith('str-') && !sch.areaName.startsWith('RET-') && !sch.areaName.toLowerCase().includes('tiwi') && !sch.areaName.toLowerCase().includes('holly')) {
     const cleanArea = sch.areaName.trim();
-    if (AREA_CODE_MAP[cleanArea.toUpperCase()]) {
-      return AREA_CODE_MAP[cleanArea.toUpperCase()];
+    const upperClean = cleanArea.toUpperCase();
+    if (upperClean === 'DENPASAR 1 & 2' || upperClean === 'DENPASAR 1&2' || upperClean === 'DENPASAR 1 / 2' || upperClean === 'DENPASAR') {
+      return 'DENPASAR 1';
+    }
+    if (AREA_CODE_MAP[upperClean]) {
+      return AREA_CODE_MAP[upperClean];
     }
     return standardizeAreaName(cleanArea);
   }
@@ -880,19 +884,32 @@ class LogisticsStore {
     });
     this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
 
-    // Auto-migrate any cached state from Cikarang DC to Banyuwangi DC
+    // Auto-migrate any cached state from Cikarang DC to Banyuwangi DC & sanitize combined Denpasar 1 & 2
     let updatedSchedules = false;
     this.schedules = this.schedules.map(s => {
+      let nextS = s;
       if (s.originCoords && s.originCoords[0] === -6.3262) {
         updatedSchedules = true;
-        return {
-          ...s,
+        nextS = {
+          ...nextS,
           originName: 'Gudang Pusat Banyuwangi DC',
           originCoords: [-8.1906, 114.3708] as [number, number]
         };
       }
-      return s;
+      const rawA = (nextS.areaName || nextS.store?.storeName || '').trim().toUpperCase();
+      if (rawA === 'DENPASAR 1 & 2' || rawA === 'DENPASAR 1&2' || rawA === 'DENPASAR') {
+        updatedSchedules = true;
+        nextS = {
+          ...nextS,
+          areaName: 'DENPASAR 1',
+          store: nextS.store ? { ...nextS.store, storeName: 'DENPASAR 1', address: 'Area Pengiriman Distribusi DENPASAR 1' } : nextS.store
+        };
+      }
+      return nextS;
     });
+    if (updatedSchedules) {
+      this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
+    }
 
     // If schedules only contain initial mock (< 10) but admin weeks cache exists (from Google Sheets or previous session)
     if (this.schedules.length <= 5) {

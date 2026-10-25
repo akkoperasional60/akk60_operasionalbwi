@@ -74,7 +74,7 @@ import {
   UserProfile
 } from '../types';
 import { logisticsStore } from '../services/store';
-import { driverReportService, DriverHelperReport } from '../services/driverReportService';
+import { driverReportService, DriverHelperReport, getLocalDateStr } from '../services/driverReportService';
 import { driverOfflineSyncService, OfflineTaskAction, DriverSyncState } from '../services/driverOfflineSyncService';
 import { driverChecklistService } from '../services/driverChecklistService';
 import { driverWaybillService } from '../services/driverWaybillService';
@@ -545,18 +545,39 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     }
   }, [selectedDriverId]);
 
-  // 📢 Arahan & Solusi Kendala dari SPV Logistik / Super Admin
+  // 📢 Arahan & Solusi Kendala dari SPV Logistik / Super Admin (Hanya tampil pada hari tersebut, otomatis hilang keesokan harinya)
   const [driverKendalaReports, setDriverKendalaReports] = useState<DriverHelperReport[]>([]);
+  const [todayOfflineReports, setTodayOfflineReports] = useState<DriverHelperReport[]>([]);
+  const todayLocalStr = useMemo(() => getLocalDateStr(realtimeNow), [realtimeNow]);
 
   const loadDriverKendalaReports = () => {
     try {
       const all = driverReportService.getReports();
       const current = crews.find(c => c.id === selectedDriverId);
-      const filtered = all.filter(r => 
-        r.driverId === selectedDriverId || 
-        (current && r.driverName.toLowerCase().includes(current.name.toLowerCase()))
-      );
+      const displayLower = (portalDisplayName || '').toLowerCase();
+      const userFullLower = (currentUser?.fullName || '').toLowerCase();
+      const isSpvOrAdminRole =
+        currentUser?.role === 'super_admin' || currentUser?.role === 'spv_logistik';
+
+      const filtered = all.filter(r => {
+        const rDriverLower = (r.driverName || '').toLowerCase();
+        const rHelperLower = (r.helperName || '').toLowerCase();
+        const currentCrewLower = (current?.name || '').toLowerCase();
+
+        if (r.driverId === selectedDriverId) return true;
+        if (currentCrewLower && (rDriverLower.includes(currentCrewLower) || rHelperLower.includes(currentCrewLower))) return true;
+        if (displayLower && (rDriverLower.includes(displayLower) || rHelperLower.includes(displayLower))) return true;
+        if (userFullLower && (rDriverLower.includes(userFullLower) || rHelperLower.includes(userFullLower))) return true;
+        if (isSpvOrAdminRole && r.solution && r.solution.trim().length > 0) return true;
+        return false;
+      });
       setDriverKendalaReports(filtered);
+
+      // Daftar laporan siapa saja yang mengaktifkan Mode Offline hari ini
+      const offlineToday = all.filter(
+        r => r.category === 'mode_offline' && (r.date || getLocalDateStr(r.timestamp)) === todayLocalStr
+      );
+      setTodayOfflineReports(offlineToday);
     } catch {}
   };
 
@@ -565,20 +586,84 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     const handleUpdate = () => loadDriverKendalaReports();
     window.addEventListener('driver-report-updated', handleUpdate);
     return () => window.removeEventListener('driver-report-updated', handleUpdate);
-  }, [selectedDriverId, crews]);
+  }, [selectedDriverId, crews, portalDisplayName, currentUser, todayLocalStr]);
 
   const activeDriverSolutions = useMemo(() => {
-    const todayStr = new Date().toISOString().slice(0, 10);
-    return driverKendalaReports.filter(r => {
-      if (!r.solution || r.solution.trim().length === 0) return false;
-      const reportDate = r.date || new Date(r.timestamp).toISOString().slice(0, 10);
-      return reportDate === todayStr;
-    });
-  }, [driverKendalaReports]);
+    return driverKendalaReports
+      .filter(r => {
+        if (!r.solution || r.solution.trim().length === 0) return false;
+        const solutionLocalDate = r.solutionAt
+          ? getLocalDateStr(new Date(r.solutionAt))
+          : getLocalDateStr(r.date || r.timestamp);
+        // Hanya tampilkan arahan pada hari tersebut (otomatis hilang keesokan harinya)
+        return solutionLocalDate === todayLocalStr;
+      })
+      .sort((a, b) => {
+        const timeA = new Date(a.solutionAt || a.timestamp || 0).getTime();
+        const timeB = new Date(b.solutionAt || b.timestamp || 0).getTime();
+        return timeB - timeA;
+      });
+  }, [driverKendalaReports, todayLocalStr]);
 
   // 📶 Offline State Synchronization Management (IndexedDB & LocalStorage)
   const [syncState, setSyncState] = useState<DriverSyncState>(driverOfflineSyncService.getSyncState());
   const [isQueueModalOpen, setIsQueueModalOpen] = useState<boolean>(false);
+
+  // Handler terpusat saat Kru mengaktifkan atau mematikan Mode Offline (otomatis tercatat di Laporan Kiriman Kru)
+  const handleToggleOfflineMode = (enableOffline: boolean) => {
+    driverOfflineSyncService.setSimulatedOffline(enableOffline);
+    const activeDel = activeDeliveries[0] || scheduledDeliveries[0] || deliveries[0];
+    const plateStr = assignedFleet?.plateNumber || activeDel?.fleet?.plateNumber || 'P 8848 U';
+    const areaStr = activeDel?.areaName || activeDel?.store?.storeName || 'Rute Pengiriman Aktif';
+    const helperStr = activeDel?.crewHelper?.name || undefined;
+
+    if (enableOffline) {
+      driverReportService.recordOfflineModeActivation({
+        driverId: selectedDriverId,
+        driverName: portalDisplayName || currentDriver?.name || 'Driver Kru',
+        userRole: syncedUserRoleInfo.roleLabel,
+        helperName: helperStr,
+        plateNumber: plateStr,
+        areaName: areaStr,
+        modeType: 'simulasi'
+      });
+      loadDriverKendalaReports();
+      addNotification(
+        'sla_warning',
+        '⚠️ Peringatan Mode Offline Tercatat',
+        `${portalDisplayName} mengaktifkan Mode Offline. Laporan peringatan telah dikirim ke Tim Pengiriman & SPV Logistik agar segera di-online-kan kembali!`
+      );
+    } else {
+      driverReportService.markOfflineModeRestored({
+        driverId: selectedDriverId,
+        driverName: portalDisplayName || currentDriver?.name || 'Driver Kru',
+        restoredBy: `${portalDisplayName || 'Kru'} (Portal Driver)`
+      });
+      loadDriverKendalaReports();
+      addNotification(
+        'delivery',
+        '✓ Kembali Online (Tersambung)',
+        `Mode Offline dimatikan oleh ${portalDisplayName}. Status peringatan di Laporan Kiriman Kru telah berubah hijau (Sudah Online).`
+      );
+    }
+  };
+
+  // Jika saat dibuka perangkat sudah dalam Mode Simulasi Offline, pastikan tercatat di laporan hari ini
+  useEffect(() => {
+    if (syncState.isSimulatedOffline && isDriverLoggedIn && portalDisplayName) {
+      const activeDel = activeDeliveries[0] || scheduledDeliveries[0] || deliveries[0];
+      driverReportService.recordOfflineModeActivation({
+        driverId: selectedDriverId,
+        driverName: portalDisplayName,
+        userRole: syncedUserRoleInfo.roleLabel,
+        helperName: activeDel?.crewHelper?.name,
+        plateNumber: assignedFleet?.plateNumber || activeDel?.fleet?.plateNumber || 'P 8848 U',
+        areaName: activeDel?.areaName || activeDel?.store?.storeName || 'Rute Pengiriman Aktif',
+        modeType: 'simulasi'
+      });
+      loadDriverKendalaReports();
+    }
+  }, [syncState.isSimulatedOffline, isDriverLoggedIn, selectedDriverId, portalDisplayName]);
 
   // Subscribe to driver offline sync changes and online reconnection events
   useEffect(() => {
@@ -762,10 +847,45 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     return checklists.find(c => matchesDriver(c)) || null;
   }, [checklists, selectedDriverId, assignedFleet, currentDriver?.name, portalDisplayName]);
 
+  // Status apakah driver sudah klik Konfirmasi Tiba di Gudang hari ini (membuka kunci Pasca-Jalan)
+  const [hasConfirmedArrivalFlag, setHasConfirmedArrivalFlag] = useState<boolean>(() => {
+    try {
+      const todayStr = new Date().toISOString().slice(0, 10);
+      return localStorage.getItem(`akk_confirmed_arrival_${selectedDriverId}`) === todayStr;
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      const todayStr = new Date().toISOString().slice(0, 10);
+      setHasConfirmedArrivalFlag(
+        localStorage.getItem(`akk_confirmed_arrival_${selectedDriverId}`) === todayStr
+      );
+    } catch {}
+  }, [selectedDriverId]);
+
+  const hasConfirmedArrivalToday = useMemo(() => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const hasDeliveredToday = deliveries.some(
+      d => d.status === 'delivered' && ((d.actualArrival || d.departureDate || '').slice(0, 10) === todayStr)
+    );
+    return Boolean(hasConfirmedArrivalFlag || hasDeliveredToday);
+  }, [hasConfirmedArrivalFlag, deliveries]);
+
   const hasChecklistToday = useMemo(() => {
     const todayStr = new Date().toISOString().slice(0, 10);
-    return Boolean((latestChecklist && latestChecklist.date === todayStr) || isChecklistCompletedAfterCheckin);
-  }, [latestChecklist, isChecklistCompletedAfterCheckin]);
+    const driverNameLower = (currentDriver?.name || portalDisplayName || '').trim().toLowerCase();
+    const hasPreTripToday = checklists.some(
+      c =>
+        c.date === todayStr &&
+        c.inspectionType === 'pre_trip' &&
+        (c.driverId === selectedDriverId ||
+          (driverNameLower.length > 0 && (c.driverName || '').trim().toLowerCase() === driverNameLower))
+    );
+    return Boolean(hasPreTripToday || isChecklistCompletedAfterCheckin);
+  }, [checklists, selectedDriverId, currentDriver?.name, portalDisplayName, isChecklistCompletedAfterCheckin]);
 
   const isUserHelperRole = useMemo(() => {
     return (
@@ -775,7 +895,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     );
   }, [syncedUserRoleInfo.roleLabel, currentUser?.role, isHelperPositionSkipped]);
 
-  // Syarat Persiapan Keluar: 1. Check-In Shift -> 2. Pemilihan Armada -> 3. Pengisian Checklist (atau Helper Skip)
+  // Syarat Persiapan Keluar: 1. Check-In Shift -> 2. Pemilihan Armada -> 3. Pengisian Checklist Pra-Jalan (atau Helper Skip)
   const canClickPersiapanKeluar = useMemo(() => {
     const hasShift = Boolean(activeShift);
     const hasFleet = Boolean(isFleetLockedAfterCheckin || isUserHelperRole);
@@ -924,16 +1044,35 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     solutionBy: string;
   } | null>(null);
 
-  // Listen to solution updates from SPV Logistik / Super Admin for this driver
+  // Listen to solution updates from SPV Logistik / Super Admin for this driver/helper (same day only)
   useEffect(() => {
     const handleReportSolutionUpdate = (e: any) => {
       const updated = e?.detail as DriverHelperReport | undefined;
       if (!updated || !updated.solution || updated.driverAcknowledged) return;
+
+      const todayStr = getLocalDateStr();
+      const solDateStr = updated.solutionAt
+        ? getLocalDateStr(new Date(updated.solutionAt))
+        : getLocalDateStr(updated.date || updated.timestamp);
+      if (solDateStr !== todayStr) return;
+
       const current = crews.find(c => c.id === selectedDriverId);
-      const isForCurrentDriver =
+      const displayLower = (portalDisplayName || '').toLowerCase();
+      const userFullLower = (currentUser?.fullName || '').toLowerCase();
+      const isSpvOrAdminRole =
+        currentUser?.role === 'super_admin' || currentUser?.role === 'spv_logistik';
+      const uDriverLower = (updated.driverName || '').toLowerCase();
+      const uHelperLower = (updated.helperName || '').toLowerCase();
+      const currentCrewLower = (current?.name || '').toLowerCase();
+
+      const isForCurrentCrew =
         updated.driverId === selectedDriverId ||
-        (current && updated.driverName.toLowerCase().includes(current.name.toLowerCase()));
-      if (isForCurrentDriver) {
+        (currentCrewLower && (uDriverLower.includes(currentCrewLower) || uHelperLower.includes(currentCrewLower))) ||
+        (displayLower && (uDriverLower.includes(displayLower) || uHelperLower.includes(displayLower))) ||
+        (userFullLower && (uDriverLower.includes(userFullLower) || uHelperLower.includes(userFullLower))) ||
+        isSpvOrAdminRole;
+
+      if (isForCurrentCrew) {
         setLatestSolutionBanner({
           id: updated.id,
           title: `Solusi Kendala: ${updated.areaName}`,
@@ -947,7 +1086,17 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     return () => {
       window.removeEventListener('driver-report-updated', handleReportSolutionUpdate);
     };
-  }, [selectedDriverId, crews]);
+  }, [selectedDriverId, crews, portalDisplayName, currentUser]);
+
+  // Otomatis bersihkan banner arahan jika sudah berganti hari (keesokan harinya)
+  useEffect(() => {
+    if (latestSolutionBanner) {
+      const stillActiveToday = activeDriverSolutions.some(r => r.id === latestSolutionBanner.id);
+      if (!stillActiveToday) {
+        setLatestSolutionBanner(null);
+      }
+    }
+  }, [todayLocalStr, activeDriverSolutions, latestSolutionBanner]);
 
   // ⚡ Supabase Realtime Live Synchronization Layer (Sinkronisasi data jadwal tanpa menampilkan banner perubahan jadwal di portal)
   useEffect(() => {
@@ -1546,6 +1695,13 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       autoCheckedOut = true;
     }
 
+    const targetDelivery = podModal.delivery;
+    const todayStr = new Date().toISOString().slice(0, 10);
+    setHasConfirmedArrivalFlag(true);
+    try {
+      localStorage.setItem(`akk_confirmed_arrival_${selectedDriverId}`, todayStr);
+    } catch {}
+
     setPodModal({
       isOpen: false,
       delivery: null,
@@ -1556,14 +1712,27 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       photoTimestamp: null,
       postTripFleetStatus: 'available'
     });
+
+    // Otomatis munculkan form Checklist Pasca-Jalan (Pulang) setelah klik Konfirmasi Tiba di Gudang
+    const postTripTemplate = driverChecklistService.createNewChecklistTemplate(
+      selectedDriverId,
+      currentDriver?.name || portalDisplayName || 'Driver',
+      assignedFleet?.id || targetDelivery.fleet?.id || 'fl-01',
+      assignedFleet?.plateNumber || targetDelivery.fleet?.plateNumber || 'P 8848 U',
+      assignedFleet?.vehicleType || targetDelivery.fleet?.vehicleType || 'Engkel Long Box',
+      0
+    );
+    postTripTemplate.inspectionType = 'post_trip';
+    setActiveChecklistToEdit(postTripTemplate);
+    setChecklistInspectionType('post_trip');
+    setIsChecklistModalOpen(true);
+
     addNotification(
       'delivery',
       autoCheckedOut
-        ? 'Tiba di Gudang & Otomatis Check-Out Berhasil'
-        : 'Konfirmasi Tiba di Gudang Argo Berhasil',
-      autoCheckedOut
-        ? `Armada ${podModal.delivery.fleet?.plateNumber || assignedFleet?.plateNumber || ''} tercatat tiba di Gudang Argo (${statusText}) dan shift Anda otomatis terhitung Check-Out.`
-        : `Armada ${podModal.delivery.fleet?.plateNumber || ''} tercatat sampai di Argo dengan status: "${statusText}"`
+        ? 'Tiba di Gudang • Silakan Isi Checklist Pasca-Jalan'
+        : 'Konfirmasi Tiba di Gudang • Isi Checklist Pasca-Jalan',
+      `Armada ${targetDelivery.fleet?.plateNumber || assignedFleet?.plateNumber || ''} tiba di Gudang Argo (${statusText}). Silakan lengkapi Checklist Pasca-Jalan (Pulang).`
     );
   };
 
@@ -1966,37 +2135,47 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         </div>
       )}
 
-      {/* 📶 PERSISTENT OFFLINE MODE BANNER */}
+      {/* 📶 PERSISTENT OFFLINE MODE WARNING BANNER (PERINGATAN TIM PENGIRIMAN UNTUK SEGERA ONLINE KEMBALI) */}
       {(!syncState.isOnline || syncState.isSimulatedOffline) && (
-        <div className="bg-gradient-to-r from-amber-950/90 via-slate-900 to-amber-950/90 border-b border-amber-500/40 px-4 py-2.5 text-xs shadow-md flex items-center justify-between gap-3 animate-fadeIn shrink-0">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0">
-              <WifiOff className="w-4 h-4 animate-pulse" />
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5 font-bold text-amber-300 text-xs">
-                <span>Mode Offline Aktif</span>
-                {syncState.isSimulatedOffline ? (
-                  <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                    Simulasi Rute
-                  </span>
-                ) : (
-                  <span className="text-[9px] px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30">
-                    Tanpa Sinyal
-                  </span>
-                )}
+        <div className="bg-gradient-to-r from-rose-950/95 via-amber-950/90 to-rose-950/95 border-b border-rose-500/50 px-4 py-3 text-xs shadow-lg space-y-2 animate-fadeIn shrink-0">
+          <div className="flex items-start justify-between gap-2.5">
+            <div className="flex items-start gap-2.5 min-w-0">
+              <div className="w-8 h-8 rounded-lg bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400 shrink-0 mt-0.5">
+                <WifiOff className="w-4 h-4 animate-pulse" />
               </div>
-              <p className="text-[11px] text-slate-300 leading-tight truncate">
-                Status muat, berangkat &amp; foto POD disimpan di HP. Otomatis sync saat online.
-              </p>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 font-black text-rose-300 text-xs flex-wrap">
+                  <span>⚠️ PERINGATAN MODE OFFLINE AKTIF ({portalDisplayName})</span>
+                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-rose-500/25 text-rose-200 border border-rose-500/40 font-mono">
+                    Tercatat di Laporan Tim Pengiriman
+                  </span>
+                </div>
+                <p className="text-[11px] text-amber-100/90 leading-snug mt-0.5">
+                  Harap <strong>segera di-online-kan kembali</strong> agar posisi GPS dan status pengiriman langsung terkirim ke server pusat!
+                </p>
+              </div>
             </div>
           </div>
-          <button
-            onClick={() => setIsQueueModalOpen(true)}
-            className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[11px] shrink-0 shadow transition cursor-pointer active:scale-95"
-          >
-            Antrean ({syncState.pendingQueue.length})
-          </button>
+
+          <div className="flex items-center justify-end gap-2 pt-1 border-t border-rose-500/20">
+            <button
+              type="button"
+              onClick={() => setIsQueueModalOpen(true)}
+              className="px-2.5 py-1.5 rounded-lg bg-slate-900/90 hover:bg-slate-800 text-amber-300 border border-amber-500/30 font-bold text-[11px] transition cursor-pointer"
+            >
+              Cek Laporan &amp; Antrean ({syncState.pendingQueue.length})
+            </button>
+            {syncState.isSimulatedOffline && (
+              <button
+                type="button"
+                onClick={() => handleToggleOfflineMode(false)}
+                className="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-[11px] flex items-center gap-1.5 shadow-md transition cursor-pointer active:scale-95"
+              >
+                <Wifi className="w-3.5 h-3.5" />
+                <span>Onlinekan Kembali Sekarang</span>
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -2169,46 +2348,46 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                 {activeDriverSolutions.map(sol => (
                   <div
                     key={sol.id}
-                    className="bg-gradient-to-r from-amber-950/70 via-slate-900 to-amber-950/60 border-2 border-amber-500/50 rounded-2xl p-4 shadow-xl space-y-3 relative overflow-hidden animate-in fade-in duration-300"
+                    className="bg-white dark:bg-slate-900 border-2 border-amber-400 dark:border-amber-500/60 rounded-2xl p-4 shadow-md space-y-3 relative overflow-hidden animate-in fade-in duration-300"
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0">
+                        <div className="w-8 h-8 rounded-xl bg-amber-100 dark:bg-amber-500/20 border border-amber-300 dark:border-amber-500/40 flex items-center justify-center text-amber-600 dark:text-amber-400 shrink-0">
                           <Sparkles className="w-4 h-4 animate-pulse" />
                         </div>
                         <div>
-                          <span className="text-[10px] font-black uppercase tracking-wider text-amber-400 block">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-400 block">
                             Arahan Resmi SPV Logistik / Super Admin
                           </span>
-                          <h4 className="text-xs font-black text-white">
-                            Solusi Kendala: {sol.areaName}
+                          <h4 className="text-xs font-black text-slate-900 dark:text-white">
+                            Solusi Kendala: {sol.areaName} ({sol.driverName})
                           </h4>
                         </div>
                       </div>
 
                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
                         sol.driverAcknowledged
-                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                          : 'bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse'
+                          ? 'bg-emerald-50 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-500/40'
+                          : 'bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-500/40 animate-pulse'
                       }`}>
                         {sol.driverAcknowledged ? '✓ Dijalankan Kru' : 'Perlu Konfirmasi'}
                       </span>
                     </div>
 
-                    <div className="bg-slate-950/80 p-2.5 rounded-xl border border-slate-800 text-xs text-slate-300">
-                      <span className="text-[10px] text-slate-400 block font-semibold">Kendala yang Anda Laporkan:</span>
-                      <p className="italic text-slate-200 mt-0.5 text-[11px]">"{sol.notes}"</p>
+                    <div className="bg-slate-50 dark:bg-slate-950/80 p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-xs text-slate-700 dark:text-slate-300">
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 block font-semibold">Laporan / Kendala Kru:</span>
+                      <p className="italic text-slate-800 dark:text-slate-200 mt-0.5 text-[11px]">&quot;{sol.notes}&quot;</p>
                     </div>
 
-                    <div className="bg-amber-500/10 border border-amber-500/30 p-3 rounded-xl space-y-1">
-                      <span className="text-[11px] font-black text-amber-300 flex items-center gap-1.5">
+                    <div className="bg-amber-50/80 dark:bg-amber-500/10 border border-amber-300 dark:border-amber-500/30 p-3 rounded-xl space-y-1">
+                      <span className="text-[11px] font-black text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
                         <Send className="w-3.5 h-3.5" />
-                        <span>Instruksi & Arahan Tindakan SPV:</span>
+                        <span>Instruksi &amp; Arahan Tindakan SPV:</span>
                       </span>
-                      <p className="text-white font-medium text-xs leading-relaxed">
+                      <p className="text-slate-900 dark:text-white font-bold text-xs leading-relaxed">
                         {sol.solution}
                       </p>
-                      <div className="text-[10px] text-amber-400/80 pt-1 flex items-center justify-between">
+                      <div className="text-[10px] text-amber-700 dark:text-amber-400/80 pt-1 flex items-center justify-between">
                         <span>Disampaikan oleh: <strong>{sol.solutionBy}</strong></span>
                         {sol.solutionAt && (
                           <span>{new Date(sol.solutionAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB</span>
@@ -2228,18 +2407,18 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                             'Status arahan SPV telah diperbarui menjadi sedang dijalankan. Tetap utamakan keselamatan kerja!'
                           );
                         }}
-                        className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 transition active:scale-95 cursor-pointer"
+                        className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-sm transition active:scale-95 cursor-pointer"
                       >
                         <Check className="w-4 h-4" />
-                        <span>Konfirmasi Mengerti & Mulai Jalankan Arahan</span>
+                        <span>Konfirmasi Mengerti &amp; Mulai Jalankan Arahan</span>
                       </button>
                     ) : (
-                      <div className="flex items-center justify-between text-[11px] text-emerald-400 font-bold bg-emerald-950/40 border border-emerald-500/30 p-2 rounded-xl">
+                      <div className="flex items-center justify-between text-[11px] text-emerald-700 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-500/30 p-2 rounded-xl">
                         <span className="flex items-center gap-1.5">
                           <CheckCircle2 className="w-4 h-4" />
-                          <span>Anda telah mengonfirmasi arahan ini & sedang bekerja sesuai solusi.</span>
+                          <span>Anda telah mengonfirmasi arahan ini &amp; sedang bekerja sesuai solusi.</span>
                         </span>
-                        <span className="text-[10px] text-slate-400 font-normal">
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400 font-normal">
                           {sol.driverAcknowledgedAt ? new Date(sol.driverAcknowledgedAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) : ''}
                         </span>
                       </div>
@@ -2407,19 +2586,12 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                       key={delivery.id}
                       className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm hover:border-slate-700 transition space-y-3"
                     >
-                      {/* Delivery Header: Store Name & Status Badge (Tanpa Nomor PO) */}
-                      <div className="flex items-start justify-between gap-2">
+                      {/* Delivery Header: Store Name & Status Badge (Tanpa Nomor PO & Tanpa Keterangan di Bawahnya) */}
+                      <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0">
                           <h2 className="text-base font-black text-white leading-tight truncate">
-                            {store?.storeName || delivery.areaName || 'Toko Retail Mitra'}
+                            {(store?.storeName || delivery.areaName || 'Toko Retail Mitra').replace(/DENPASAR\s*1\s*&\s*2/gi, 'DENPASAR 1')}
                           </h2>
-                          <div className="flex items-center gap-1.5 text-xs text-slate-400 mt-1">
-                            <span className="text-emerald-400 font-semibold">{store?.city || 'Banyuwangi'}</span>
-                            <span aria-hidden="true">·</span>
-                            <span>{store?.island || 'Jawa'}</span>
-                            <span aria-hidden="true">·</span>
-                            <span className="text-amber-400 font-medium">{delivery.areaName || 'Area Distribusi'}</span>
-                          </div>
                         </div>
 
                         <div className="shrink-0">
@@ -2454,7 +2626,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                         <div className="flex items-start gap-2">
                           <MapPin className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
                           <span className="text-slate-300 text-[11px] leading-snug">
-                            {store?.address || `Area Pengiriman Distribusi ${delivery.areaName || ''}`}
+                            {(store?.address || `Area Pengiriman Distribusi ${delivery.areaName || ''}`).replace(/DENPASAR\s*1\s*&\s*2/gi, 'DENPASAR 1')}
                           </span>
                         </div>
                       </div>
@@ -2913,13 +3085,17 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                 <button
                   type="button"
                   onClick={() => {
+                    const nextType: 'pre_trip' | 'post_trip' = hasConfirmedArrivalToday ? 'post_trip' : 'pre_trip';
                     const fresh = driverChecklistService.createNewChecklistTemplate(
                       selectedDriverId,
                       currentDriver?.name || 'Driver',
                       assignedFleet?.id || 'fl-01',
                       assignedFleet?.plateNumber || 'P 8848 U',
-                      assignedFleet?.vehicleType || 'Engkel Long Box'
+                      assignedFleet?.vehicleType || 'Engkel Long Box',
+                      0
                     );
+                    fresh.inspectionType = nextType;
+                    setChecklistInspectionType(nextType);
                     setActiveChecklistToEdit(fresh);
                     setIsChecklistModalOpen(true);
                   }}
@@ -3436,12 +3612,12 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               </div>
             </div>
 
-            {/* Presensi Shift & Keamanan PIN (2x Verifikasi) Card */}
+            {/* Presensi Shift & Keamanan PIN Card */}
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3 text-xs">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <KeyRound className="w-4 h-4 text-amber-400" />
-                  <span className="font-bold text-slate-200">Presensi Shift &amp; PIN Keamanan (2x Verifikasi)</span>
+                  <span className="font-bold text-slate-200">Presensi Shift &amp; PIN Keamanan</span>
                 </div>
                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                   activeShift ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
@@ -3460,7 +3636,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                 <div className="flex items-center justify-between text-[11px]">
                   <span className="text-slate-400">Metode Verifikasi:</span>
                   <span className="text-slate-300 font-semibold">
-                    PIN Keamanan (2x Verifikasi)
+                    Check-In (1x PIN) · Ubah/Buat PIN (2x PIN)
                   </span>
                 </div>
                 <div className="flex items-center justify-between text-[11px]">
@@ -3479,7 +3655,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                   className="py-2.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black transition cursor-pointer flex items-center justify-center gap-1.5 active:scale-95"
                 >
                   <KeyRound className="w-3.5 h-3.5" />
-                  <span>{activeShift ? 'Lihat / Perbarui Shift' : 'Check-In Shift (2x PIN)'}</span>
+                  <span>{activeShift ? 'Lihat / Perbarui Shift' : 'Check-In Shift'}</span>
                 </button>
 
                 <button
@@ -3507,35 +3683,15 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               )}
             </div>
 
-            {/* Opsi Aplikasi & Keluar Portal di Profil */}
-            <div className="pt-2 space-y-2">
-              <button
-                type="button"
-                onClick={() => setIsApkModalOpen(true)}
-                className="w-full py-2.5 px-3 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer active:scale-95"
-              >
-                <Smartphone className="w-4 h-4 text-emerald-400" />
-                <span>Unduh Berkas APK Android (v1.0.4)</span>
-              </button>
-
-              {onBackToPortal && (
-                <button
-                  type="button"
-                  onClick={onBackToPortal}
-                  className="w-full py-2.5 px-3 rounded-xl bg-indigo-500/15 hover:bg-indigo-500/25 border border-indigo-500/30 text-indigo-300 font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer active:scale-95"
-                >
-                  <ArrowRightLeft className="w-4 h-4 text-indigo-400" />
-                  <span>Kembali ke Portal Operasional</span>
-                </button>
-              )}
-
+            {/* Tombol Keluar */}
+            <div className="pt-2">
               <button
                 type="button"
                 onClick={handleDriverLogout}
                 className="w-full py-2.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer active:scale-95"
               >
                 <X className="w-4 h-4 text-rose-400" />
-                <span>Keluar Akun Driver (Ganti Akun)</span>
+                <span>Keluar</span>
               </button>
             </div>
           </div>
@@ -4167,26 +4323,100 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               <div className="flex items-center gap-2 text-xs">
                 <span className={`w-2.5 h-2.5 rounded-full ${
                   !syncState.isOnline || syncState.isSimulatedOffline
-                    ? 'bg-amber-400 animate-pulse'
+                    ? 'bg-rose-500 animate-ping'
                     : 'bg-emerald-400'
                 }`} />
                 <span className="font-bold text-slate-200">
                   {!syncState.isOnline || syncState.isSimulatedOffline
-                    ? syncState.isSimulatedOffline ? 'Mode Simulasi Offline (Aktif)' : 'Perangkat Terputus (Offline)'
+                    ? syncState.isSimulatedOffline ? `Mode Offline Aktif (${portalDisplayName})` : 'Perangkat Terputus (Offline)'
                     : 'Perangkat Online (Tersambung ke Server)'}
                 </span>
               </div>
               <button
                 type="button"
-                onClick={() => driverOfflineSyncService.setSimulatedOffline(!syncState.isSimulatedOffline)}
-                className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition cursor-pointer ${
+                onClick={() => handleToggleOfflineMode(!syncState.isSimulatedOffline)}
+                className={`text-[11px] font-black px-3 py-1.5 rounded-lg border transition cursor-pointer flex items-center gap-1.5 ${
                   syncState.isSimulatedOffline
-                    ? 'bg-amber-500 text-slate-950 border-amber-400'
+                    ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 border-emerald-400 shadow-sm'
                     : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-amber-500/30'
                 }`}
               >
-                {syncState.isSimulatedOffline ? 'Matikan Simulasi' : 'Uji Mode Offline'}
+                {syncState.isSimulatedOffline ? (
+                  <>
+                    <Wifi className="w-3.5 h-3.5" />
+                    <span>Onlinekan Kembali</span>
+                  </>
+                ) : (
+                  <span>Uji Mode Offline</span>
+                )}
               </button>
+            </div>
+
+            {/* 🚨 LAPORAN PERINGATAN SIAPA SAJA YANG MENGAKTIFKAN MODE OFFLINE HARI INI */}
+            <div className="px-4 py-3 bg-slate-950/90 border-b border-slate-800 shrink-0 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 text-[11px] font-black text-rose-300 uppercase tracking-wider">
+                  <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                  <span>Laporan Aktivasi Mode Offline Tim Pengiriman ({todayOfflineReports.length})</span>
+                </div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/30">
+                  Wajib Segera Di-Online-kan
+                </span>
+              </div>
+
+              {todayOfflineReports.length === 0 ? (
+                <div className="p-2.5 rounded-xl bg-emerald-950/25 border border-emerald-500/30 text-[11px] text-emerald-300 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>Seluruh kru pengiriman saat ini berstatus <strong>Online</strong>. Tidak ada kru yang mengaktifkan Mode Offline.</span>
+                </div>
+              ) : (
+                <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                  {todayOfflineReports.map(rep => {
+                    const isStillOffline = rep.offlineStatus === 'masih_offline';
+                    return (
+                      <div
+                        key={rep.id}
+                        className={`p-2.5 rounded-xl border text-xs flex items-center justify-between gap-2 ${
+                          isStillOffline
+                            ? 'bg-rose-950/35 border-rose-500/50 text-rose-100'
+                            : 'bg-emerald-950/25 border-emerald-500/40 text-emerald-100'
+                        }`}
+                      >
+                        <div className="min-w-0 space-y-0.5">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-black text-white text-xs">{rep.driverName}</span>
+                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-900 text-amber-300 border border-slate-700 font-mono font-bold">
+                              {rep.userRole || 'Driver'} • {rep.plateNumber}
+                            </span>
+                            {isStillOffline ? (
+                              <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-rose-500/30 text-rose-200 border border-rose-400/50 font-black animate-pulse">
+                                ⚠️ MASIH OFFLINE (Segera Onlinekan!)
+                              </span>
+                            ) : (
+                              <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-emerald-500/25 text-emerald-300 border border-emerald-500/40 font-bold">
+                                ✓ Sudah Online ({rep.onlineRestoredAt || 'Selesai'})
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[10px] text-slate-300 truncate">
+                            Area: <strong>{rep.areaName}</strong> • Aktif Offline: <strong>{rep.offlineActivatedAt || new Date(rep.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB'}</strong>
+                          </div>
+                        </div>
+
+                        {isStillOffline && (
+                          <button
+                            type="button"
+                            onClick={() => handleToggleOfflineMode(false)}
+                            className="px-2.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-[10px] shrink-0 shadow cursor-pointer active:scale-95"
+                          >
+                            Onlinekan
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Stat Counter Strip */}
@@ -4459,14 +4689,17 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         vehicleType={assignedFleet?.vehicleType || 'Engkel Long Box'}
         initialChecklist={activeChecklistToEdit}
         defaultInspectionType={checklistInspectionType}
+        canSelectPostTrip={hasConfirmedArrivalToday}
         onSaved={(saved) => {
           const todayStr = new Date().toISOString().slice(0, 10);
           setIsFleetLockedAfterCheckin(true);
-          setIsChecklistCompletedAfterCheckin(true);
-          try {
-            localStorage.setItem(`akk_fleet_locked_flag_${selectedDriverId}`, 'true');
-            localStorage.setItem(`akk_checklist_done_${selectedDriverId}`, todayStr);
-          } catch {}
+          if (saved.inspectionType === 'pre_trip') {
+            setIsChecklistCompletedAfterCheckin(true);
+            try {
+              localStorage.setItem(`akk_fleet_locked_flag_${selectedDriverId}`, 'true');
+              localStorage.setItem(`akk_checklist_done_${selectedDriverId}`, todayStr);
+            } catch {}
+          }
           setChecklists(prev => {
             const idx = prev.findIndex(c => c.id === saved.id);
             if (idx >= 0) {
@@ -4477,11 +4710,15 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
             return [saved, ...prev];
           });
           setBottomNav('deliveries');
-          setActiveTab('active');
+          setActiveTab(saved.inspectionType === 'post_trip' ? 'delivered' : 'active');
           addNotification(
             'delivery',
-            'Checklist Disimpan • Persiapan Keluar Siap Diklik',
-            `Checklist armada ${saved.plateNumber} telah tersimpan. Tombol "Persiapan Keluar" pada jadwal aktif kini terbuka dan siap diklik.`
+            saved.inspectionType === 'post_trip'
+              ? 'Checklist Pasca-Jalan Tersimpan'
+              : 'Checklist Pra-Jalan Disimpan • Persiapan Keluar Siap Diklik',
+            saved.inspectionType === 'post_trip'
+              ? `Checklist Pasca-Jalan (Pulang) armada ${saved.plateNumber} telah tersimpan.`
+              : `Checklist Pra-Jalan armada ${saved.plateNumber} telah tersimpan. Tombol "Persiapan Keluar" pada jadwal aktif kini terbuka dan siap diklik.`
           );
         }}
       />
