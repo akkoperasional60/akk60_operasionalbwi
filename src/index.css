@@ -483,11 +483,13 @@ html.light .text-slate-400 {
 }
 
 /* Light Mode Accent Colors */
+html.light .text-emerald-200,
+html.light .text-emerald-300,
 html.light .text-emerald-400 {
-  color: #059669 !important;
+  color: #047857 !important;
 }
 html.light .text-emerald-500 {
-  color: #047857 !important;
+  color: #065f46 !important;
 }
 html.light .text-amber-100,
 html.light .text-amber-200 {
@@ -502,18 +504,25 @@ html.light .text-amber-400 {
 html.light .text-amber-500 {
   color: #b45309 !important;
 }
+html.light .text-blue-100,
+html.light .text-blue-200,
+html.light .text-blue-300,
 html.light .text-blue-400 {
   color: #1d4ed8 !important;
 }
 html.light .text-blue-500 {
   color: #1e40af !important;
 }
+html.light .text-indigo-200,
+html.light .text-indigo-300,
 html.light .text-indigo-400 {
   color: #4338ca !important;
 }
 html.light .text-indigo-500 {
   color: #3730a3 !important;
 }
+html.light .text-purple-200,
+html.light .text-purple-300,
 html.light .text-purple-400 {
   color: #6d28d9 !important;
 }
@@ -523,7 +532,7 @@ html.light .text-purple-500 {
 html.light .text-rose-100,
 html.light .text-rose-200,
 html.light .text-rose-300 {
-  color: #881337 !important;
+  color: #9f1239 !important;
 }
 html.light .text-rose-400 {
   color: #be123c !important;
@@ -531,11 +540,13 @@ html.light .text-rose-400 {
 html.light .text-rose-500 {
   color: #9f1239 !important;
 }
+html.light .text-cyan-200,
+html.light .text-cyan-300,
 html.light .text-cyan-400 {
   color: #0e7490 !important;
 }
 
-/* Solid Action Buttons with White Text */
+/* Solid Action Buttons with White Text (excluding translucent /10, /15, /20 backgrounds) */
 html.light .bg-blue-600,
 html.light .bg-blue-700,
 html.light .bg-blue-800,
@@ -553,17 +564,6 @@ html.light .bg-purple-700,
 html.light .bg-indigo-600,
 html.light .bg-indigo-700,
 html.light .bg-red-600,
-html.light [class*="bg-blue-600"],
-html.light [class*="bg-blue-700"],
-html.light [class*="bg-blue-800"],
-html.light [class*="bg-blue-900"],
-html.light [class*="bg-emerald-600"],
-html.light [class*="bg-emerald-700"],
-html.light [class*="bg-emerald-800"],
-html.light [class*="bg-rose-600"],
-html.light [class*="bg-amber-600"],
-html.light [class*="bg-purple-600"],
-html.light [class*="bg-indigo-600"],
 html.light [class*="bg-[#064e3b]"] {
   color: #ffffff !important;
 }

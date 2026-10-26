@@ -943,25 +943,104 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     return targetF;
   };
 
-  // Load deliveries with offline local caching (IndexedDB & LocalStorage) + Deduplikasi 1 Jadwal per Hari
+  // Filter kru khusus untuk SPV Logistik & Super Admin di Portal Driver ('all' = tampilkan semua jadwal kru)
+  const [spvCrewFilter, setSpvCrewFilter] = useState<string>('all');
+
+  // Cek apakah role akun saat ini adalah SPV Logistik atau Super Admin (bisa melihat semua jadwal & menghapus jadwal)
+  const canManageAllPortalSchedules = useMemo(() => {
+    const r1 = String(currentUser?.role || '').toLowerCase();
+    const r2 = String(syncedUserRoleInfo.rawRole || '').toLowerCase();
+    return (
+      ['super_admin', 'spv_logistik', 'admin'].includes(r1) ||
+      ['super_admin', 'spv_logistik', 'admin'].includes(r2)
+    );
+  }, [currentUser?.role, syncedUserRoleInfo.rawRole]);
+
+  // Helper pencocokan nama kru secara akurat berdasarkan token kata (mencegah 'Budi' tercampur dengan 'Budiono', namun 'Rizal' cocok dengan 'Saiful Rizal')
+  const doesCrewNameMatch = (schedulePersonName: string | undefined, targetAccountName: string | undefined): boolean => {
+    const a = (schedulePersonName || '').trim().toLowerCase();
+    const b = (targetAccountName || '').trim().toLowerCase();
+    if (!a || !b || a === '-' || a === 'tanpa helper') return false;
+    if (a === b) return true;
+    const tokensA = a.split(/[\s,/&.-]+/).filter(w => w.length >= 3);
+    const tokensB = b.split(/[\s,/&.-]+/).filter(w => w.length >= 3);
+    if (tokensA.length === 0 || tokensB.length === 0) return false;
+    return tokensB.every(t => tokensA.includes(t)) || tokensA.every(t => tokensB.includes(t));
+  };
+
+  // Cek apakah sebuah jadwal ditugaskan kepada kru (Driver atau Helper) tertentu
+  const isScheduleAssignedToPerson = (s: Schedule, personName: string, personId?: string): boolean => {
+    const cleanName = (personName || '').trim();
+    const cleanId = (personId || '').trim().toLowerCase();
+
+    if (cleanId && cleanId.length > 2) {
+      const strippedTargetId = cleanId.replace(/^(usr-|crw-)/, '');
+      const scheduleIds = [s.crewId, s.crewHelperId, s.crewHelper2Id, s.crew?.id, s.crewHelper?.id, s.crewHelper2?.id]
+        .filter(Boolean)
+        .map(x => String(x).trim().toLowerCase());
+
+      if (scheduleIds.includes(cleanId)) {
+        // Pastikan nama kru pada jadwal juga selaras jika tersedia (agar crw-06 fallback tidak salah cocok)
+        const driverNameOnSch = s.crew?.name || crews.find(c => c.id === s.crewId)?.name || '';
+        const helper1OnSch = s.crewHelper?.name || (s.crewHelperId ? crews.find(c => c.id === s.crewHelperId)?.name : '') || '';
+        const helper2OnSch = s.crewHelper2?.name || (s.crewHelper2Id ? crews.find(c => c.id === s.crewHelper2Id)?.name : '') || '';
+        if (
+          doesCrewNameMatch(driverNameOnSch, cleanName) ||
+          doesCrewNameMatch(helper1OnSch, cleanName) ||
+          doesCrewNameMatch(helper2OnSch, cleanName)
+        ) {
+          return true;
+        }
+      }
+      if (
+        strippedTargetId.length >= 4 &&
+        scheduleIds.some(sid => sid.replace(/^(usr-|crw-)/, '') === strippedTargetId)
+      ) {
+        return true;
+      }
+    }
+
+    if (!cleanName) return false;
+
+    const driverName = s.crew?.name || crews.find(c => c.id === s.crewId)?.name || '';
+    const helper1Name = s.crewHelper?.name || (s.crewHelperId ? crews.find(c => c.id === s.crewHelperId)?.name : '') || '';
+    const helper2Name = s.crewHelper2?.name || (s.crewHelper2Id ? crews.find(c => c.id === s.crewHelper2Id)?.name : '') || '';
+
+    if (doesCrewNameMatch(driverName, cleanName)) return true;
+    if (doesCrewNameMatch(helper1Name, cleanName)) return true;
+    if (doesCrewNameMatch(helper2Name, cleanName)) return true;
+
+    return false;
+  };
+
+  // Load deliveries with offline local caching + Role-based Schedule Filtering (Driver/Helper vs SPV Logistik/Super Admin)
   const loadDeliveries = async (silent = false) => {
     if (!silent) setIsLoading(true);
     try {
-      // Integrasi penuh dengan Menu Jadwal & Penugasan (logisticsStore)
       const localSchedules = logisticsStore.getSchedules();
-      const activeCrew = crews.find(c => c.id === selectedDriverId);
-      const filtered = (selectedDriverId || activeCrew?.name)
-        ? localSchedules.filter(s =>
-            s.crewId === selectedDriverId ||
-            (activeCrew && s.crew?.name?.toLowerCase() === activeCrew.name.toLowerCase()) ||
-            (s.crew && activeCrew && s.crew.id === activeCrew.id) ||
-            s.crewHelperId === selectedDriverId
-          )
-        : localSchedules;
+      if (localSchedules.length === 0) {
+        setDeliveries([]);
+        driverOfflineSyncService.cacheDeliveries([]);
+        return;
+      }
 
-      const targetList = filtered;
+      let targetList: Schedule[] = [];
 
-      // Prioritas status agar jika ada jadwal ganda di tanggal yang sama, jadwal yang sedang jalan / selesai / diedit manual diprioritaskan
+      if (canManageAllPortalSchedules) {
+        // Role SPV Logistik & Super Admin: Semua jadwal terbaca di portal (atau difilter sesuai pilihan kru)
+        if (spvCrewFilter === 'all') {
+          targetList = localSchedules;
+        } else {
+          targetList = localSchedules.filter(s => isScheduleAssignedToPerson(s, spvCrewFilter));
+        }
+      } else {
+        // Role Driver / Helper: HANYA jadwal milik akun yang sedang login (misal Budi -> jadwal Budi, Rizal -> jadwal Rizal)
+        const accountName = (currentUser?.fullName || portalDisplayName || '').trim();
+        const accountId = currentUser?.id || selectedDriverId;
+        targetList = localSchedules.filter(s => isScheduleAssignedToPerson(s, accountName, accountId));
+      }
+
+      // Prioritas status agar jika ada jadwal ganda di tanggal yang sama untuk kru yang sama, jadwal aktif diprioritaskan
       const getStatusRank = (s: Schedule): number => {
         if (s.status === 'in_transit' || s.status === 'picked_up' || s.status === 'delayed') return 4;
         if (s.status === 'delivered') return 3;
@@ -977,17 +1056,22 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         return dateB - dateA;
       });
 
-      // Hilangkan jadwal yang double (maksimal 1 jadwal per tanggal keberangkatan untuk kru ini)
       const seenIds = new Set<string>();
-      const seenDates = new Set<string>();
+      const seenCrewDates = new Set<string>();
       const deduplicated: Schedule[] = [];
 
       for (const item of sortedRaw) {
         if (seenIds.has(item.id)) continue;
         const dateKey = (item.departureDate || item.createdAt || '').slice(0, 10);
-        if (dateKey && seenDates.has(dateKey)) continue;
+        const crewKey = (item.crew?.name || item.crewId || '').toLowerCase();
+        const areaKey = (item.areaName || item.store?.storeName || '').toLowerCase();
+        const compositeKey = canManageAllPortalSchedules && spvCrewFilter === 'all'
+          ? `${dateKey}_${crewKey}_${areaKey}`
+          : `${dateKey}_${crewKey}`;
+
+        if (dateKey && seenCrewDates.has(compositeKey)) continue;
         seenIds.add(item.id);
-        if (dateKey) seenDates.add(dateKey);
+        if (dateKey) seenCrewDates.add(compositeKey);
         deduplicated.push(item);
       }
 
@@ -1001,11 +1085,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       setIsSupabaseLive(false);
       driverOfflineSyncService.cacheDeliveries(sorted);
     } catch (err) {
-      console.warn('[DriverMobileView] Error fetching deliveries, loading from offline cache:', err);
-      const cached = await driverOfflineSyncService.getCachedDeliveries(selectedDriverId);
-      if (cached && cached.length > 0) {
-        setDeliveries(cached);
-      }
+      console.warn('[DriverMobileView] Error fetching deliveries:', err);
+      setDeliveries([]);
     } finally {
       if (!silent) setIsLoading(false);
       setIsRefreshing(false);
@@ -1014,7 +1095,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
   useEffect(() => {
     loadDeliveries();
-  }, [selectedDriverId]);
+  }, [selectedDriverId, currentUser?.id, currentUser?.fullName, currentUser?.role, portalDisplayName, spvCrewFilter, canManageAllPortalSchedules]);
 
   // React to store updates
   useEffect(() => {
@@ -1136,19 +1217,35 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     };
   }, [selectedDriverId, currentDriver?.name, portalDisplayName]);
 
-  // Cek peran user saat ini untuk hak akses khusus Super Admin (Hanya Super Admin yang melihat tombol Hapus Riwayat Selesai)
+  // Cek peran user saat ini untuk hak akses khusus Super Admin & SPV Logistik
   const isSuperAdmin =
     currentUser?.role === 'super_admin' &&
     String(syncedUserRoleInfo.rawRole).toLowerCase() === 'super_admin';
 
   // 📦 Pemisahan tugas pengiriman:
-  // - Jadwal Aktif (activeDeliveries): Hanya 1 jadwal aktif pada satu hari (prioritas yang sedang Di Jalan / Persiapan Keluar / hari ini / jadwal terdekat).
-  // - Daftar Jadwal (scheduledDeliveries): Jadwal selain yang sedang aktif dan belum selesai (tanpa duplikat).
-  // - Selesai (deliveredDeliveries): Jadwal yang sudah Konfirmasi Tiba di Gudang ('delivered').
+  // - Untuk SPV Logistik & Super Admin (saat filter 'all'): tampilkan semua jadwal aktif/terjadwal agar semua jadwal kru terbaca.
+  // - Untuk Driver / Helper: Jadwal Aktif menampilkan 1 jadwal utama hari ini / terdekat, sisanya di Daftar Jadwal.
   const { activeDeliveries, scheduledDeliveries, deliveredDeliveries } = useMemo(() => {
     const todayIso = new Date().toISOString().slice(0, 10);
     const delivered = deliveries.filter(d => d.status === 'delivered');
     const nonDelivered = deliveries.filter(d => d.status !== 'delivered');
+
+    if (canManageAllPortalSchedules && spvCrewFilter === 'all') {
+      const inProgressOrToday = nonDelivered.filter(
+        d =>
+          ['picked_up', 'in_transit', 'delayed'].includes(d.status) ||
+          Boolean(keluarArgoMap[d.id]) ||
+          (d.departureDate || '').slice(0, 10) === todayIso
+      );
+      const activeList = inProgressOrToday.length > 0 ? inProgressOrToday : nonDelivered;
+      const activeIds = new Set(activeList.map(d => d.id));
+      const remainingScheduled = nonDelivered.filter(d => !activeIds.has(d.id));
+      return {
+        activeDeliveries: activeList,
+        scheduledDeliveries: remainingScheduled,
+        deliveredDeliveries: delivered
+      };
+    }
 
     let primaryActive: Schedule | null = null;
 
@@ -1193,7 +1290,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       scheduledDeliveries: remainingScheduled,
       deliveredDeliveries: delivered
     };
-  }, [deliveries, keluarArgoMap]);
+  }, [deliveries, keluarArgoMap, canManageAllPortalSchedules, spvCrewFilter]);
 
   // 📄 Surat Jalan Keluar (SJ Keluar):
   // - Siap Out: HANYA 1 jadwal yang tampil (prioritas jadwal yang klik Persiapan Keluar / jadwal aktif, atau jika sudah berangkat maka 1 jadwal besok H+1).
@@ -1577,16 +1674,20 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     await loadDeliveries(true);
   };
 
-  // Hapus riwayat pengiriman selesai (Khusus Super Admin)
+  // Hapus jadwal pengiriman (Khusus SPV Logistik & Super Admin)
   const handleDeleteCompletedSchedule = async () => {
     if (!deleteConfirmModal.delivery) return;
-    if (!isSuperAdmin) {
-      addNotification('delivery', 'Akses Ditolak', 'Hanya Super Admin yang berhak menghapus riwayat pengiriman.');
+    if (!canManageAllPortalSchedules) {
+      addNotification('delivery', 'Akses Ditolak', 'Hanya SPV Logistik dan Super Admin yang berhak menghapus jadwal pengiriman.');
       return;
     }
 
     logisticsStore.deleteSchedule(deleteConfirmModal.delivery.id);
-    addNotification('delivery', 'Riwayat Dihapus', 'Jadwal pengiriman selesai berhasil dihapus permanen oleh Super Admin.');
+    addNotification(
+      'delivery',
+      'Jadwal Dihapus',
+      `Jadwal pengiriman (${deleteConfirmModal.delivery.areaName || deleteConfirmModal.delivery.store?.storeName || 'Rute'}) berhasil dihapus oleh ${syncedUserRoleInfo.roleLabel}.`
+    );
     setDeleteConfirmModal({ isOpen: false, delivery: null });
     await loadDeliveries(true);
   };
@@ -2508,6 +2609,57 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                   />
                 </div>
               </div>
+
+              {/* Filter Jadwal Berdasarkan Kru & Aksi Kosongkan Jadwal (Khusus SPV Logistik & Super Admin) */}
+              {canManageAllPortalSchedules ? (
+                <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <span className="text-[11px] font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                      <Users className="w-3.5 h-3.5" />
+                      <span>Mode {syncedUserRoleInfo.roleLabel}: Semua Jadwal Kru Terbaca</span>
+                    </span>
+                    {deliveries.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          logisticsStore.clearAllSchedules();
+                          setDeliveries([]);
+                          addNotification(
+                            'schedule',
+                            'Semua Jadwal Dikosongkan',
+                            `Seluruh daftar jadwal pengiriman telah dikosongkan oleh ${syncedUserRoleInfo.roleLabel}.`
+                          );
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-rose-500/15 hover:bg-rose-600 text-rose-600 dark:text-rose-300 hover:text-white border border-rose-500/30 text-[10px] font-bold flex items-center gap-1 transition cursor-pointer"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>Kosongkan Semua Jadwal</span>
+                      </button>
+                    )}
+                  </div>
+                  <select
+                    value={spvCrewFilter}
+                    onChange={(e) => setSpvCrewFilter(e.target.value)}
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-slate-900 dark:text-white focus:outline-none focus:border-amber-500 cursor-pointer"
+                  >
+                    <option value="all">📋 Tampilkan Semua Jadwal Kru (Driver &amp; Helper)</option>
+                    {logisticsStore.getUsers()
+                      .filter(u => (u.role === 'driver' || u.role === 'crew_helper') && u.status === 'approved')
+                      .map(u => (
+                        <option key={u.id} value={u.fullName}>
+                          👤 Jadwal {u.fullName}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              ) : (
+                <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-[11px]">
+                  <span className="text-slate-500 dark:text-slate-400">Filter Akun Aktif ({syncedUserRoleInfo.roleLabel}):</span>
+                  <span className="font-black text-emerald-600 dark:text-emerald-400">
+                    Hanya Jadwal {currentUser?.fullName || portalDisplayName}
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Filter Tabs (Segmented Buttons) */}
@@ -2955,24 +3107,24 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                                 </span>
                               </div>
                             </div>
+                          </div>
+                        )}
 
-                            {/* Fitur Hapus Riwayat Selesai (HANYA TAMPIL UNTUK ROLE SUPER ADMIN) */}
-                            {isSuperAdmin && (
-                              <div className="flex items-center justify-between pt-1 px-1">
-                                <span className="text-[10px] text-slate-500">
-                                  Akses Super Admin:
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => setDeleteConfirmModal({ isOpen: true, delivery })}
-                                  className="text-[11px] font-bold text-rose-400 hover:text-rose-300 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 px-2.5 py-1 rounded-lg flex items-center gap-1 transition cursor-pointer"
-                                  title="Hapus riwayat pengiriman selesai (Hanya Super Admin)"
-                                >
-                                  <Trash2 className="w-3 h-3 text-rose-400" />
-                                  <span>Hapus Riwayat Selesai</span>
-                                </button>
-                              </div>
-                            )}
+                        {/* Fitur Hapus Jadwal (Tampil untuk Role SPV Logistik & Super Admin pada Semua Status Jadwal) */}
+                        {canManageAllPortalSchedules && (
+                          <div className="flex items-center justify-between pt-2 mt-1 border-t border-slate-800/80 px-1">
+                            <span className="text-[10px] text-slate-400 font-semibold">
+                              Otorisasi {syncedUserRoleInfo.roleLabel}:
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setDeleteConfirmModal({ isOpen: true, delivery })}
+                              className="text-[11px] font-bold text-rose-400 hover:text-white bg-rose-500/15 hover:bg-rose-600 border border-rose-500/30 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
+                              title="Hapus jadwal pengiriman ini (SPV Logistik & Super Admin)"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Hapus Jadwal</span>
+                            </button>
                           </div>
                         )}
                       </div>
@@ -3992,8 +4144,10 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                 <Trash2 className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="text-sm font-black text-white">Hapus Riwayat Pengiriman Selesai</h3>
-                <span className="text-[10px] text-rose-400 font-bold uppercase tracking-wider">Akses Khusus Super Admin</span>
+                <h3 className="text-sm font-black text-white">Hapus Jadwal Pengiriman</h3>
+                <span className="text-[10px] text-rose-400 font-bold uppercase tracking-wider">
+                  Akses SPV Logistik &amp; Super Admin
+                </span>
               </div>
             </div>
 
@@ -4002,15 +4156,15 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                 Toko / Tujuan: <strong className="text-white">{deleteConfirmModal.delivery?.store?.storeName || deleteConfirmModal.delivery?.areaName}</strong>
               </div>
               <div className="text-slate-400">
-                Area: <span className="text-emerald-400 font-semibold">{deleteConfirmModal.delivery?.areaName || 'Banyuwangi'}</span>
+                Kru Bertugas: <span className="text-amber-300 font-semibold">{deleteConfirmModal.delivery?.crew?.name || '-'}</span>
               </div>
-              <div className="text-[11px] text-slate-500 mt-1">
-                Tiba Selesai: {deleteConfirmModal.delivery?.actualArrival ? new Date(deleteConfirmModal.delivery.actualArrival).toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : 'Hari ini'}
+              <div className="text-slate-400">
+                Area: <span className="text-emerald-400 font-semibold">{deleteConfirmModal.delivery?.areaName || 'Banyuwangi'}</span>
               </div>
             </div>
 
             <p className="text-xs text-slate-400 leading-relaxed">
-              Apakah Anda yakin ingin menghapus arsip pengiriman selesai ini? Data akan dihapus secara permanen dari server dan daftar riwayat driver.
+              Apakah Anda yakin ingin menghapus jadwal pengiriman ini? Data jadwal akan dihapus secara permanen dari portal dan daftar penugasan.
             </p>
 
             <div className="flex items-center gap-2 pt-1">

@@ -186,16 +186,19 @@ export const DriverReportsManagement: React.FC = () => {
     };
   }, []);
 
-  // Map of reports count & solution status per calendar date
+  // Map of reports count & solution status per calendar date (termasuk Kendala Masuk & Akhir Kiriman)
   const reportsByDateMap = useMemo(() => {
     const map = new Map<
       string,
       {
         total: number;
         kendala: number;
+        akhirKirimanCount: number;
         needsActionCount: number;
         sentToPortalCount: number;
         otherReportsCount: number;
+        kendalaItems: string[];
+        akhirItems: string[];
       }
     >();
     reports.forEach(r => {
@@ -204,18 +207,37 @@ export const DriverReportsManagement: React.FC = () => {
         const curr = map.get(d) || {
           total: 0,
           kendala: 0,
+          akhirKirimanCount: 0,
           needsActionCount: 0,
           sentToPortalCount: 0,
-          otherReportsCount: 0
+          otherReportsCount: 0,
+          kendalaItems: [],
+          akhirItems: []
         };
         curr.total += 1;
         const hasSolution = Boolean(r.solution && r.solution.trim());
+        const shortDriver = (r.driverName || 'Kru').split(' ')[0];
+        const shortArea = r.areaName || 'Rute';
+        const labelSummary = `${shortDriver} • ${shortArea}`;
+
         if (r.category === 'kendala_jalan' || r.category === 'mode_offline') {
           curr.kendala += 1;
+          if (curr.kendalaItems.length < 2) {
+            curr.kendalaItems.push(labelSummary);
+          }
           if (hasSolution || r.offlineStatus === 'sudah_online') {
             curr.sentToPortalCount += 1;
           } else {
             curr.needsActionCount += 1;
+          }
+        } else if (r.category === 'akhir_kiriman') {
+          curr.akhirKirimanCount += 1;
+          curr.otherReportsCount += 1;
+          if (curr.akhirItems.length < 2) {
+            curr.akhirItems.push(labelSummary);
+          }
+          if (hasSolution) {
+            curr.sentToPortalCount += 1;
           }
         } else {
           curr.otherReportsCount += 1;
@@ -316,9 +338,12 @@ export const DriverReportsManagement: React.FC = () => {
           isToday: boolean;
           totalReports: number;
           kendalaCount: number;
+          akhirKirimanCount: number;
           needsActionCount: number;
           sentToPortalCount: number;
           otherReportsCount: number;
+          kendalaItems: string[];
+          akhirItems: string[];
         };
 
     const cells: CalendarCell[] = [];
@@ -332,9 +357,12 @@ export const DriverReportsManagement: React.FC = () => {
       const stats = reportsByDateMap.get(iso) || {
         total: 0,
         kendala: 0,
+        akhirKirimanCount: 0,
         needsActionCount: 0,
         sentToPortalCount: 0,
-        otherReportsCount: 0
+        otherReportsCount: 0,
+        kendalaItems: [],
+        akhirItems: []
       };
       cells.push({
         type: 'day',
@@ -344,9 +372,12 @@ export const DriverReportsManagement: React.FC = () => {
         isToday: iso === todayIso,
         totalReports: stats.total,
         kendalaCount: stats.kendala,
+        akhirKirimanCount: stats.akhirKirimanCount,
         needsActionCount: stats.needsActionCount,
         sentToPortalCount: stats.sentToPortalCount,
-        otherReportsCount: stats.otherReportsCount
+        otherReportsCount: stats.otherReportsCount,
+        kendalaItems: stats.kendalaItems,
+        akhirItems: stats.akhirItems
       });
     }
 
@@ -1092,7 +1123,7 @@ export const DriverReportsManagement: React.FC = () => {
               </div>
             </div>
 
-            {/* Legend Badges (Indikator Kendala Masuk vs Terkirim ke Portal Driver) */}
+            {/* Legend Badges (Indikator Kendala Masuk & Akhir Kiriman Langsung di Kalender) */}
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <span className="text-xs font-bold text-slate-600 dark:text-slate-300">
                 Tanggal Terpilih: <strong className="text-emerald-600 dark:text-emerald-400 font-mono">{selectedCalendarDate}</strong>
@@ -1100,11 +1131,15 @@ export const DriverReportsManagement: React.FC = () => {
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-rose-100 dark:bg-rose-950/80 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-800 shadow-2xs">
                   <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
-                  <span>Ada Kendala Masuk (Segera Beri Solusi)</span>
+                  <span>⚠️ Kendala Masuk</span>
+                </span>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-blue-100 dark:bg-blue-950/80 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-800 shadow-2xs">
+                  <span className="w-2 h-2 rounded-full bg-blue-500" />
+                  <span>✅ Akhir Kiriman</span>
                 </span>
                 <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 shadow-2xs">
                   <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                  <span>Solusi Sudah Terkirim ke Portal Driver (Hijau)</span>
+                  <span>Solusi Terkirim ke Portal Driver</span>
                 </span>
               </div>
             </div>
@@ -1120,21 +1155,23 @@ export const DriverReportsManagement: React.FC = () => {
               <div className="text-blue-600 dark:text-blue-400">SABTU</div>
             </div>
 
-            {/* Calendar Cells Grid (01 s/d 31) — Bersih tanpa pop-up keterangan di dalam kotak tanggal */}
+            {/* Calendar Cells Grid (01 s/d 31) dengan Keterangan Langsung Kendala Masuk & Akhir Kiriman */}
             <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
               {monthlyCalendarGrid.cells.map((cell) => {
                 if (cell.type === 'padding') {
                   return (
                     <div
                       key={cell.key}
-                      className="min-h-[60px] sm:min-h-[72px] bg-slate-50/50 dark:bg-slate-950/20 rounded-xl border border-dashed border-slate-200 dark:border-slate-800/50"
+                      className="min-h-[82px] sm:min-h-[96px] bg-slate-50/50 dark:bg-slate-950/20 rounded-xl border border-dashed border-slate-200 dark:border-slate-800/50"
                     />
                   );
                 }
 
                 const isSelected = selectedCalendarDate === cell.iso;
                 const hasUnhandled = cell.needsActionCount > 0;
-                const isAllResolvedGreen = !hasUnhandled && cell.sentToPortalCount > 0;
+                const hasKendala = cell.kendalaCount > 0;
+                const hasAkhirKiriman = cell.akhirKirimanCount > 0;
+                const isAllResolvedGreen = !hasUnhandled && (cell.sentToPortalCount > 0 || hasAkhirKiriman);
 
                 return (
                   <div
@@ -1143,7 +1180,7 @@ export const DriverReportsManagement: React.FC = () => {
                       setSelectedCalendarDate(cell.iso);
                       setDateFilterMode('single_date');
                     }}
-                    className={`min-h-[60px] sm:min-h-[72px] p-2.5 rounded-xl border transition cursor-pointer flex flex-col justify-between select-none relative ${
+                    className={`min-h-[82px] sm:min-h-[96px] p-2 rounded-xl border transition cursor-pointer flex flex-col justify-between select-none relative gap-1.5 ${
                       isSelected
                         ? hasUnhandled
                           ? 'bg-rose-100/90 dark:bg-rose-950/60 border-rose-500 ring-2 ring-rose-500 shadow-md z-10'
@@ -1171,17 +1208,52 @@ export const DriverReportsManagement: React.FC = () => {
 
                       {hasUnhandled ? (
                         <span
-                          className="w-3 h-3 rounded-full bg-rose-500 animate-pulse ring-4 ring-rose-500/20"
+                          className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse ring-4 ring-rose-500/20"
                           title="Ada kendala masuk — segera perbarui status & solusi!"
                         />
                       ) : isAllResolvedGreen ? (
                         <span
                           className="w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-2xs"
-                          title="Solusi sudah terkirim ke Portal Driver"
+                          title="Solusi terkirim / Akhir kiriman tercatat"
                         >
                           <Check className="w-2.5 h-2.5 stroke-[3]" />
                         </span>
                       ) : null}
+                    </div>
+
+                    {/* Direct Keterangan inside Calendar Cell: Kendala Masuk & Akhir Kiriman */}
+                    <div className="space-y-1 mt-auto">
+                      {hasKendala && (
+                        <div className="px-1.5 py-1 rounded-md bg-rose-600/15 dark:bg-rose-500/25 border border-rose-500/40 text-rose-800 dark:text-rose-200 text-[9px] leading-tight">
+                          <div className="font-black flex items-center justify-between gap-1">
+                            <span className="truncate">⚠️ Kendala Masuk</span>
+                            <span className="px-1 rounded bg-rose-600 text-white font-mono text-[8px] shrink-0">
+                              {cell.kendalaCount}
+                            </span>
+                          </div>
+                          {cell.kendalaItems.length > 0 && (
+                            <div className="text-[8px] opacity-90 truncate mt-0.5 font-semibold">
+                              {cell.kendalaItems.join(', ')}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {hasAkhirKiriman && (
+                        <div className="px-1.5 py-1 rounded-md bg-blue-600/15 dark:bg-blue-500/25 border border-blue-500/40 text-blue-800 dark:text-blue-200 text-[9px] leading-tight">
+                          <div className="font-black flex items-center justify-between gap-1">
+                            <span className="truncate">✅ Akhir Kiriman</span>
+                            <span className="px-1 rounded bg-blue-600 text-white font-mono text-[8px] shrink-0">
+                              {cell.akhirKirimanCount}
+                            </span>
+                          </div>
+                          {cell.akhirItems.length > 0 && (
+                            <div className="text-[8px] opacity-90 truncate mt-0.5 font-semibold">
+                              {cell.akhirItems.join(', ')}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 );

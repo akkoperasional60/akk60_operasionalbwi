@@ -589,10 +589,96 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     logisticsStore.updateFleetStatus(fleet.id, nextStatus);
   };
 
+  // Integrasi 2 arah Status Operasional Kru dengan Manajemen User (Aktif / Nonaktif)
+  const getCrewIntegratedStatus = (crew: Crew): { isActive: boolean; matchedUserId?: string } => {
+    const allUsers = logisticsStore.getUsers();
+    const cleanCrewName = (crew.name || '').trim().toLowerCase();
+    const strippedCrewId = crew.id.replace(/^crw-/, '');
+    const matchedUser = allUsers.find(
+      u =>
+        u.id === strippedCrewId ||
+        `crw-${u.id}` === crew.id ||
+        (u.fullName || '').trim().toLowerCase() === cleanCrewName
+    );
+    if (matchedUser) {
+      return {
+        isActive: matchedUser.status === 'approved' && crew.status !== 'off',
+        matchedUserId: matchedUser.id
+      };
+    }
+    return {
+      isActive: crew.status !== 'off'
+    };
+  };
+
+  // Perhitungan Dinamis Performa Rit & Rating dari Prosentase Total Kiriman & Ketepatan Waktu Berangkat/Sampai Gudang
+  const getCrewDynamicPerformance = (crew: Crew) => {
+    const allSchedules = logisticsStore.getSchedules();
+    const cleanCrewName = (crew.name || '').trim().toLowerCase();
+    const crewSchedules = allSchedules.filter(s => {
+      const dName = (s.crew?.name || '').trim().toLowerCase();
+      const h1Name = (s.crewHelper?.name || '').trim().toLowerCase();
+      const h2Name = (s.crewHelper2?.name || '').trim().toLowerCase();
+      return (
+        s.crewId === crew.id ||
+        s.crewHelperId === crew.id ||
+        s.crewHelper2Id === crew.id ||
+        (cleanCrewName.length > 0 && (dName === cleanCrewName || h1Name === cleanCrewName || h2Name === cleanCrewName))
+      );
+    });
+
+    const totalAssigned = crewSchedules.length;
+    const completedRit = crewSchedules.filter(s => s.status === 'delivered').length;
+    const completionPct = totalAssigned > 0 ? Math.round((completedRit / totalAssigned) * 100) : 100;
+
+    // Cek ketepatan waktu berangkat dari gudang (Gate-Out) & sampai di gudang (Gate-In / tidak telat)
+    const onTimeSchedules = crewSchedules.filter(s => {
+      if (s.status === 'delayed') return false;
+      const notesLower = (s.notes || '').toLowerCase();
+      if (notesLower.includes('telat') || notesLower.includes('terlambat') || notesLower.includes('kendala:')) {
+        return false;
+      }
+      if (s.actualArrival && s.estimatedArrival) {
+        const actualMs = new Date(s.actualArrival).getTime();
+        const estMs = new Date(s.estimatedArrival).getTime();
+        if (!isNaN(actualMs) && !isNaN(estMs) && actualMs > estMs + 30 * 60 * 1000) {
+          return false;
+        }
+      }
+      return true;
+    }).length;
+
+    const onTimePct = totalAssigned > 0 ? Math.round((onTimeSchedules / totalAssigned) * 100) : 100;
+
+    // Rating dihitung dari 50% Prosentase Total Kiriman Selesai + 50% Ketepatan Waktu Berangkat & Sampai Gudang (Skala 5.0)
+    const weightedScorePct = totalAssigned > 0 ? completionPct * 0.5 + onTimePct * 0.5 : 100;
+    const rating = totalAssigned > 0
+      ? Math.max(1.0, Math.min(5.0, Number(((weightedScorePct / 100) * 5.0).toFixed(1))))
+      : 5.0;
+
+    return {
+      totalAssigned,
+      completedRit,
+      completionPct,
+      onTimePct,
+      rating
+    };
+  };
+
   const toggleCrewStatus = (crew: Crew) => {
-    const nextStatus: CrewStatus =
-      crew.status === 'available' ? 'on-duty' : crew.status === 'on-duty' ? 'off' : 'available';
-    logisticsStore.updateCrewStatus(crew.id, nextStatus);
+    const { isActive, matchedUserId } = getCrewIntegratedStatus(crew);
+    if (isActive) {
+      logisticsStore.updateCrewStatus(crew.id, 'off');
+      if (matchedUserId) {
+        logisticsStore.deactivateUser(matchedUserId, 'Dinonaktifkan dari menu Status Operasional Kru');
+      }
+    } else {
+      logisticsStore.updateCrewStatus(crew.id, 'available');
+      if (matchedUserId) {
+        logisticsStore.activateUser(matchedUserId, 'Diaktifkan dari menu Status Operasional Kru');
+      }
+    }
+    setCrews(logisticsStore.getCrews());
   };
 
   const filteredFleets = fleets.filter(f => {
@@ -609,7 +695,12 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
   });
 
   const filteredCrews = crews.filter(c => {
-    const matchesStatus = crewFilter === 'all' || c.status === crewFilter;
+    const { isActive } = getCrewIntegratedStatus(c);
+    const matchesStatus =
+      crewFilter === 'all' ||
+      (crewFilter === 'aktif' && isActive) ||
+      (crewFilter === 'nonaktif' && !isActive) ||
+      c.status === crewFilter;
     const matchesRole = crewRoleFilter === 'all' || c.role === crewRoleFilter;
     const q = searchQuery.toLowerCase().trim();
     const matchesQuery =
@@ -795,16 +886,15 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                 </>
               ) : (
                 <>
-                  {/* Status Kru Dropdown */}
+                  {/* Status Operasional Kru Dropdown (Terintegrasi User Manajemen) */}
                   <select
                     value={crewFilter}
                     onChange={(e) => setCrewFilter(e.target.value)}
                     className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-hidden focus:border-emerald-500 cursor-pointer"
                   >
-                    <option value="all">Semua Status</option>
-                    <option value="available">Ready</option>
-                    <option value="on-duty">On-Duty</option>
-                    <option value="off">Off / Libur</option>
+                    <option value="all">Semua Status Operasional</option>
+                    <option value="aktif">● Aktif (User Manajemen)</option>
+                    <option value="nonaktif">○ Nonaktif (User Manajemen)</option>
                   </select>
 
                   {/* Peran Kru Dropdown */}
@@ -1503,6 +1593,25 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
         )
       )}
 
+      {/* Info Indikator Status Operasional & Rumus Performa Rit & Rating */}
+      {activeTab === 'crews' && (
+        <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-2xs">
+          <div className="flex items-start sm:items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+              <Award className="w-4 h-4" />
+            </div>
+            <div className="space-y-0.5">
+              <div className="font-bold text-white text-xs">
+                Integrasi Status Operasional &amp; Rumus Performa Rit / Rating Kru
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                <strong>Status Operasional (Aktif / Nonaktif)</strong> terintegrasi langsung dengan <strong>Manajemen User</strong>. Sedangkan <strong>Performa Rit &amp; Rating</strong> dihitung otomatis dari <strong>Prosentase Total Kiriman Selesai (%)</strong> serta <strong>Ketepatan Waktu (Tidak Telat) Berangkat dari Gudang &amp; Sampai di Gudang (%)</strong>.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Crews Content: Table View */}
       {activeTab === 'crews' && viewMode === 'table' && (
         <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
@@ -1513,9 +1622,9 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   <th className="py-3 px-4 w-12 text-center">#</th>
                   <th className="py-3 px-4">Nama Lengkap Kru</th>
                   <th className="py-3 px-4">Peran Tugas</th>
-                  <th className="py-3 px-4 text-center">Status Operasional</th>
+                  <th className="py-3 px-4 text-center">Status Operasional (User)</th>
                   <th className="py-3 px-4">Armada Ditugaskan</th>
-                  <th className="py-3 px-4 text-center">Performa Rit & Rating</th>
+                  <th className="py-3 px-4 text-center">Performa Rit &amp; Rating (Kiriman &amp; Waktu Gudang)</th>
                   <th className="py-3 px-4 text-center">Supabase Cloud</th>
                   <th className="py-3 px-4 text-center w-28">Aksi</th>
                 </tr>
@@ -1532,6 +1641,8 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                 ) : (
                   filteredCrews.map((crew, index) => {
                     const assignedFleet = fleets.find(f => f.id === crew.currentFleetId || f.driverId === crew.id);
+                    const { isActive } = getCrewIntegratedStatus(crew);
+                    const perf = getCrewDynamicPerformance(crew);
 
                     return (
                       <tr key={crew.id} className="hover:bg-slate-850/50 transition">
@@ -1562,20 +1673,15 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                           <button
                             type="button"
                             onClick={() => toggleCrewStatus(crew)}
-                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold border transition cursor-pointer ${
-                              crew.status === 'available'
-                                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
-                                : crew.status === 'on-duty'
-                                ? 'bg-blue-500/10 text-blue-400 border-blue-500/30 hover:bg-blue-500/20'
-                                : 'bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-750'
+                            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold border transition cursor-pointer ${
+                              isActive
+                                ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/25'
+                                : 'bg-rose-500/15 text-rose-400 border-rose-500/30 hover:bg-rose-500/25'
                             }`}
-                            title="Klik untuk ubah status kru"
+                            title="Terintegrasi dengan Manajemen User (Klik untuk ubah Aktif / Nonaktif)"
                           >
-                            <span>
-                              {crew.status === 'available' && '● Ready'}
-                              {crew.status === 'on-duty' && '● Sedang Jalan'}
-                              {crew.status === 'off' && '○ Libur / Off'}
-                            </span>
+                            <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+                            <span>{isActive ? 'Aktif' : 'Nonaktif'}</span>
                           </button>
                         </td>
                         <td className="py-3 px-4">
@@ -1592,10 +1698,14 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                           )}
                         </td>
                         <td className="py-3 px-4 text-center">
-                          <div className="font-semibold text-white">{crew.tripsCompleted || 0} Rit</div>
-                          <div className="text-[10px] text-amber-400 font-bold flex items-center justify-center gap-0.5">
-                            <Award className="w-2.5 h-2.5" />
-                            <span>{(crew.rating || 5.0).toFixed(1)} / 5.0</span>
+                          <div className="font-bold text-white text-xs">
+                            {perf.completedRit} / {perf.totalAssigned} Rit ({perf.completionPct}% Kiriman)
+                          </div>
+                          <div className="text-[10px] text-amber-400 font-bold flex items-center justify-center gap-1 mt-0.5">
+                            <Award className="w-3 h-3 shrink-0" />
+                            <span>{perf.rating.toFixed(1)} / 5.0</span>
+                            <span className="text-slate-500">•</span>
+                            <span className="text-emerald-400">Tepat Waktu Gudang: {perf.onTimePct}%</span>
                           </div>
                         </td>
                         <td className="py-3 px-4 text-center">
@@ -1644,78 +1754,85 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredCrews.map(crew => (
-            <div key={crew.id} className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-4 hover:border-slate-700 transition">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-blue-400 font-bold text-sm">
-                    {crew.name.substring(0, 2).toUpperCase()}
+            {filteredCrews.map(crew => {
+              const { isActive } = getCrewIntegratedStatus(crew);
+              const perf = getCrewDynamicPerformance(crew);
+              return (
+                <div key={crew.id} className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-4 hover:border-slate-700 transition">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-blue-400 font-bold text-sm">
+                        {crew.name.substring(0, 2).toUpperCase()}
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-bold text-white">{crew.name}</h3>
+                        <span className="text-[11px] text-slate-400">{crew.role}</span>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => toggleCrewStatus(crew)}
+                      className={`px-2.5 py-1 rounded-full text-xs font-bold cursor-pointer border transition flex items-center gap-1.5 ${
+                        isActive
+                          ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                          : 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                      }`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+                      <span>{isActive ? 'Aktif' : 'Nonaktif'}</span>
+                    </button>
                   </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-white">{crew.name}</h3>
-                    <span className="text-[11px] text-slate-400">{crew.role}</span>
+
+                  <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800 text-xs space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 text-[11px]">Prosentase Kiriman Selesai:</span>
+                      <span className="font-bold text-white">{perf.completedRit} / {perf.totalAssigned} Rit ({perf.completionPct}%)</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 text-[11px]">Tepat Waktu Berangkat &amp; Tiba Gudang:</span>
+                      <span className="font-bold text-emerald-400">{perf.onTimePct}%</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-3 border-t border-slate-800 text-xs">
+                    <span className="text-[11px] text-slate-400">Rating Performa:</span>
+                    <div className="flex items-center gap-1 text-amber-400 font-semibold">
+                      <Award className="w-3.5 h-3.5" />
+                      <span>{perf.rating.toFixed(1)} / 5.0</span>
+                    </div>
+                  </div>
+
+                  <div className="pt-2">
+                    <button
+                      onClick={() => setActiveTab('history')}
+                      className="w-full py-1.5 px-2.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white text-[11px] font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                    >
+                      <History className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Cek Histori &amp; Distribusi Wilayah</span>
+                    </button>
+                  </div>
+
+                  {/* Edit & Hapus Buttons */}
+                  <div className="pt-2.5 border-t border-slate-800 flex items-center justify-end gap-2 text-xs">
+                    <button
+                      onClick={() => handleEditCrewClick(crew)}
+                      className="px-3 py-1 rounded bg-slate-800 hover:bg-slate-750 hover:text-white text-slate-300 font-medium flex items-center gap-1 transition cursor-pointer"
+                    >
+                      <Edit3 className="w-3.5 h-3.5 text-blue-400" />
+                      <span>Edit</span>
+                    </button>
+                    <button
+                      onClick={() => handleDeleteCrewClick(crew)}
+                      className="px-3 py-1 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 font-medium flex items-center gap-1 transition cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Hapus</span>
+                    </button>
                   </div>
                 </div>
-
-                <button
-                  onClick={() => toggleCrewStatus(crew)}
-                  className={`px-2.5 py-1 rounded-full text-xs font-semibold cursor-pointer border transition ${
-                    crew.status === 'available'
-                      ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                      : crew.status === 'on-duty'
-                      ? 'bg-blue-500/10 text-blue-400 border-blue-500/30'
-                      : 'bg-slate-800 text-slate-400 border-slate-700'
-                  }`}
-                >
-                  {crew.status === 'available' && '● Ready'}
-                  {crew.status === 'on-duty' && '● Sedang Jalan'}
-                  {crew.status === 'off' && '○ Libur / Off'}
-                </button>
-              </div>
-
-              <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800 text-xs">
-                <span className="text-slate-400 text-[11px]">Total Perjalanan:</span>
-                <div className="font-semibold text-white mt-0.5">{crew.tripsCompleted} Trip Sukses</div>
-              </div>
-
-              <div className="flex items-center justify-end pt-3 border-t border-slate-800 text-xs">
-
-                <div className="flex items-center gap-1 text-amber-400 font-semibold">
-                  <Award className="w-3.5 h-3.5" />
-                  <span>{crew.rating.toFixed(1)} / 5.0</span>
-                </div>
-              </div>
-
-              <div className="pt-2">
-                <button
-                  onClick={() => setActiveTab('history')}
-                  className="w-full py-1.5 px-2.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-300 hover:text-white text-[11px] font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer"
-                >
-                  <History className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Cek Histori & Distribusi Wilayah</span>
-                </button>
-              </div>
-
-              {/* Edit & Hapus Buttons */}
-              <div className="pt-2.5 border-t border-slate-800 flex items-center justify-end gap-2 text-xs">
-                <button
-                  onClick={() => handleEditCrewClick(crew)}
-                  className="px-3 py-1 rounded bg-slate-800 hover:bg-slate-750 hover:text-white text-slate-300 font-medium flex items-center gap-1 transition cursor-pointer"
-                >
-                  <Edit3 className="w-3.5 h-3.5 text-blue-400" />
-                  <span>Edit</span>
-                </button>
-                <button
-                  onClick={() => handleDeleteCrewClick(crew)}
-                  className="px-3 py-1 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 font-medium flex items-center gap-1 transition cursor-pointer"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Hapus</span>
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
+              );
+            })}
+          </div>
         )
       )}
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Calendar, Plus, Truck, Store, User, Users, Ship, Clock, CheckCircle2, AlertTriangle, FileText, Search, ChevronRight, ChevronDown, ChevronUp, CalendarDays, X, XCircle, LayoutList, MapPin, Printer, ShieldAlert, Edit, Trash2, Sparkles, CalendarCheck, Repeat, Layers, Move, FileSpreadsheet, History, RefreshCw, Zap, Download, Loader2, Compass, Navigation, ArrowRightLeft, UserX } from 'lucide-react';
+import { Calendar, Plus, Truck, Store, User, Users, Ship, Clock, CheckCircle2, AlertTriangle, FileText, Search, ChevronRight, ChevronDown, ChevronUp, CalendarDays, X, XCircle, LayoutList, MapPin, Printer, ShieldAlert, Edit, Trash2, Sparkles, CalendarCheck, Repeat, Layers, Move, FileSpreadsheet, History, RefreshCw, Zap, Download, Loader2, Compass, Navigation, ArrowRightLeft, UserX, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Schedule, RetailStore, Fleet, Crew, ShipmentStatus, CrewDeliveryHistory } from '../types';
 import { logisticsStore } from '../services/store';
@@ -21,6 +21,7 @@ import { GoogleSheetsAdminScheduleView } from './GoogleSheetsAdminScheduleView';
 import { downloadScheduleManifestPdf } from '../utils/suratJalanPdfGenerator';
 import { useToast } from '../context/ToastContext';
 import { getAreaScheduleTiming, calculateScheduleTimestamps } from '../utils/areaScheduleRules';
+import { OFFICIAL_DESTINATION_AREAS } from '../utils/areaNormalizer';
 
 interface ScheduleManagementProps {
   preselectedStore?: RetailStore | null;
@@ -168,16 +169,7 @@ export const ScheduleManagement: React.FC<ScheduleManagementProps> = ({
     return 'Lainnya';
   };
 
-  // Auto-initialize recurring weekly schedules on component mount if not yet present
-  useEffect(() => {
-    if (!ScheduleInitializerService.isWeeklyScheduleInitialized()) {
-      const result = ScheduleInitializerService.initializeWeeklySchedules({ weekOffset: 0 });
-      if (result.addedCount > 0) {
-        setAutoInitMessage(`Sistem otomatis menginisialisasi ${result.addedCount} rute pengiriman rutin (${result.outboundCount} Prioritas Luar Kota & ${result.localCount} Lokal) dengan proteksi jeda istirahat 24 jam.`);
-        setTimeout(() => setAutoInitMessage(null), 6000);
-      }
-    }
-  }, []);
+  // Jadwal dimulai dalam kondisi kosong sesuai permintaan operasional (tidak auto-seed otomatis saat mount)
 
   const handleRunWeeklyAutoInit = (weekOffset: number = 0) => {
     const result = ScheduleInitializerService.initializeWeeklySchedules({ weekOffset });
@@ -379,6 +371,48 @@ export const ScheduleManagement: React.FC<ScheduleManagementProps> = ({
     transitPort: '',
     notes: ''
   });
+
+  const [areaSearchFilter, setAreaSearchFilter] = useState<string>('');
+  const [areaCategoryFilter, setAreaCategoryFilter] = useState<'all' | 'bali' | 'banyuwangi' | 'jember' | 'pantura'>('all');
+  const [isAreaPickerExpanded, setIsAreaPickerExpanded] = useState<boolean>(false);
+
+  const getAreaRegionCategory = (areaName: string): { category: 'bali' | 'jember' | 'pantura' | 'banyuwangi'; label: string; badgeColor: string } => {
+    const upper = areaName.toUpperCase();
+    if (upper.includes('DENPASAR') || upper.includes('SINGARAJA') || upper.includes('NEGARA')) {
+      return { category: 'bali', label: 'Pulau Bali', badgeColor: 'bg-amber-500/15 text-amber-300 border-amber-500/30' };
+    }
+    if (upper.includes('JEMBER')) {
+      return { category: 'jember', label: 'Jember', badgeColor: 'bg-blue-500/15 text-blue-300 border-blue-500/30' };
+    }
+    if (upper.includes('SITUBONDO') || upper.includes('BONDOWOSO')) {
+      return { category: 'pantura', label: 'Situbondo & Bw', badgeColor: 'bg-purple-500/15 text-purple-300 border-purple-500/30' };
+    }
+    return { category: 'banyuwangi', label: 'Banyuwangi & Sekitar', badgeColor: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' };
+  };
+
+  const filteredOfficialAreas = useMemo(() => {
+    return OFFICIAL_DESTINATION_AREAS.filter(areaName => {
+      const matchSearch = areaName.toLowerCase().includes(areaSearchFilter.toLowerCase().trim());
+      if (!matchSearch) return false;
+      if (areaCategoryFilter === 'all') return true;
+      const cat = getAreaRegionCategory(areaName).category;
+      return cat === areaCategoryFilter;
+    });
+  }, [areaSearchFilter, areaCategoryFilter]);
+
+  const handleSelectArea = (selectedVal: string) => {
+    const baseDate = newSchedule.departureDate ? new Date(newSchedule.departureDate) : new Date();
+    const timestamps = calculateScheduleTimestamps(baseDate, selectedVal);
+    const upper = selectedVal.toUpperCase();
+    const isBaliIsland = upper.includes('DENPASAR') || upper.includes('SINGARAJA') || upper.includes('NEGARA');
+    setNewSchedule(prev => ({
+      ...prev,
+      storeId: selectedVal,
+      departureDate: timestamps.departureDate,
+      estimatedArrival: timestamps.estimatedArrival,
+      isInterIsland: isBaliIsland
+    }));
+  };
 
   useEffect(() => {
     return logisticsStore.subscribe(() => {
@@ -1065,58 +1099,148 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                 {/* Section 1: Area & Armada */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   <div>
-                    <label className="text-slate-300 font-bold block mb-1.5 flex items-center gap-1.5">
-                      <MapPin className="w-3.5 h-3.5 text-blue-400" />
-                      <span>Area Kirim Tujuan *</span>
-                    </label>
-                    <select
-                      required
-                      value={newSchedule.storeId}
-                      onChange={(e) => {
-                        const selectedVal = e.target.value;
-                        const baseDate = newSchedule.departureDate ? new Date(newSchedule.departureDate) : new Date();
-                        const timestamps = calculateScheduleTimestamps(baseDate, selectedVal);
-                        const isBaliIsland = selectedVal.includes('DENPASAR') || selectedVal.includes('SINGARAJA') || selectedVal.includes('NEGARA');
-                        setNewSchedule({
-                          ...newSchedule,
-                          storeId: selectedVal,
-                          departureDate: timestamps.departureDate,
-                          estimatedArrival: timestamps.estimatedArrival,
-                          isInterIsland: isBaliIsland
-                        });
-                      }}
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold focus:outline-none focus:border-blue-500 transition cursor-pointer"
-                    >
-                      <option value="">-- Pilih Area --</option>
-                      <option value="GROSIR1">GROSIR 1</option>
-                      <option value="RITEL_ROGOJAMPI">RITEL ROGOJAMPI</option>
-                      <option value="RITEL_SONGGON">RITEL SONGGON</option>
-                      <option value="SUSULAN_ROGOJAMPI_MUNCAR">SUSULAN ROGOJAMPI-MUNCAR</option>
-                      <option value="JAJAG_RETAIL">JAJAG RETAIL</option>
-                      <option value="DENPASAR2">DENPASAR 2 (Malam 21.00 WIB)</option>
-                      <option value="SUSULAN_SANGGAR_JAJAG">SUSULAN SANGGAR-JAJAG</option>
-                      <option value="DENPASAR1">DENPASAR 1 (Malam 21.00 WIB)</option>
-                      <option value="BWI_KOTA_SELATAN">BWI KOTA SELATAN</option>
-                      <option value="KETAPANG_WONGSOREJO">KETAPANG - WONGSOREJO</option>
-                      <option value="RITEL_SRONO">RITEL SRONO</option>
-                      <option value="GALEKAN">GALEKAN</option>
-                      <option value="JEMBER_BARAT">JEMBER BARAT (Malam 21.00 WIB)</option>
-                      <option value="RITEL_KALIBARU">RITEL KALIBARU</option>
-                      <option value="PURWO_DAMBUNTUNG">PURWO DAMBUNTUNG</option>
-                      <option value="PURWO_PASAR">PURWO PASAR</option>
-                      <option value="SUMBERAYU_RETAIL">SUMBERAYU RETAIL</option>
-                      <option value="SSLN_SINGARAJA">SSLN SINGARAJA (Malam 21.00 WIB)</option>
-                      <option value="SEMPU_KALISTAIL">SEMPU KALISTAIL</option>
-                      <option value="JEMBER_KOTA">JEMBER KOTA (Malam 21.00 WIB)</option>
-                      <option value="BONDOWOSO">BONDOWOSO (Malam 21.00 WIB)</option>
-                      <option value="SITUBONDO">SITUBONDO (Pagi 07.15 WIB)</option>
-                      <option value="SSLN_STB_BDWS">SSLN STB BDWS (Pagi 07.30 WIB)</option>
-                      <option value="RITEL_SANGGAR">RITEL SANGGAR</option>
-                      <option value="NEGARA">NEGARA (Pagi 07.15 WIB)</option>
-                      <option value="JEMBER_SELATAN">JEMBER SELATAN (Malam 21.00 WIB)</option>
-                      <option value="TOKO_DR_SOETOMO">TOKO DR. SOETOMO</option>
-                      <option value="NUSANTARA_EXPAND">NUSANTARA EXPAND</option>
-                    </select>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-slate-300 font-bold flex items-center gap-1.5 text-xs">
+                        <MapPin className="w-3.5 h-3.5 text-blue-400" />
+                        <span>Area Kirim Tujuan *</span>
+                      </label>
+                      <span className="text-[10px] font-bold text-blue-400 bg-blue-500/10 px-2 py-0.5 rounded-full border border-blue-500/20">
+                        {OFFICIAL_DESTINATION_AREAS.length} Area Terdaftar
+                      </span>
+                    </div>
+
+                    {/* Selected Area Card with Expandable Searchable Picker */}
+                    <div className="rounded-xl border border-slate-800 bg-slate-950 p-2.5 transition">
+                      <div
+                        onClick={() => setIsAreaPickerExpanded(!isAreaPickerExpanded)}
+                        className="flex items-center justify-between gap-2 cursor-pointer select-none"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="w-9 h-9 rounded-xl bg-blue-500/15 border border-blue-500/30 text-blue-400 flex items-center justify-center shrink-0">
+                            <MapPin className="w-4 h-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-xs font-black text-white truncate">
+                              {newSchedule.storeId || 'Klik untuk Pilih Area Tujuan'}
+                            </div>
+                            {newSchedule.storeId ? (
+                              <span className={`inline-block text-[9px] font-bold px-1.5 py-0.2 rounded border mt-0.5 ${getAreaRegionCategory(newSchedule.storeId).badgeColor}`}>
+                                {getAreaRegionCategory(newSchedule.storeId).label}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-slate-400">
+                                Pilih dari {OFFICIAL_DESTINATION_AREAS.length} area pengiriman resmi
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setIsAreaPickerExpanded(!isAreaPickerExpanded);
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-[11px] flex items-center gap-1.5 transition cursor-pointer shadow-xs shrink-0"
+                        >
+                          <span>{isAreaPickerExpanded ? 'Tutup Pilihan' : 'Pilih / Ganti Area'}</span>
+                          <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isAreaPickerExpanded ? 'rotate-180' : ''}`} />
+                        </button>
+                      </div>
+
+                      {/* Expanded Custom Interactive Area Selector */}
+                      {isAreaPickerExpanded && (
+                        <div className="mt-3 pt-3 border-t border-slate-800 space-y-2.5 animate-in fade-in duration-150">
+                          {/* Search Bar with clear button */}
+                          <div className="relative">
+                            <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                            <input
+                              type="text"
+                              value={areaSearchFilter}
+                              onChange={(e) => setAreaSearchFilter(e.target.value)}
+                              placeholder="Cari area (misal: Denpasar, Toko DR. Soetomo, Nusantara Expand, Titipan Kota Kota)..."
+                              className="w-full bg-slate-900 border border-slate-700 text-white text-xs rounded-lg pl-8 pr-8 py-2 focus:outline-none focus:border-blue-500"
+                              autoFocus
+                            />
+                            {areaSearchFilter && (
+                              <button
+                                type="button"
+                                onClick={() => setAreaSearchFilter('')}
+                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs cursor-pointer"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Region Category Chips */}
+                          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[10px]">
+                            {[
+                              { id: 'all', label: `Semua (${OFFICIAL_DESTINATION_AREAS.length})` },
+                              { id: 'bali', label: 'Bali (4)' },
+                              { id: 'banyuwangi', label: 'Banyuwangi & Khusus (26)' },
+                              { id: 'jember', label: 'Jember (3)' },
+                              { id: 'pantura', label: 'Situbondo/Bw (3)' },
+                            ].map(cat => (
+                              <button
+                                key={cat.id}
+                                type="button"
+                                onClick={() => setAreaCategoryFilter(cat.id as any)}
+                                className={`px-2.5 py-1 rounded-md font-bold whitespace-nowrap transition cursor-pointer ${
+                                  areaCategoryFilter === cat.id
+                                    ? 'bg-blue-600 text-white shadow-xs'
+                                    : 'bg-slate-900 text-slate-400 border border-slate-800 hover:bg-slate-800 hover:text-slate-200'
+                                }`}
+                              >
+                                {cat.label}
+                              </button>
+                            ))}
+                          </div>
+
+                          {/* Interactive Area Options Grid */}
+                          <div className="max-h-56 overflow-y-auto pr-1 grid grid-cols-1 gap-1.5">
+                            {filteredOfficialAreas.map(areaName => {
+                              const isSelected = newSchedule.storeId === areaName;
+                              const meta = getAreaRegionCategory(areaName);
+                              return (
+                                <button
+                                  key={areaName}
+                                  type="button"
+                                  onClick={() => {
+                                    handleSelectArea(areaName);
+                                    setIsAreaPickerExpanded(false);
+                                  }}
+                                  className={`flex items-center justify-between p-2 rounded-lg text-left transition cursor-pointer border ${
+                                    isSelected
+                                      ? 'bg-blue-500/20 border-blue-500 text-blue-200 shadow-2xs font-extrabold'
+                                      : 'bg-slate-900 border-slate-800 hover:border-blue-500/50 hover:bg-slate-800/80 text-slate-200'
+                                  }`}
+                                >
+                                  <div className="min-w-0 pr-2">
+                                    <div className="text-xs truncate">{areaName}</div>
+                                    <span className={`inline-block text-[9px] font-bold px-1.5 py-0.2 rounded border mt-0.5 ${meta.badgeColor}`}>
+                                      {meta.label}
+                                    </span>
+                                  </div>
+                                  {isSelected ? (
+                                    <div className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center shrink-0">
+                                      <Check className="w-3 h-3" />
+                                    </div>
+                                  ) : (
+                                    <span className="text-[10px] text-slate-500 font-semibold">Pilih</span>
+                                  )}
+                                </button>
+                              );
+                            })}
+                            {filteredOfficialAreas.length === 0 && (
+                              <div className="py-4 text-center text-xs text-slate-400">
+                                Tidak ada area yang cocok dengan pencarian "{areaSearchFilter}"
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   <div>

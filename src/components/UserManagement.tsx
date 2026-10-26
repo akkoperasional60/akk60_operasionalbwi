@@ -596,36 +596,36 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
   return (
     <div className="space-y-5">
       {/* RBAC Header & Schedule Integration Summary */}
-      <div className={`p-4 sm:p-5 rounded-2xl border flex flex-col lg:flex-row lg:items-center justify-between gap-4 shadow-md ${
+      <div className={`p-4 sm:p-5 rounded-2xl border flex flex-col lg:flex-row lg:items-center justify-between gap-4 shadow-sm bg-slate-900 ${
         isSuperAdmin
-          ? 'bg-gradient-to-r from-slate-900 via-slate-900 to-slate-950 border-amber-500/30 text-amber-200'
-          : 'bg-slate-900 border-slate-800 text-slate-400'
+          ? 'border-amber-500/40'
+          : 'border-slate-800'
       }`}>
         <div className="flex items-start sm:items-center gap-3.5">
-          <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${
+          <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 border ${
             isSuperAdmin
-              ? 'bg-amber-500/20 border-amber-500/40 text-amber-400 shadow-inner'
-              : 'bg-slate-800 border-slate-700 text-slate-500'
+              ? 'bg-amber-500/15 border-amber-500/40 text-amber-400 shadow-xs'
+              : 'bg-slate-800 border-slate-700 text-slate-400'
           }`}>
             <Shield className="w-5 h-5" />
           </div>
           <div>
             <div className="font-extrabold text-white text-sm sm:text-base flex items-center gap-2 flex-wrap">
               <span>{isSuperAdmin ? 'Manajemen User, Hak Akses & Integrasi Jadwal Kru' : 'Hak Akses Pengguna Terbatas'}</span>
-              <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase border ${
+              <span className={`px-2.5 py-0.5 rounded-md text-[10px] font-black uppercase border ${
                 isSuperAdmin
-                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                  ? 'bg-amber-500/15 text-amber-400 border-amber-500/40'
                   : 'bg-slate-800 text-slate-400 border-slate-700'
               }`}>
                 {isSuperAdmin ? '👑 Super Admin' : '🔒 Read Only'}
               </span>
-              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+              <span className="px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
                 🚚 Sinkron Jadwal Pengiriman ({users.filter(u => u.role === 'driver').length} Driver &bull; {users.filter(u => u.role === 'crew_helper').length} Helper)
               </span>
             </div>
             <p className="text-[11px] sm:text-xs text-slate-400 mt-1 leading-relaxed">
               {isSuperAdmin
-                ? 'Setiap pengguna dengan role Kru Supir / Driver atau Kru Helper / Kernet otomatis terintegrasi ke dalam daftar penugasan Jadwal Pengiriman.'
+                ? 'Setiap pengguna dengan role Kru Supir / Driver atau Kru Helper / Kernet otomatis terintegrasi ke dalam daftar penugasan Jadwal Pengiriman & Status Operasional.'
                 : `Manajemen user dan perubahan hak akses dikunci khusus untuk Super Admin. Anda login sebagai: ${currentUser.role === 'super_admin' ? 'Super Admin' : currentUser.fullName} (${currentUser.role}).`}
             </p>
           </div>
@@ -634,10 +634,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
 
       {/* Save Success Alert Banner */}
       {saveSuccessMessage && (
-        <div className="p-3.5 rounded-xl bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 text-xs flex items-center justify-between shadow-lg animate-in fade-in duration-200">
+        <div className="p-3.5 rounded-xl bg-emerald-500/15 border border-emerald-500/35 text-emerald-400 text-xs flex items-center justify-between shadow-sm animate-in fade-in duration-200">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span className="font-medium">{saveSuccessMessage}</span>
+            <span className="font-semibold">{saveSuccessMessage}</span>
           </div>
           <button
             onClick={() => setSaveSuccessMessage(null)}
@@ -649,24 +649,24 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       )}
 
       {/* Top Toolbar: Add User & Search / Filter */}
-      <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 bg-slate-900 border border-slate-800 rounded-xl p-4">
+      <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3 bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xs">
         <div className="flex items-center gap-3 flex-wrap">
           <button
             onClick={() => setIsAddUserModalOpen(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold text-xs shadow transition cursor-pointer"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs shadow-xs transition cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>Tambah User Langsung</span>
           </button>
 
           {/* Department / Role Filter Dropdown in Top Toolbar */}
-          <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 text-xs shadow-inner">
+          <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 text-xs">
             <Filter className="w-3.5 h-3.5 text-amber-400 shrink-0" />
             <span className="text-slate-400 font-semibold text-[11px] hidden sm:inline">Role / Dept:</span>
             <select
               value={departmentFilter}
               onChange={(e) => setDepartmentFilter(e.target.value)}
-              className="bg-transparent text-amber-300 font-bold text-xs focus:outline-none cursor-pointer pr-1"
+              className="bg-transparent text-amber-400 font-bold text-xs focus:outline-none cursor-pointer pr-1"
             >
               {DEPARTMENT_FILTER_OPTIONS.map(opt => (
                 <option key={opt.id} value={opt.id} className="bg-slate-900 text-slate-200 font-medium">
@@ -683,7 +683,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
             <button
               onClick={() => setStatusFilter('all')}
               className={`px-2.5 py-1.5 rounded-md font-semibold transition cursor-pointer whitespace-nowrap ${
-                statusFilter === 'all' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+                statusFilter === 'all' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               Semua ({users.length})
@@ -691,7 +691,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
             <button
               onClick={() => setStatusFilter('pending')}
               className={`px-2.5 py-1.5 rounded-md font-semibold transition cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
-                statusFilter === 'pending' ? 'bg-amber-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+                statusFilter === 'pending' ? 'bg-amber-600 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               <span>Pending</span>
@@ -704,7 +704,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
             <button
               onClick={() => setStatusFilter('approved')}
               className={`px-2.5 py-1.5 rounded-md font-semibold transition cursor-pointer whitespace-nowrap ${
-                statusFilter === 'approved' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+                statusFilter === 'approved' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               Aktif ({approvedCount})
@@ -712,7 +712,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
             <button
               onClick={() => setStatusFilter('inactive')}
               className={`px-2.5 py-1.5 rounded-md font-semibold transition cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
-                statusFilter === 'inactive' ? 'bg-rose-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+                statusFilter === 'inactive' ? 'bg-rose-600 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
               <span>Nonaktif ({inactiveCount})</span>
@@ -736,7 +736,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         
         {/* LEFT COLUMN: Clean & Simple User List */}
-        <div className="lg:col-span-4 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm flex flex-col max-h-[82vh]">
+        <div className="lg:col-span-4 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xs flex flex-col max-h-[82vh]">
           {/* Header */}
           <div className="p-3.5 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
             <h3 className="font-bold text-white text-xs flex items-center gap-2">
@@ -753,7 +753,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                 <span>Reset Filter</span>
               </button>
             ) : (
-              <span className="text-[10px] text-slate-400">Pilih user untuk rincian</span>
+              <span className="text-[10px] text-slate-400 font-medium">Pilih user untuk rincian</span>
             )}
           </div>
 
@@ -774,25 +774,29 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                     onClick={() => setSelectedUserId(user.id)}
                     className={`px-3.5 py-3 transition cursor-pointer flex items-center justify-between gap-3 ${
                       isSelected 
-                        ? 'bg-amber-600/15 border-l-4 border-amber-500 text-white' 
+                        ? 'bg-amber-500/15 border-l-4 border-amber-500' 
                         : isInactive
-                        ? 'bg-slate-950/60 hover:bg-slate-900/80 text-slate-400 opacity-85'
-                        : 'hover:bg-slate-800/60 text-slate-300'
+                        ? 'bg-slate-950/60 hover:bg-slate-800/50 opacity-85'
+                        : 'hover:bg-slate-800/60'
                     }`}
                   >
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 shadow-xs ${
-                        isSelected ? 'bg-amber-500 text-slate-950' : isInactive ? 'bg-slate-800 text-slate-500 border border-slate-700' : 'bg-slate-800 text-slate-200'
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 shadow-xs border ${
+                        isSelected
+                          ? 'bg-amber-600 text-white border-amber-500'
+                          : isInactive
+                          ? 'bg-slate-800 text-slate-400 border-slate-700'
+                          : 'bg-slate-800 text-white border-slate-700'
                       }`}>
                         {user.role === 'super_admin' ? '👑' : user.fullName.substring(0, 2).toUpperCase()}
                       </div>
                       <div className="min-w-0">
                         <div className="font-bold text-xs truncate flex items-center gap-1.5">
-                          <span className={isSelected ? 'text-amber-300 font-extrabold' : isInactive ? 'text-slate-400 line-through' : 'text-white'}>
+                          <span className={isSelected ? 'text-amber-400 font-extrabold' : isInactive ? 'text-slate-400 line-through' : 'text-white'}>
                             {user.role === 'super_admin' ? 'Super Admin' : user.fullName}
                           </span>
                           {isCurrent && (
-                            <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-blue-500/20 text-blue-300 shrink-0">
+                            <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-blue-500/15 text-blue-400 border border-blue-500/30 shrink-0">
                               Anda
                             </span>
                           )}
@@ -803,11 +807,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                               ⚠️ Perlu Diisi Role
                             </span>
                           ) : (
-                            <span className="text-slate-300 font-medium">{ROLE_LABELS[user.role] || user.role}</span>
+                            <span className="text-slate-400 font-medium">{ROLE_LABELS[user.role] || user.role}</span>
                           )}
                           {(user.role === 'driver' || user.role === 'crew_helper') && (
-                            <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-blue-500/15 text-blue-300 border border-blue-500/30">
-                              Terintegrasi Jadwal
+                            <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-blue-500/15 text-blue-400 border border-blue-500/30">
+                              Kru Jadwal
                             </span>
                           )}
                         </div>
@@ -816,25 +820,25 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
 
                     <div className="shrink-0">
                       {user.status === 'approved' && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                           Aktif
                         </span>
                       )}
                       {user.status === 'inactive' && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
-                          <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30">
+                          <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
                           Nonaktif
                         </span>
                       )}
                       {user.status === 'pending' && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping" />
                           Pending
                         </span>
                       )}
                       {user.status === 'rejected' && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-900/40 text-rose-300 border border-rose-700/40">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/40">
                           Ditolak
                         </span>
                       )}
@@ -847,50 +851,50 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
         </div>
 
         {/* RIGHT COLUMN: Selected User Details, Password & Menu/Submenu Granular Access */}
-        <div className="lg:col-span-8 bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-md flex flex-col">
+        <div className="lg:col-span-8 bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xs flex flex-col">
           {selectedUser ? (
             <>
               {/* Selected User Header Banner */}
-              <div className="p-5 bg-gradient-to-b from-slate-950 to-slate-900 border-b border-slate-800 space-y-4">
+              <div className="p-5 bg-slate-950 border-b border-slate-800 space-y-4">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-white font-bold text-sm shadow-sm shrink-0 ${
+                  <div className="flex items-center gap-3.5">
+                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-extrabold text-sm shadow-xs shrink-0 border ${
                       selectedUser.status === 'inactive'
-                        ? 'bg-slate-800 border border-slate-700 text-slate-400'
-                        : 'bg-amber-600'
+                        ? 'bg-slate-800 border-slate-700 text-slate-400'
+                        : 'bg-amber-600 border-amber-500 text-white'
                     }`}>
                       {selectedUser.role === 'super_admin' ? '👑' : selectedUser.fullName.substring(0, 2).toUpperCase()}
                     </div>
                     <div>
                       <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="text-sm font-bold text-white">
+                        <h3 className="text-base font-extrabold text-white">
                           {selectedUser.role === 'super_admin' ? 'Super Admin' : selectedUser.fullName}
                         </h3>
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-black border ${
+                        <span className={`px-2.5 py-0.5 rounded-md text-[10px] font-extrabold border ${
                           selectedUser.role === 'unassigned'
-                            ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
-                            : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                            ? 'bg-rose-500/15 text-rose-400 border-rose-500/40'
+                            : 'bg-amber-500/15 text-amber-400 border-amber-500/40'
                         }`}>
                           {ROLE_LABELS[selectedUser.role] || selectedUser.role}
                         </span>
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
                           selectedUser.status === 'approved'
-                            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                            ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/40'
                             : selectedUser.status === 'inactive'
-                            ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
-                            : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                            ? 'bg-rose-500/15 text-rose-400 border-rose-500/40'
+                            : 'bg-amber-500/15 text-amber-400 border-amber-500/40'
                         }`}>
-                          {selectedUser.status === 'approved' ? '🟢 Status: Aktif' : selectedUser.status === 'inactive' ? '⚫ Status: Nonaktif' : '🟡 Status: Pending'}
+                          {selectedUser.status === 'approved' ? '🟢 Status: Aktif' : selectedUser.status === 'inactive' ? '🔴 Status: Nonaktif' : '🟡 Status: Pending'}
                         </span>
                       </div>
-                      <div className="text-[11px] text-slate-400 flex items-center gap-3 mt-1 flex-wrap">
-                        <span className="flex items-center gap-1">
-                          <Mail className="w-3 h-3 text-slate-500" />
-                          {selectedUser.email}
+                      <div className="text-xs text-slate-400 flex items-center gap-3.5 mt-1.5 flex-wrap font-medium">
+                        <span className="flex items-center gap-1.5">
+                          <Mail className="w-3.5 h-3.5 text-amber-400" />
+                          <span>{selectedUser.email}</span>
                         </span>
-                        <span className="flex items-center gap-1">
-                          <Building className="w-3 h-3 text-slate-500" />
-                          {selectedUser.department || 'Perlu Diisi'}
+                        <span className="flex items-center gap-1.5">
+                          <Building className="w-3.5 h-3.5 text-blue-400" />
+                          <span>{selectedUser.department || 'Perlu Diisi'}</span>
                         </span>
                       </div>
                     </div>
@@ -901,20 +905,20 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                     {selectedUser.status === 'approved' && (
                       <button
                         onClick={() => logisticsStore.switchCurrentUser(selectedUser.id)}
-                        className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs active:scale-95"
+                        className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs active:scale-95"
                         title={`Masuk sebagai ${selectedUser.fullName} dan buka menu ${ROLE_LABELS[selectedUser.role] || selectedUser.role}`}
                       >
                         <UserCheck className="w-3.5 h-3.5" />
-                        <span>Masuk & Buka Menu Role</span>
+                        <span>Masuk &amp; Buka Menu Role</span>
                       </button>
                     )}
                     {isSuperAdmin && (
                       <button
                         onClick={() => handleOpenEdit(selectedUser)}
-                        className="px-3 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white border border-blue-500/40 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs active:scale-95"
+                        className="px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs active:scale-95"
                         title={`Edit Data ${selectedUser.fullName} (${ROLE_LABELS[selectedUser.role] || selectedUser.role})`}
                       >
-                        <Edit3 className="w-3.5 h-3.5 text-blue-400" />
+                        <Edit3 className="w-3.5 h-3.5" />
                         <span>Edit Pengguna</span>
                       </button>
                     )}
@@ -922,7 +926,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                       selectedUser.status === 'inactive' ? (
                         <button
                           onClick={() => handleActivateUser(selectedUser)}
-                          className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs active:scale-95"
+                          className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs active:scale-95"
                         >
                           <UserCheck className="w-3.5 h-3.5" />
                           <span>Aktifkan User</span>
@@ -930,7 +934,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                       ) : (
                         <button
                           onClick={() => handleDeactivateUser(selectedUser)}
-                          className="px-3 py-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/40 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs active:scale-95"
+                          className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs active:scale-95"
                         >
                           <UserX className="w-3.5 h-3.5" />
                           <span>Nonaktifkan User</span>
@@ -940,7 +944,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                     {selectedUser.status === 'pending' && isSuperAdmin && (
                       <button
                         onClick={() => handleApprove(selectedUser.id)}
-                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs cursor-pointer shadow-xs active:scale-95"
+                        className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs cursor-pointer shadow-xs active:scale-95"
                       >
                         Setujui Akun
                       </button>
@@ -949,21 +953,23 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                 </div>
 
                 {/* Dedicated Password & Credentials Bar for Selected User */}
-                <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
-                  <div className="flex items-center gap-2.5 flex-wrap">
-                    <div className="w-7 h-7 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400">
-                      <Key className="w-3.5 h-3.5" />
+                <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-2xs">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <div className="w-8 h-8 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                      <Key className="w-4 h-4" />
                     </div>
                     <div>
-                      <span className="text-[10px] text-slate-400 block font-semibold">Kata Sandi / Password Akun ({selectedUser.email}):</span>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <code className="px-2 py-0.5 rounded bg-slate-950 border border-slate-800 font-mono font-bold text-amber-300 text-xs">
+                      <span className="text-[11px] text-slate-400 block font-bold">
+                        Kata Sandi / Password Akun ({selectedUser.email}):
+                      </span>
+                      <div className="flex items-center gap-2 mt-1 flex-wrap">
+                        <code className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 font-mono font-extrabold text-amber-400 text-xs tracking-wider">
                           {visiblePasswords[selectedUser.id] ? getEffectivePassword(selectedUser) : '••••••••••••'}
                         </code>
                         <button
                           type="button"
                           onClick={() => togglePasswordVisibility(selectedUser.id)}
-                          className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 font-bold text-[11px] flex items-center gap-1.5 transition cursor-pointer border border-slate-700"
+                          className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-blue-400 font-bold text-[11px] flex items-center gap-1.5 transition cursor-pointer border border-slate-700"
                         >
                           {visiblePasswords[selectedUser.id] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                           <span>{visiblePasswords[selectedUser.id] ? 'Sembunyikan Password' : 'Lihat Password'}</span>
@@ -971,7 +977,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                         <button
                           type="button"
                           onClick={() => handleCopyUserPassword(selectedUser)}
-                          className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-semibold text-[11px] flex items-center gap-1 transition cursor-pointer border border-slate-700"
+                          className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-[11px] flex items-center gap-1.5 transition cursor-pointer border border-slate-700"
                         >
                           {copiedPasswordUserId === selectedUser.id ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                           <span>{copiedPasswordUserId === selectedUser.id ? 'Tersalin' : 'Salin'}</span>
@@ -984,7 +990,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                     <button
                       type="button"
                       onClick={() => setIsPasswordModalOpen(true)}
-                      className="px-3 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 font-bold text-[11px] flex items-center gap-1.5 transition cursor-pointer self-end sm:self-auto"
+                      className="px-3.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-400 border border-amber-500/40 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer self-end sm:self-auto"
                     >
                       <Lock className="w-3.5 h-3.5" />
                       <span>Ubah Password</span>
@@ -994,20 +1000,20 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
 
                 {/* Live Schedule & Assignment Integration Banner for Driver & Helper Roles */}
                 {(selectedUser.role === 'driver' || selectedUser.role === 'crew_helper') && (
-                  <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-7 h-7 rounded-lg bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-blue-300 shrink-0">
+                  <div className="p-3.5 rounded-xl bg-blue-500/10 border border-blue-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-400 shrink-0">
                         <CheckCircle2 className="w-4 h-4" />
                       </div>
                       <div>
-                        <div className="font-bold text-blue-200 flex items-center gap-2 flex-wrap">
-                          <span>Terintegrasi dengan Jadwal &amp; Penugasan Pengiriman</span>
-                          <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                        <div className="font-extrabold text-blue-400 flex items-center gap-2 flex-wrap">
+                          <span>Terintegrasi dengan Jadwal Pengiriman &amp; Status Operasional</span>
+                          <span className="px-2 py-0.5 rounded-md text-[10px] font-extrabold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
                             {selectedUser.role === 'driver' ? 'List: Kru Supir Utama' : 'List: Kru Helper / Kernet'}
                           </span>
                         </div>
-                        <p className="text-[11px] text-slate-300 mt-0.5">
-                          Akun <strong>{selectedUser.fullName}</strong> otomatis masuk ke daftar pilihan <strong>{selectedUser.role === 'driver' ? 'Kru Supir Utama' : 'Kru Helper 1 & Helper 2'}</strong> pada menu Jadwal Pengiriman &amp; Portal Driver Mobile.
+                        <p className="text-[11px] text-slate-400 mt-0.5 font-medium">
+                          Akun <strong className="text-white">{selectedUser.fullName}</strong> otomatis masuk ke daftar pilihan <strong className="text-white">{selectedUser.role === 'driver' ? 'Kru Supir Utama' : 'Kru Helper 1 & Helper 2'}</strong> pada menu Jadwal Pengiriman, Kru &amp; Armada, serta Portal Driver Mobile.
                         </p>
                       </div>
                     </div>

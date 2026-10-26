@@ -1,214 +1,288 @@
 /**
  * Standard Area Normalizer & Harmonizer
  * Menyelaraskan nama area dari Google Sheet (Sheet ALL)
- * agar 100% identik dengan opsi resmi pada Pembuatan Jadwal Baru.
+ * agar 100% identik dengan 33 opsi resmi pada Pembuatan Jadwal Pengiriman.
  */
 
-export const STANDARD_AREAS = [
-  'GROSIR 1',
-  'RITEL ROGOJAMPI',
-  'RITEL SONGGON',
-  'SUSULAN ROGOJAMPI-MUNCAR',
-  'JAJAG RETAIL',
-  'DENPASAR 2',
-  'SUSULAN SANGGAR-JAJAG',
-  'DENPASAR 1',
-  'BWI KOTA SELATAN',
-  'KETAPANG - WONGSOREJO',
-  'RITEL SRONO',
-  'GALEKAN',
-  'JEMBER BARAT',
-  'RITEL KALIBARU',
-  'PURWO DAMBUNTUNG',
-  'PURWO PASAR',
-  'SUMBERAYU RETAIL',
-  'SSLN SINGARAJA',
-  'SEMPU KALISTAIL',
-  'JEMBER KOTA',
-  'BONDOWOSO',
-  'SSLN STB BDWS',
-  'RITEL SANGGAR',
-  'NEGARA',
-  'JEMBER SELATAN',
-  'TOKO DR. SOETOMO',
-  'NUSANTARA EXPAND'
+export const OFFICIAL_DESTINATION_AREAS = [
+  'Denpasar 1',
+  'Denpasar 2',
+  'Situbondo',
+  'Bondowoso',
+  'Susulan Genteng Rogojampi',
+  'Muncar Pasar',
+  'Muncar Pinggir',
+  'Grosir Banyuwangi Rogojampi',
+  'Jember Selatan',
+  'Singaraja',
+  'Sumberayu Retail',
+  'Susulan Sanggar Jajag',
+  'Rogojampi Retail',
+  'Genteng Retail',
+  'Grosir Genteng Gendoh',
+  'Songgon Retail',
+  'BWI Kota Selatan',
+  'Susulan Situbondo Bondowoso',
+  'Jember Barat',
+  'Galekan Retail',
+  'Ketapang Wongsorejo',
+  'Grosir Srono Sumberayu Muncar',
+  'Kalibaru Retail',
+  'Sempu Stail',
+  'Sanggar Retail',
+  'Susulan Rogojampi Muncar',
+  'Negara',
+  'Purwo Pasar',
+  'Purwo Dambuntung',
+  'Grosir Jajag Sanggar Purwo',
+  'Jajag Retail',
+  'Srono Retail',
+  'Jember Kota',
+  'Toko DR. Soetomo',
+  'Nusantara Expand',
+  'Titipan Kota Kota'
 ] as const;
 
+export type OfficialDestinationArea = typeof OFFICIAL_DESTINATION_AREAS[number];
+
+export const STANDARD_AREAS = OFFICIAL_DESTINATION_AREAS;
 export type StandardAreaName = typeof STANDARD_AREAS[number];
 
 export const AREA_CODE_MAP: Record<string, StandardAreaName> = {
-  'GROSIR1': 'GROSIR 1',
-  'RITEL_ROGOJAMPI': 'RITEL ROGOJAMPI',
-  'RITEL_SONGGON': 'RITEL SONGGON',
-  'SUSULAN_ROGOJAMPI_MUNCAR': 'SUSULAN ROGOJAMPI-MUNCAR',
-  'JAJAG_RETAIL': 'JAJAG RETAIL',
-  'DENPASAR2': 'DENPASAR 2',
-  'SUSULAN_SANGGAR_JAJAG': 'SUSULAN SANGGAR-JAJAG',
-  'DENPASAR1': 'DENPASAR 1',
-  'BWI_KOTA_SELATAN': 'BWI KOTA SELATAN',
-  'KETAPANG_WONGSOREJO': 'KETAPANG - WONGSOREJO',
-  'RITEL_SRONO': 'RITEL SRONO',
-  'GALEKAN': 'GALEKAN',
-  'JEMBER_BARAT': 'JEMBER BARAT',
-  'RITEL_KALIBARU': 'RITEL KALIBARU',
-  'PURWO_DAMBUNTUNG': 'PURWO DAMBUNTUNG',
-  'PURWO_PASAR': 'PURWO PASAR',
-  'SUMBERAYU_RETAIL': 'SUMBERAYU RETAIL',
-  'SSLN_SINGARAJA': 'SSLN SINGARAJA',
-  'SEMPU_KALISTAIL': 'SEMPU KALISTAIL',
-  'JEMBER_KOTA': 'JEMBER KOTA',
-  'BONDOWOSO': 'BONDOWOSO',
-  'SSLN_STB_BDWS': 'SSLN STB BDWS',
-  'RITEL_SANGGAR': 'RITEL SANGGAR',
-  'NEGARA': 'NEGARA',
-  'JEMBER_SELATAN': 'JEMBER SELATAN',
-  'TOKO_DR_SOETOMO': 'TOKO DR. SOETOMO',
-  'NUSANTARA_EXPAND': 'NUSANTARA EXPAND'
+  'DENPASAR1': 'Denpasar 1',
+  'DENPASAR_1': 'Denpasar 1',
+  'DENPASAR2': 'Denpasar 2',
+  'DENPASAR_2': 'Denpasar 2',
+  'SITUBONDO': 'Situbondo',
+  'BONDOWOSO': 'Bondowoso',
+  'SUSULAN_GENTENG_ROGOJAMPI': 'Susulan Genteng Rogojampi',
+  'MUNCAR_PASAR': 'Muncar Pasar',
+  'MUNCAR_PINGGIR': 'Muncar Pinggir',
+  'GROSIR_BANYUWANGI_ROGOJAMPI': 'Grosir Banyuwangi Rogojampi',
+  'JEMBER_SELATAN': 'Jember Selatan',
+  'SINGARAJA': 'Singaraja',
+  'SSLN_SINGARAJA': 'Singaraja',
+  'SUMBERAYU_RETAIL': 'Sumberayu Retail',
+  'SUSULAN_SANGGAR_JAJAG': 'Susulan Sanggar Jajag',
+  'ROGOJAMPI_RETAIL': 'Rogojampi Retail',
+  'RITEL_ROGOJAMPI': 'Rogojampi Retail',
+  'GENTENG_RETAIL': 'Genteng Retail',
+  'GROSIR_GENTENG_GENDOH': 'Grosir Genteng Gendoh',
+  'SONGGON_RETAIL': 'Songgon Retail',
+  'RITEL_SONGGON': 'Songgon Retail',
+  'BWI_KOTA_SELATAN': 'BWI Kota Selatan',
+  'SUSULAN_SITUBONDO_BONDOWOSO': 'Susulan Situbondo Bondowoso',
+  'SSLN_STB_BDWS': 'Susulan Situbondo Bondowoso',
+  'JEMBER_BARAT': 'Jember Barat',
+  'GALEKAN_RETAIL': 'Galekan Retail',
+  'GALEKAN': 'Galekan Retail',
+  'KETAPANG_WONGSOREJO': 'Ketapang Wongsorejo',
+  'GROSIR_SRONO_SUMBERAYU_MUNCAR': 'Grosir Srono Sumberayu Muncar',
+  'KALIBARU_RETAIL': 'Kalibaru Retail',
+  'RITEL_KALIBARU': 'Kalibaru Retail',
+  'SEMPU_STAIL': 'Sempu Stail',
+  'SEMPU_KALISTAIL': 'Sempu Stail',
+  'SANGGAR_RETAIL': 'Sanggar Retail',
+  'RITEL_SANGGAR': 'Sanggar Retail',
+  'SUSULAN_ROGOJAMPI_MUNCAR': 'Susulan Rogojampi Muncar',
+  'NEGARA': 'Negara',
+  'PURWO_PASAR': 'Purwo Pasar',
+  'PURWO_DAMBUNTUNG': 'Purwo Dambuntung',
+  'GROSIR_JAJAG_SANGGAR_PURWO': 'Grosir Jajag Sanggar Purwo',
+  'JAJAG_RETAIL': 'Jajag Retail',
+  'SRONO_RETAIL': 'Srono Retail',
+  'RITEL_SRONO': 'Srono Retail',
+  'JEMBER_KOTA': 'Jember Kota',
+  'GROSIR1': 'Grosir Banyuwangi Rogojampi',
+  'TOKO_DR_SOETOMO': 'Toko DR. Soetomo',
+  'DR_SOETOMO': 'Toko DR. Soetomo',
+  'NUSANTARA_EXPAND': 'Nusantara Expand',
+  'TITIPAN_KOTA_KOTA': 'Titipan Kota Kota'
 };
 
 /**
- * Normalisasi otomatis nama area variatif dari Google Sheets / Excel
- * menjadi nama area baku yang dipakai di "Pembuatan Jadwal Baru".
+ * Normalisasi otomatis nama area variatif dari Google Sheets / Excel / Form
+ * menjadi salah satu dari 36 nama area baku resmi.
  */
 export function standardizeAreaName(rawArea: string | undefined | null): string {
-  if (!rawArea) return 'RITEL ROGOJAMPI';
+  if (!rawArea) return 'Rogojampi Retail';
   const clean = rawArea.trim().toUpperCase();
 
-  // 1. Direct matches (Denpasar 1 dan Denpasar 2 terpisah per keberangkatan, bukan digabung DENPASAR 1 & 2)
-  if (
-    clean === 'DENPASAR 1' ||
-    clean === 'DENPASAR1' ||
-    clean === 'DENPASAR' ||
-    clean === 'DENPASAR 1 & 2' ||
-    clean === 'DENPASAR 1&2' ||
-    clean === 'DENPASAR 1 / 2' ||
-    clean === 'DENPASAR 1/2'
-  ) {
-    return 'DENPASAR 1';
-  }
-  if (clean === 'DENPASAR 2' || clean === 'DENPASAR2') return 'DENPASAR 2';
-  if (clean === 'BONDOWOSO') return 'BONDOWOSO';
-  if (clean === 'JAJAG RETAIL' || clean === 'JAJAG' || clean === 'JAJAG ( RITEL )') return 'JAJAG RETAIL';
-  if (clean === 'NEGARA') return 'NEGARA';
-  if (clean === 'GALEKAN') return 'GALEKAN';
-  if (clean === 'BWI KOTA SELATAN' || clean === 'BANYUWANGI KOTA') return 'BWI KOTA SELATAN';
-  if (clean.includes('SOETOMO') || clean.includes('SUTOMO') || clean === 'TOKO_DR_SOETOMO') return 'TOKO DR. SOETOMO';
-  if (clean.includes('NUSANTARA') || clean === 'NUSANTARA_EXPAND') return 'NUSANTARA EXPAND';
+  // 1. Direct case-insensitive match dengan salah satu dari 36 official areas
+  const exactMatch = OFFICIAL_DESTINATION_AREAS.find(a => a.toUpperCase() === clean);
+  if (exactMatch) return exactMatch;
 
-  // 2. Situbondo / Bondowoso Susulan -> SSLN STB BDWS
-  if (
-    clean.includes('SITUBONDO') || 
-    clean.includes('STBD') || 
-    clean.includes('STB') || 
-    clean === 'SSLN STB BDWS' || 
-    clean.includes('SSLN STB')
-  ) {
-    return 'SSLN STB BDWS';
+  // 1b. Toko DR. Soetomo, Nusantara Expand, Titipan Kota Kota
+  if (clean.includes('SOETOMO') || clean.includes('SUTOMO')) {
+    return 'Toko DR. Soetomo';
+  }
+  if (clean.includes('NUSANTARA')) {
+    return 'Nusantara Expand';
+  }
+  if (clean.includes('TITIPAN')) {
+    return 'Titipan Kota Kota';
   }
 
-  // 3. Susulan Genteng - Rogojampi -> SUSULAN ROGOJAMPI-MUNCAR
-  if (
-    clean.includes('GENTENG - ROGOJAMPI') || 
-    clean.includes('GENTENG, RGJ') || 
-    clean.includes('GTG- RGJ') || 
-    clean.includes('ROGOJAMPI-MUNCAR') || 
-    clean.includes('ROGOJAMPI - MUNCAR') ||
-    clean.includes('SSL RGJ') ||
-    clean.includes('SUSULAN GTG')
-  ) {
-    return 'SUSULAN ROGOJAMPI-MUNCAR';
+  // 2. Denpasar 1 & Denpasar 2
+  if (clean === 'DENPASAR 1' || clean === 'DENPASAR1' || clean === 'DPS1' || clean === 'DENPASAR 1 & 2' || clean === 'DENPASAR 1/2') {
+    return 'Denpasar 1';
+  }
+  if (clean === 'DENPASAR 2' || clean === 'DENPASAR2' || clean === 'DPS2') {
+    return 'Denpasar 2';
+  }
+  if (clean === 'DENPASAR' || clean === 'DPS') {
+    return 'Denpasar 1';
   }
 
-  // 4. Sumberayu Retail
-  if (
-    clean.includes('SUMBERAYU') || 
-    clean.includes('SUMBER AYU') || 
-    clean.includes('SUMBERAYUY')
-  ) {
-    return 'SUMBERAYU RETAIL';
+  // 3. Susulan Situbondo Bondowoso vs Situbondo vs Bondowoso
+  if (clean.includes('SUSULAN SITUBONDO') || clean.includes('SSLN STB') || clean.includes('SITUBONDO BONDOWOSO') || clean.includes('STB BDWS')) {
+    return 'Susulan Situbondo Bondowoso';
+  }
+  if (clean === 'SITUBONDO' || clean.includes('STBD') || clean === 'STB') {
+    return 'Situbondo';
+  }
+  if (clean === 'BONDOWOSO' || clean === 'BDWS') {
+    return 'Bondowoso';
   }
 
-  // 5. Purwo Dambuntung / Purwo Pasar / Purwo
-  if (clean.includes('DAMBUNTUNG')) {
-    return 'PURWO DAMBUNTUNG';
+  // 4. Susulan Genteng Rogojampi vs Susulan Rogojampi Muncar
+  if (clean.includes('GENTENG ROGOJAMPI') || clean.includes('GTG ROGOJAMPI') || clean.includes('SUSULAN GENTENG')) {
+    return 'Susulan Genteng Rogojampi';
   }
-  if (clean.includes('PASAR') && clean.includes('PURWO')) {
-    return 'PURWO PASAR';
-  }
-  if (clean.includes('PURWO') || clean.includes('PURWOHARJO')) {
-    if (clean.includes('DAM') || clean.includes('BUNTUNG')) return 'PURWO DAMBUNTUNG';
-    return 'PURWO PASAR';
+  if (clean.includes('ROGOJAMPI MUNCAR') || clean.includes('ROGOJAMPI-MUNCAR') || clean.includes('SUSULAN ROGOJAMPI')) {
+    return 'Susulan Rogojampi Muncar';
   }
 
-  // 6. Singaraja -> SSLN SINGARAJA
-  if (clean.includes('SINGARAJA')) {
-    return 'SSLN SINGARAJA';
+  // 5. Muncar Pasar vs Muncar Pinggir
+  if (clean.includes('MUNCAR') && clean.includes('PASAR')) {
+    return 'Muncar Pasar';
+  }
+  if (clean.includes('MUNCAR') && (clean.includes('PINGGIR') || clean.includes('PGIR'))) {
+    return 'Muncar Pinggir';
   }
 
-  // 7. Kalibaru -> RITEL KALIBARU
-  if (clean.includes('KALIBARU')) {
-    return 'RITEL KALIBARU';
+  // 6. Grosir Banyuwangi Rogojampi, Grosir Genteng Gendoh, Grosir Srono Sumberayu Muncar, Grosir Jajag Sanggar Purwo
+  if (clean.includes('GROSIR') && clean.includes('BANYUWANGI')) {
+    return 'Grosir Banyuwangi Rogojampi';
+  }
+  if (clean.includes('GROSIR') && (clean.includes('GENDOH') || clean.includes('GENTENG'))) {
+    return 'Grosir Genteng Gendoh';
+  }
+  if (clean.includes('GROSIR') && (clean.includes('SRONO') || clean.includes('SUMBERAYU'))) {
+    return 'Grosir Srono Sumberayu Muncar';
+  }
+  if (clean.includes('GROSIR') && (clean.includes('JAJAG') || clean.includes('SANGGAR') || clean.includes('PURWO'))) {
+    return 'Grosir Jajag Sanggar Purwo';
+  }
+  if (clean === 'GROSIR 1' || clean === 'GROSIR1') {
+    return 'Grosir Banyuwangi Rogojampi';
   }
 
-  // 8. Songgon -> RITEL SONGGON
-  if (clean.includes('SONGGON')) {
-    return 'RITEL SONGGON';
+  // 7. Jember Selatan, Jember Barat, Jember Kota
+  if (clean.includes('JEMBER') && clean.includes('SELATAN')) {
+    return 'Jember Selatan';
   }
-
-  // 9. Srono -> RITEL SRONO
-  if (clean.includes('SRONO')) {
-    return 'RITEL SRONO';
-  }
-
-  // 10. Sanggar -> RITEL SANGGAR / SUSULAN SANGGAR-JAJAG
-  if (clean.includes('SUSULAN SANGGAR') || clean.includes('SANGGAR-JAJAG')) {
-    return 'SUSULAN SANGGAR-JAJAG';
-  }
-  if (clean.includes('SANGGAR')) {
-    return 'RITEL SANGGAR';
-  }
-
-  // 11. Rogojampi Ritel -> RITEL ROGOJAMPI
-  if (clean.includes('ROGOJAMPI')) {
-    return 'RITEL ROGOJAMPI';
-  }
-
-  // 12. Ketapang / Wongsorejo -> KETAPANG - WONGSOREJO
-  if (clean.includes('KETAPANG') || clean.includes('WONGSOREJO')) {
-    return 'KETAPANG - WONGSOREJO';
-  }
-
-  // 13. Sempu / Kalistail / Xstail -> SEMPU KALISTAIL
-  if (clean.includes('SEMPU') || clean.includes('KALISTAIL') || clean.includes('XSTAIL')) {
-    return 'SEMPU KALISTAIL';
-  }
-
-  // 14. Jember Kota / Barat / Selatan
-  if (clean.includes('JEMBER BARAT') || clean.includes('JEMBER PINGGIR') || clean.includes('JEMBER (MALAM)')) {
-    return 'JEMBER BARAT';
-  }
-  if (clean.includes('JEMBER SELATAN')) {
-    return 'JEMBER SELATAN';
+  if (clean.includes('JEMBER') && (clean.includes('BARAT') || clean.includes('PINGGIR'))) {
+    return 'Jember Barat';
   }
   if (clean.includes('JEMBER')) {
-    return 'JEMBER KOTA';
+    return 'Jember Kota';
   }
 
-  // 15. Grosir -> GROSIR 1
-  if (clean.includes('GROSIR')) {
-    return 'GROSIR 1';
+  // 8. Singaraja & Negara
+  if (clean.includes('SINGARAJA')) {
+    return 'Singaraja';
+  }
+  if (clean.includes('NEGARA')) {
+    return 'Negara';
   }
 
-  // Check if matches standard area directly
-  const directMatch = STANDARD_AREAS.find(a => a === clean);
-  if (directMatch) return directMatch;
+  // 9. Sumberayu Retail
+  if (clean.includes('SUMBERAYU') || clean.includes('SUMBER AYU')) {
+    return 'Sumberayu Retail';
+  }
 
-  return clean;
+  // 10. Susulan Sanggar Jajag vs Sanggar Retail
+  if (clean.includes('SUSULAN SANGGAR') || clean.includes('SANGGAR JAJAG') || clean.includes('SANGGAR-JAJAG')) {
+    return 'Susulan Sanggar Jajag';
+  }
+  if (clean.includes('SANGGAR')) {
+    return 'Sanggar Retail';
+  }
+
+  // 11. Rogojampi Retail
+  if (clean.includes('ROGOJAMPI')) {
+    return 'Rogojampi Retail';
+  }
+
+  // 12. Genteng Retail
+  if (clean.includes('GENTENG')) {
+    return 'Genteng Retail';
+  }
+
+  // 13. Songgon Retail
+  if (clean.includes('SONGGON')) {
+    return 'Songgon Retail';
+  }
+
+  // 14. BWI Kota Selatan
+  if (clean.includes('BWI KOTA') || clean.includes('BANYUWANGI KOTA') || clean.includes('BWI KOTA SELATAN')) {
+    return 'BWI Kota Selatan';
+  }
+
+  // 15. Galekan Retail
+  if (clean.includes('GALEKAN')) {
+    return 'Galekan Retail';
+  }
+
+  // 16. Ketapang Wongsorejo
+  if (clean.includes('KETAPANG') || clean.includes('WONGSOREJO')) {
+    return 'Ketapang Wongsorejo';
+  }
+
+  // 17. Kalibaru Retail
+  if (clean.includes('KALIBARU')) {
+    return 'Kalibaru Retail';
+  }
+
+  // 18. Sempu Stail
+  if (clean.includes('SEMPU') || clean.includes('STAIL') || clean.includes('KALISTAIL') || clean.includes('XSTAIL')) {
+    return 'Sempu Stail';
+  }
+
+  // 19. Purwo Pasar & Purwo Dambuntung
+  if (clean.includes('DAMBUNTUNG')) {
+    return 'Purwo Dambuntung';
+  }
+  if (clean.includes('PURWO') && clean.includes('PASAR')) {
+    return 'Purwo Pasar';
+  }
+  if (clean.includes('PURWO')) {
+    return 'Purwo Pasar';
+  }
+
+  // 20. Jajag Retail
+  if (clean.includes('JAJAG')) {
+    return 'Jajag Retail';
+  }
+
+  // 21. Srono Retail
+  if (clean.includes('SRONO')) {
+    return 'Srono Retail';
+  }
+
+  // Fallback: search closest in OFFICIAL_DESTINATION_AREAS
+  for (const official of OFFICIAL_DESTINATION_AREAS) {
+    if (clean.includes(official.toUpperCase()) || official.toUpperCase().includes(clean)) {
+      return official;
+    }
+  }
+
+  return rawArea.trim();
 }
 
 /**
- * Mendapatkan sub-detail asli (misal: "Purwo Dambuntung" -> detail: "Dambuntung")
- * untuk tampilan badge informatif opsional.
+ * Mendapatkan sub-detail asli untuk tampilan badge informatif opsional.
  */
 export function getAreaSubDetail(rawArea: string | undefined | null): string | null {
   if (!rawArea) return null;

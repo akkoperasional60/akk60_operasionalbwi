@@ -63,7 +63,7 @@ import {
   ParsedSheetTrip 
 } from '../services/googleSheetsApiService';
 import { googleSheetsSyncService } from '../services/googleSheetsSyncService';
-import { standardizeAreaName, getAreaSubDetail } from '../utils/areaNormalizer';
+import { standardizeAreaName, getAreaSubDetail, OFFICIAL_DESTINATION_AREAS } from '../utils/areaNormalizer';
 import { areaAutoMapper, AreaMappingEntry, OfficialAreaItem } from '../services/areaAutoMapper';
 import { crewAutoMapper, CrewMappingEntry, OfficialCrewItem } from '../services/crewAutoMapper';
 import { persistSchedulesToDatabase, fetchPersistedSchedulesFromServer } from '../services/supabaseService';
@@ -139,14 +139,19 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 }) => {
   const [selectedWeekNum, setSelectedWeekNum] = useState<number | 'all'>('all');
   const [selectedDayFilter, setSelectedDayFilter] = useState<string>('all');
-  const [selectedMonth, setSelectedMonth] = useState<number>(0); // 0 = Januari
-  const [selectedYear, setSelectedYear] = useState<number>(2026);
+  const [selectedMonth, setSelectedMonth] = useState<number>(() => new Date().getMonth());
+  const [selectedYear, setSelectedYear] = useState<number>(() => new Date().getFullYear());
   const [categoryFilter, setCategoryFilter] = useState<'all' | 'luar_kota' | 'lokal'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [scheduleStatusFilter, setScheduleStatusFilter] = useState<'all' | 'scheduled' | 'picked_up' | 'in_transit' | 'delivered' | 'delayed'>('all');
   const [armadaFilter, setArmadaFilter] = useState<string>('all');
   const [crewDriverFilter, setCrewDriverFilter] = useState<string>('all');
-  const [selectedCalendarDate, setSelectedCalendarDate] = useState<string>('05 Januari 2026');
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState<string>(() => {
+    const now = new Date();
+    const day = String(now.getDate()).padStart(2, '0');
+    const monthName = MONTH_NAMES[now.getMonth()] || 'Oktober';
+    return `${day} ${monthName} ${now.getFullYear()}`;
+  });
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncSuccessMessage, setSyncSuccessMessage] = useState<string | null>(null);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState<boolean>(false);
@@ -203,6 +208,14 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     return result;
   };
 
+  const getTodayIso = () => {
+    const now = new Date();
+    const yr = now.getFullYear();
+    const mo = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return `${yr}-${mo}-${d}`;
+  };
+
   const [manualScheduleForm, setManualScheduleForm] = useState<{
     dateIso: string;
     driver: string;
@@ -215,15 +228,43 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     const initDrivers = logisticsStore.getUsers().filter(u => u.role === 'driver' && u.status !== 'rejected');
     const initHelpers = logisticsStore.getUsers().filter(u => u.role === 'crew_helper' && u.status !== 'rejected');
     return {
-      dateIso: '2026-01-05',
+      dateIso: getTodayIso(),
       driver: initDrivers[0]?.fullName || 'Budiono',
       helper: initHelpers[0]?.fullName || 'Saiful Rizal',
       helper2: '',
-      area: 'DENPASAR 1',
+      area: 'Denpasar 1',
       armada: 'DS3',
       target: 'Gudang Pusat AKK Banyuwangi DC'
     };
   });
+  const [areaSearchFilter, setAreaSearchFilter] = useState<string>('');
+  const [areaCategoryFilter, setAreaCategoryFilter] = useState<'all' | 'bali' | 'banyuwangi' | 'jember' | 'pantura'>('all');
+  const [isAreaPickerExpanded, setIsAreaPickerExpanded] = useState<boolean>(false);
+
+  const getAreaRegionCategory = (areaName: string): { category: 'bali' | 'jember' | 'pantura' | 'banyuwangi'; label: string; badgeColor: string } => {
+    const upper = areaName.toUpperCase();
+    if (upper.includes('DENPASAR') || upper.includes('SINGARAJA') || upper.includes('NEGARA')) {
+      return { category: 'bali', label: 'Pulau Bali', badgeColor: 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30' };
+    }
+    if (upper.includes('JEMBER')) {
+      return { category: 'jember', label: 'Jember', badgeColor: 'bg-blue-500/15 text-blue-700 dark:text-blue-400 border-blue-500/30' };
+    }
+    if (upper.includes('SITUBONDO') || upper.includes('BONDOWOSO')) {
+      return { category: 'pantura', label: 'Situbondo & Bw', badgeColor: 'bg-purple-500/15 text-purple-700 dark:text-purple-400 border-purple-500/30' };
+    }
+    return { category: 'banyuwangi', label: 'Banyuwangi & Sekitar', badgeColor: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30' };
+  };
+
+  const filteredOfficialAreas = useMemo(() => {
+    return OFFICIAL_DESTINATION_AREAS.filter(areaName => {
+      const matchSearch = areaName.toLowerCase().includes(areaSearchFilter.toLowerCase().trim());
+      if (!matchSearch) return false;
+      if (areaCategoryFilter === 'all') return true;
+      const cat = getAreaRegionCategory(areaName).category;
+      return cat === areaCategoryFilter;
+    });
+  }, [areaSearchFilter, areaCategoryFilter]);
+
   const [stagedCombinedTrips, setStagedCombinedTrips] = useState<Array<ParsedSheetTrip & { source: 'excel' | 'manual'; tempId: string }>>([]);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState<boolean>(false);
   const [scheduleChangeLogs, setScheduleChangeLogs] = useState<ScheduleChangeLogEntry[]>(() => logisticsStore.getScheduleChangeLogs());
@@ -528,8 +569,6 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         localStorage.setItem(cacheKey, JSON.stringify(initialWeeks));
         localStorage.setItem('akk_admin_schedule_weeks_cache', JSON.stringify(initialWeeks));
       } catch {}
-
-      seedWeeksIntoStore(initialWeeks, selectedYear, effectiveMonth);
     }
 
     // Subscribe to store updates (from manual edits in ScheduleManagement or modals)
@@ -2189,13 +2228,9 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
             <button
               onClick={() => {
-                const effectiveMo = selectedMonth === -1 ? 0 : selectedMonth;
-                const activeDayMatch = selectedCalendarDate.match(/^(\d{1,2})/);
-                const dayNum = activeDayMatch ? Number(activeDayMatch[1]) : 5;
-                const defaultIso = `${selectedYear}-${String(effectiveMo + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
                 setManualScheduleForm(prev => ({
                   ...prev,
-                  dateIso: defaultIso
+                  dateIso: getTodayIso()
                 }));
                 setIsUploadConfigModalOpen(true);
               }}
@@ -3194,7 +3229,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             <div className="space-y-3.5 text-xs">
               <div>
                 <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
-                  Driver / Pengemudi (Integrasi Manajemen User)
+                  Driver / Pengemudi
                 </label>
                 <select
                   value={editingTripModal.driver}
@@ -3203,7 +3238,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 >
                   {getIntegratedDrivers().map(c => (
                     <option key={c.id} value={c.name}>
-                      {c.name}{c.hasAccount ? ' (Akun Driver)' : ''}
+                      {c.name}
                     </option>
                   ))}
                 </select>
@@ -3212,7 +3247,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
-                    Helper / Kernet 1 (Integrasi Manajemen User)
+                    Helper / Kernet 1
                   </label>
                   <select
                     value={editingTripModal.helper}
@@ -3222,7 +3257,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     <option value="">- Tanpa Helper 1 -</option>
                     {getIntegratedHelpers().map(c => (
                       <option key={c.id} value={c.name}>
-                        {c.name}{c.hasAccount ? ' (Akun Helper)' : ''}
+                        {c.name}
                       </option>
                     ))}
                   </select>
@@ -3240,7 +3275,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     <option value="">- Tanpa Helper 2 -</option>
                     {getIntegratedHelpers().map(c => (
                       <option key={`edit-h2-${c.id}`} value={c.name}>
-                        {c.name}{c.hasAccount ? ' (Akun Helper)' : ''}
+                        {c.name}
                       </option>
                     ))}
                   </select>
@@ -3249,34 +3284,28 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
               <div>
                 <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
-                  Kirim Area / Tujuan
+                  Kirim Area / Tujuan ({OFFICIAL_DESTINATION_AREAS.length} Area Resmi)
                 </label>
-                <input
-                  type="text"
-                  list="area-options"
-                  value={editingTripModal.area}
-                  onChange={(e) => setEditingTripModal({ ...editingTripModal, area: e.target.value })}
-                  placeholder="e.g. DENPASAR 1, SITUBONDO, TOKO DR. SOETOMO, NUSANTARA EXPAND"
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-medium uppercase focus:outline-none focus:border-emerald-500"
-                />
-                <datalist id="area-options">
-                  <option value="DENPASAR 1" />
-                  <option value="DENPASAR 2" />
-                  <option value="SINGARAJA" />
-                  <option value="NEGARA" />
-                  <option value="SITUBONDO" />
-                  <option value="BONDOWOSO" />
-                  <option value="JAJAG RETAIL" />
-                  <option value="PURWO DAMBUNTUNG" />
-                  <option value="PURWO PASAR" />
-                  <option value="GALEKAN" />
-                  <option value="SUSULAN GENTENG - ROGOJAMPI" />
-                  <option value="SUSULAN SANGGAR JAJAG" />
-                  <option value="SUMBERAYU RETAIL" />
-                  <option value="GROSIR BWI - ROGOJAMPI" />
-                  <option value="TOKO DR. SOETOMO" />
-                  <option value="NUSANTARA EXPAND" />
-                </datalist>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-44 overflow-y-auto p-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950">
+                  {OFFICIAL_DESTINATION_AREAS.map(areaOpt => {
+                    const isSel = editingTripModal.area.toUpperCase() === areaOpt.toUpperCase();
+                    return (
+                      <button
+                        key={areaOpt}
+                        type="button"
+                        onClick={() => setEditingTripModal({ ...editingTripModal, area: areaOpt })}
+                        className={`px-2.5 py-1.5 rounded-lg text-left text-xs font-bold transition cursor-pointer flex items-center justify-between border ${
+                          isSel
+                            ? 'bg-emerald-600 text-white border-emerald-500 shadow-2xs'
+                            : 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 border-slate-200 dark:border-slate-800 hover:border-emerald-500/50'
+                        }`}
+                      >
+                        <span className="truncate">{areaOpt}</span>
+                        {isSel && <Check className="w-3.5 h-3.5 shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               <div>
@@ -3345,9 +3374,6 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   <h3 className="text-base font-black text-slate-900 dark:text-white">
                     Form Tambah Jadwal Baru (Manual)
                   </h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Terintegrasi langsung dengan akun Driver &amp; Helper pada Manajemen User (Budiono, Saiful Rizal, dll.)
-                  </p>
                 </div>
               </div>
               <button
@@ -3363,15 +3389,54 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             <div className="space-y-4 text-xs">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                 <div>
-                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1.5">
-                    Tanggal Kirim *
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                      <Calendar className="w-3.5 h-3.5 text-emerald-500" />
+                      <span>Tanggal Kirim *</span>
+                    </label>
+                    <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                      Otomatis Hari Ini
+                    </span>
+                  </div>
                   <input
                     type="date"
                     value={manualScheduleForm.dateIso}
                     onChange={(e) => setManualScheduleForm({ ...manualScheduleForm, dateIso: e.target.value })}
-                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-emerald-500"
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-emerald-500 cursor-pointer"
                   />
+                  <div className="flex items-center gap-1.5 mt-2">
+                    <button
+                      type="button"
+                      onClick={() => setManualScheduleForm({ ...manualScheduleForm, dateIso: getTodayIso() })}
+                      className="px-2.5 py-1 text-[10px] font-bold rounded-lg bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/25 border border-emerald-500/30 transition cursor-pointer"
+                    >
+                      Hari Ini
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const d = new Date();
+                        d.setDate(d.getDate() + 1);
+                        const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                        setManualScheduleForm({ ...manualScheduleForm, dateIso: iso });
+                      }}
+                      className="px-2.5 py-1 text-[10px] font-bold rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 transition cursor-pointer"
+                    >
+                      Besok (+1)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const d = new Date();
+                        d.setDate(d.getDate() + 2);
+                        const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                        setManualScheduleForm({ ...manualScheduleForm, dateIso: iso });
+                      }}
+                      className="px-2.5 py-1 text-[10px] font-bold rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 transition cursor-pointer"
+                    >
+                      Lusa (+2)
+                    </button>
+                  </div>
                 </div>
                 <div>
                   <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1.5">
@@ -3403,7 +3468,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   >
                     {getIntegratedDrivers().map(drv => (
                       <option key={drv.id} value={drv.name}>
-                        {drv.name}{drv.hasAccount ? ' (Akun Driver)' : ''}
+                        {drv.name}
                       </option>
                     ))}
                   </select>
@@ -3421,7 +3486,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     <option value="-">- Tanpa Helper 1 -</option>
                     {getIntegratedHelpers().map(hlp => (
                       <option key={hlp.id} value={hlp.name}>
-                        {hlp.name}{hlp.hasAccount ? ' (Akun Helper)' : ''}
+                        {hlp.name}
                       </option>
                     ))}
                   </select>
@@ -3439,30 +3504,157 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     <option value="">- Tanpa Helper 2 -</option>
                     {getIntegratedHelpers().map(hlp => (
                       <option key={`modal-h2-${hlp.id}`} value={hlp.name}>
-                        {hlp.name}{hlp.hasAccount ? ' (Akun Helper)' : ''}
+                        {hlp.name}
                       </option>
                     ))}
                   </select>
                 </div>
               </div>
 
+              {/* Area Kirim Tujuan (UI/UX Modern Tanpa Select OS Bawaan & Tanpa Angka Nomor) */}
               <div>
-                <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1.5">
-                  Area Kirim Tujuan *
-                </label>
-                <input
-                  type="text"
-                  list="combined-area-options"
-                  value={manualScheduleForm.area}
-                  onChange={(e) => setManualScheduleForm({ ...manualScheduleForm, area: e.target.value })}
-                  placeholder="Contoh: DENPASAR 1, SITUBONDO, BONDOWOSO"
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs uppercase font-bold rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-emerald-500"
-                />
-                <datalist id="combined-area-options">
-                  {officialAreasList.map(a => (
-                    <option key={a.id} value={a.name} />
-                  ))}
-                </datalist>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5 text-emerald-500" />
+                    <span>Area Kirim Tujuan *</span>
+                  </label>
+                  <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                    {OFFICIAL_DESTINATION_AREAS.length} Area Terdaftar
+                  </span>
+                </div>
+
+                {/* Selected Area Card with Expandable Searchable Picker */}
+                <div className="rounded-xl border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 p-2.5 transition">
+                  <div
+                    onClick={() => setIsAreaPickerExpanded(!isAreaPickerExpanded)}
+                    className="flex items-center justify-between gap-2 cursor-pointer select-none"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                        <MapPin className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs font-black text-slate-900 dark:text-white truncate">
+                          {manualScheduleForm.area || 'Klik untuk Pilih Area Tujuan'}
+                        </div>
+                        {manualScheduleForm.area ? (
+                          <span className={`inline-block text-[9px] font-bold px-1.5 py-0.2 rounded border mt-0.5 ${getAreaRegionCategory(manualScheduleForm.area).badgeColor}`}>
+                            {getAreaRegionCategory(manualScheduleForm.area).label}
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                            Pilih dari {OFFICIAL_DESTINATION_AREAS.length} area pengiriman resmi
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsAreaPickerExpanded(!isAreaPickerExpanded);
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] flex items-center gap-1.5 transition cursor-pointer shadow-xs shrink-0"
+                    >
+                      <span>{isAreaPickerExpanded ? 'Tutup Pilihan' : 'Pilih / Ganti Area'}</span>
+                      <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isAreaPickerExpanded ? 'rotate-180' : ''}`} />
+                    </button>
+                  </div>
+
+                  {/* Expanded Custom Interactive Area Selector */}
+                  {isAreaPickerExpanded && (
+                    <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-800 space-y-2.5 animate-in fade-in duration-150">
+                      {/* Search Bar with clear button */}
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <input
+                          type="text"
+                          value={areaSearchFilter}
+                          onChange={(e) => setAreaSearchFilter(e.target.value)}
+                          placeholder="Cari area (misal: Denpasar, Toko DR. Soetomo, Nusantara Expand, Titipan Kota Kota)..."
+                          className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs rounded-lg pl-8 pr-8 py-2 focus:outline-none focus:border-emerald-500"
+                          autoFocus
+                        />
+                        {areaSearchFilter && (
+                          <button
+                            type="button"
+                            onClick={() => setAreaSearchFilter('')}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-white text-xs cursor-pointer"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Region Category Chips */}
+                      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[10px]">
+                        {[
+                          { id: 'all', label: `Semua (${OFFICIAL_DESTINATION_AREAS.length})` },
+                          { id: 'bali', label: 'Bali (4)' },
+                          { id: 'banyuwangi', label: 'Banyuwangi & Khusus (26)' },
+                          { id: 'jember', label: 'Jember (3)' },
+                          { id: 'pantura', label: 'Situbondo/Bw (3)' },
+                        ].map(cat => (
+                          <button
+                            key={cat.id}
+                            type="button"
+                            onClick={() => setAreaCategoryFilter(cat.id as any)}
+                            className={`px-2.5 py-1 rounded-md font-bold whitespace-nowrap transition cursor-pointer ${
+                              areaCategoryFilter === cat.id
+                                ? 'bg-emerald-600 text-white shadow-xs'
+                                : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800'
+                            }`}
+                          >
+                            {cat.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Interactive Area Options Grid */}
+                      <div className="max-h-56 overflow-y-auto pr-1 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                        {filteredOfficialAreas.map(areaName => {
+                          const isSelected = manualScheduleForm.area === areaName;
+                          const meta = getAreaRegionCategory(areaName);
+                          return (
+                            <button
+                              key={areaName}
+                              type="button"
+                              onClick={() => {
+                                setManualScheduleForm({ ...manualScheduleForm, area: areaName });
+                                setIsAreaPickerExpanded(false);
+                              }}
+                              className={`flex items-center justify-between p-2 rounded-lg text-left transition cursor-pointer border ${
+                                isSelected
+                                  ? 'bg-emerald-500/15 border-emerald-500 text-emerald-950 dark:text-emerald-200 shadow-2xs font-extrabold'
+                                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-emerald-500/50 hover:bg-slate-50 dark:hover:bg-slate-800/60 text-slate-800 dark:text-slate-200'
+                              }`}
+                            >
+                              <div className="min-w-0 pr-2">
+                                <div className="text-xs truncate">{areaName}</div>
+                                <span className={`inline-block text-[9px] font-bold px-1.5 py-0.2 rounded border mt-0.5 ${meta.badgeColor}`}>
+                                  {meta.label}
+                                </span>
+                              </div>
+                              {isSelected ? (
+                                <div className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0">
+                                  <Check className="w-3 h-3" />
+                                </div>
+                              ) : (
+                                <span className="text-[10px] text-slate-400 font-semibold">Pilih</span>
+                              )}
+                            </button>
+                          );
+                        })}
+                        {filteredOfficialAreas.length === 0 && (
+                          <div className="col-span-2 py-4 text-center text-xs text-slate-400">
+                            Tidak ada area yang cocok dengan pencarian "{areaSearchFilter}"
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 

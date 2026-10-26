@@ -133,9 +133,21 @@ export const areaAutoMapper = {
       if (!seenNames.has(upper)) {
         seenNames.add(upper);
         const isBali = upper.includes('DENPASAR') || upper.includes('SINGARAJA') || upper.includes('NEGARA');
-        const city = isBali 
-          ? (upper.includes('DENPASAR') ? 'Denpasar' : (upper.includes('SINGARAJA') ? 'Singaraja' : 'Negara'))
-          : (upper.includes('BONDOWOSO') || upper.includes('STB') ? 'Situbondo / Bondowoso' : (upper.includes('JEMBER') ? 'Jember' : 'Banyuwangi'));
+        let city = 'Banyuwangi';
+        if (upper.includes('DENPASAR')) city = 'Denpasar';
+        else if (upper.includes('SINGARAJA')) city = 'Singaraja';
+        else if (upper.includes('NEGARA')) city = 'Negara';
+        else if (upper.includes('SITUBONDO')) city = 'Situbondo';
+        else if (upper.includes('BONDOWOSO')) city = 'Bondowoso';
+        else if (upper.includes('JEMBER')) city = 'Jember';
+        else if (upper.includes('MUNCAR')) city = 'Muncar';
+        else if (upper.includes('GENTENG')) city = 'Genteng';
+        else if (upper.includes('JAJAG')) city = 'Jajag';
+        else if (upper.includes('ROGOJAMPI')) city = 'Rogojampi';
+        else if (upper.includes('SONGGON')) city = 'Songgon';
+        else if (upper.includes('KALIBARU')) city = 'Kalibaru';
+        else if (upper.includes('SRONO')) city = 'Srono';
+
         list.push({
           id: `std-${upper.replace(/[^A-Z0-9]/g, '_')}`,
           name: areaName,

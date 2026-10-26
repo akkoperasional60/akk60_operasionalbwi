@@ -490,46 +490,20 @@ class LogisticsStore {
     this.fleets = this.loadFromStorage(STORAGE_KEYS.FLEETS, INITIAL_FLEETS);
     this.crews = this.loadFromStorage(STORAGE_KEYS.CREWS, INITIAL_CREWS);
     this.stores = this.loadFromStorage(STORAGE_KEYS.STORES, INITIAL_STORES);
-    this.schedules = this.loadFromStorage(STORAGE_KEYS.SCHEDULES, INITIAL_SCHEDULES);
+    this.schedules = this.loadFromStorage(STORAGE_KEYS.SCHEDULES, []);
     this.devices = this.loadFromStorage(STORAGE_KEYS.DEVICES, INITIAL_TRACKSOLID_DEVICES);
     this.users = this.loadFromStorage(STORAGE_KEYS.USERS, INITIAL_PROFILES);
     this.currentUser = this.loadFromStorage(STORAGE_KEYS.CURRENT_USER, INITIAL_PROFILES[0]);
 
-    // Pastikan jadwal Denpasar untuk supir Budiono selalu tersedia & terstandarisasi sesuai SOP AKK
-    const hasBudionoDps = this.schedules.some(s => 
-      s.id === 'sch-budiono-dps' || 
-      ((s.crewId === 'crw-06' || s.crew?.name?.toLowerCase().includes('budiono')) && 
-       (s.areaName?.includes('DENPASAR') || s.storeId === 'str-04'))
-    );
-    if (!hasBudionoDps) {
-      const dpsStore = this.stores.find(s => s.id === 'str-04') || this.stores[0];
-      const budCrew = this.crews.find(c => c.id === 'crw-06' || c.name.toLowerCase().includes('budiono')) || this.crews[0];
-      const flt = this.fleets.find(f => f.plateNumber === 'P 8509 VQ') || this.fleets[0];
-      this.schedules.unshift({
-        id: 'sch-budiono-dps',
-        trackingNumber: 'TRK-2026-DPS-BUDIONO',
-        originName: 'Gudang Pusat Banyuwangi DC',
-        originCoords: [-8.1906, 114.3708],
-        storeId: 'str-04',
-        store: dpsStore,
-        fleetId: flt.id,
-        fleet: flt,
-        crewId: budCrew.id,
-        crew: budCrew,
-        status: 'scheduled',
-        areaName: 'DENPASAR 1',
-        departureDate: '2026-09-17T21:00:00+07:00',
-        estimatedArrival: '2026-09-18T17:30:00+07:00',
-        cargoDescription: 'Karton Box & FMCG Dry Food Denpasar 1 (Palet Standar)',
-        cargoWeightTon: 14.5,
-        isInterIsland: true,
-        ferryBookingCode: 'ASDP-KTG-GLM-99411',
-        transitPort: 'Pelabuhan Ketapang Banyuwangi -> Gilimanuk Bali',
-        notes: 'Jadwal Luar Kota Denpasar: Berangkat nanti malam 21.00 WIB, target kepulangan besok 17.30 WIB.',
-        createdAt: new Date().toISOString()
-      });
-      this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
-    }
+    // Kosongkan jadwal awal secara otomatis (one-time migration v4) sesuai instruksi operasional
+    try {
+      if (typeof localStorage !== 'undefined' && localStorage.getItem('akk_schedules_empty_init_v4') !== 'true') {
+        this.schedules = [];
+        this.saveToStorage(STORAGE_KEYS.SCHEDULES, []);
+        localStorage.removeItem('akk_driver_cached_deliveries_v2');
+        localStorage.setItem('akk_schedules_empty_init_v4', 'true');
+      }
+    } catch {}
 
     // Ensure super admin user has generic name 'Super Admin' and email 'bayun791@gmail.com'
     const superAdminUser = this.users.find(u => u.role === 'super_admin' || u.id === 'usr-001');
@@ -907,98 +881,6 @@ class LogisticsStore {
       }
       return nextS;
     });
-    if (updatedSchedules) {
-      this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
-    }
-
-    // If schedules only contain initial mock (< 10) but admin weeks cache exists (from Google Sheets or previous session)
-    if (this.schedules.length <= 5) {
-      let cachedWeeks: any[] | null = null;
-      try {
-        const saved2026 = localStorage.getItem('akk_admin_schedule_cache_2026_0');
-        if (saved2026) cachedWeeks = JSON.parse(saved2026);
-        if (!cachedWeeks) {
-          const savedAll = localStorage.getItem('akk_admin_schedule_weeks_cache');
-          if (savedAll) cachedWeeks = JSON.parse(savedAll);
-        }
-      } catch {}
-
-      if (Array.isArray(cachedWeeks) && cachedWeeks.length > 0 && cachedWeeks[0]?.days?.length > 0) {
-        const loadedFromCache: Schedule[] = [];
-        cachedWeeks.forEach((week: any) => {
-          (week.days || []).forEach((day: any) => {
-            const dayPadded = String(day.dayNumber).padStart(2, '0');
-            const depIso = `2026-01-${dayPadded}T07:30:00.000Z`;
-            const arrIso = `2026-01-${dayPadded}T18:00:00.000Z`;
-            (day.pengiriman || []).forEach((p: any, idx: number) => {
-              const stdArea = p.area || 'Area Kirim';
-              const isBali = stdArea.toUpperCase().includes('DENPASAR') || stdArea.toUpperCase().includes('SINGARAJA') || stdArea.toUpperCase().includes('NEGARA') || stdArea.toUpperCase().includes('BALI');
-              const matchedFleet = this.fleets.find(f => 
-                f.initialCode?.toUpperCase() === p.armada?.toUpperCase() ||
-                f.plateNumber.replace(/\s+/g, '').toUpperCase().includes((p.armada || '').replace(/\s+/g, '').toUpperCase())
-              ) || this.fleets[idx % this.fleets.length] || this.fleets[0];
-
-              const matchedDriver = this.crews.find(c => 
-                c.name.toLowerCase().includes((p.driver || '').toLowerCase()) || 
-                (p.driver || '').toLowerCase().includes(c.name.toLowerCase())
-              ) || this.crews[0];
-
-              const matchedHelper = p.helper && p.helper !== '-' ? this.crews.find(c =>
-                c.name.toLowerCase().includes((p.helper || '').toLowerCase()) ||
-                (p.helper || '').toLowerCase().includes(c.name.toLowerCase())
-              ) : undefined;
-
-              loadedFromCache.push({
-                id: p.id || `sch-202601${dayPadded}-${(p.armada || 'FLT').replace(/[^a-zA-Z0-9]/g, '')}-${idx + 1}`,
-                trackingNumber: `PO-AKK-202601${dayPadded}-${(p.armada || 'FLT').replace(/[^a-zA-Z0-9]/g, '')}-${idx + 1}`,
-                originName: 'Gudang Pusat Banyuwangi DC',
-                originCoords: [-8.1906, 114.3708],
-                storeId: `area-${stdArea.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
-                store: {
-                  id: `area-${stdArea.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
-                  storeCode: `AREA-${stdArea.substring(0, 4).toUpperCase().replace(/[^A-Z0-9]/g, '')}`,
-                  storeName: stdArea,
-                  island: isBali ? 'Bali & Nusa Tenggara' : 'Jawa',
-                  province: isBali ? 'Bali' : 'Jawa Timur',
-                  city: isBali ? 'Denpasar' : 'Banyuwangi',
-                  address: `Area Distribusi ${stdArea}`,
-                  latitude: isBali ? -8.6705 : -8.219,
-                  longitude: isBali ? 115.2126 : 114.369,
-                  contactPerson: 'PIC Distribusi Area',
-                  phone: '-',
-                  deliveryWindow: '08:00 - 17:00',
-                  storeCategory: 'Distribution Hub'
-                },
-                areaName: stdArea,
-                fleetId: matchedFleet ? matchedFleet.id : 'flt-01',
-                fleet: matchedFleet,
-                crewId: matchedDriver ? matchedDriver.id : 'crw-01',
-                crew: matchedDriver,
-                crewHelperId: matchedHelper ? matchedHelper.id : undefined,
-                crewHelper: matchedHelper,
-                status: 'scheduled',
-                departureDate: depIso,
-                estimatedArrival: arrIso,
-                cargoDescription: `Karton Box & Sheet Kemasan - ${stdArea}`,
-                cargoWeightTon: isBali ? 4.5 : 2.5,
-                isInterIsland: isBali,
-                ferryBookingCode: isBali ? `ASDP-KTP-GLM-${idx + 100}` : undefined,
-                transitPort: isBali ? 'Pelabuhan Ketapang Banyuwangi -> Gilimanuk Bali' : undefined,
-                notes: p.target || `Rute Distribusi ${stdArea}`,
-                createdAt: new Date().toISOString(),
-                isManuallyEdited: !!p.isManuallyEdited
-              });
-            });
-          });
-        });
-
-        if (loadedFromCache.length > 0) {
-          this.schedules = loadedFromCache;
-          updatedSchedules = true;
-        }
-      }
-    }
-
     if (updatedSchedules) {
       this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
     }
@@ -2680,15 +2562,17 @@ class LogisticsStore {
 
     const expectedCrewId = `crw-${user?.id || 'usr'}`;
 
-    // 1. Cari kru yang cocok berdasarkan ID atau nama (case-insensitive)
+    // 1. Cari kru yang cocok berdasarkan ID atau kata nama lengkap (mencegah 'Budi' menimpa 'Budiono')
     let matchedCrew = this.crews.find(c => {
       if (c.id === expectedCrewId) return true;
       const cName = (c.name || '').trim().toLowerCase();
-      return (
-        cName === lowerName ||
-        (cleanUserName.length > 2 && lowerName.includes(cName)) ||
-        (cName.length > 2 && cName.includes(lowerName))
-      );
+      if (cName === lowerName) return true;
+      const cTokens = cName.split(/[\s,/&.-]+/).filter(w => w.length >= 3);
+      const uTokens = lowerName.split(/[\s,/&.-]+/).filter(w => w.length >= 3);
+      if (cTokens.length > 0 && uTokens.length > 0) {
+        return cTokens.every(t => uTokens.includes(t)) || uTokens.every(t => cTokens.includes(t));
+      }
+      return false;
     });
 
     if (matchedCrew) {
@@ -2881,6 +2765,15 @@ class LogisticsStore {
       timestamp: new Date().toISOString()
     });
 
+    this.notify();
+  }
+
+  public clearAllSchedules() {
+    this.schedules = [];
+    this.saveToStorage(STORAGE_KEYS.SCHEDULES, []);
+    try {
+      localStorage.removeItem('akk_driver_cached_deliveries_v2');
+    } catch {}
     this.notify();
   }
 
