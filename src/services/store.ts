@@ -99,6 +99,7 @@ const STORAGE_KEYS = {
   SCHEDULES: 'akk_schedules_v1',
   DEVICES: 'akk_devices_v1',
   CURRENT_USER: 'akk_user_v2',
+  AUTH_SESSION: 'akk_auth_session_active_v1',
   USERS: 'akk_users_list_v5',
   SUPABASE_CONFIG: 'akk_supabase_config_v1',
   CREW_HISTORY: 'akk_crew_history_v1',
@@ -117,6 +118,15 @@ const STORAGE_KEYS = {
   SCANNED_DOCUMENTS: 'akk_scanned_documents_v1',
   SECURITY_LOGS: 'akk_security_logs_v1',
   SCHEDULE_CHANGE_LOGS: 'akk_schedule_change_logs_v1'
+};
+
+export const GUEST_USER_PROFILE: UserProfile = {
+  id: 'guest',
+  email: 'guest@akk-packaging.co.id',
+  fullName: 'Tamu / Belum Login',
+  role: 'unassigned',
+  department: 'Tamu',
+  status: 'pending'
 };
 
 export const INITIAL_SCHEDULE_CHANGE_LOGS: ScheduleChangeLogEntry[] = [
@@ -505,7 +515,15 @@ class LogisticsStore {
     this.schedules = this.loadFromStorage(STORAGE_KEYS.SCHEDULES, []);
     this.devices = this.loadFromStorage(STORAGE_KEYS.DEVICES, INITIAL_TRACKSOLID_DEVICES);
     this.users = this.loadFromStorage(STORAGE_KEYS.USERS, INITIAL_PROFILES);
-    this.currentUser = this.loadFromStorage(STORAGE_KEYS.CURRENT_USER, INITIAL_PROFILES[0]);
+
+    // Initial authentication session from sessionStorage (Menutup browser otomatis mereset sesi)
+    const sessionUserId = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STORAGE_KEYS.AUTH_SESSION) : null;
+    if (sessionUserId) {
+      const activeMatch = this.users.find(u => u.id === sessionUserId && u.status === 'approved');
+      this.currentUser = activeMatch ? { ...activeMatch } : { ...GUEST_USER_PROFILE };
+    } else {
+      this.currentUser = { ...GUEST_USER_PROFILE };
+    }
 
     // Kosongkan jadwal awal secara otomatis (one-time migration v4) sesuai instruksi operasional
     try {
@@ -534,24 +552,20 @@ class LogisticsStore {
     });
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
 
-    // Sync current active session
-    if (this.currentUser) {
-      const match = this.users.find(u => u.id === this.currentUser.id || (u.id === 'usr-001' && this.currentUser.role === 'super_admin'));
+    // Sync active session if authenticated
+    if (this.currentUser && this.currentUser.id !== 'guest') {
+      const match = this.users.find(u => u.id === this.currentUser.id && u.status === 'approved');
       if (match) {
-        this.currentUser = {
-          ...this.currentUser,
-          id: match.id,
-          fullName: match.fullName,
-          department: match.department,
-          phone: match.phone,
-          email: match.email,
-          role: match.role
-        };
+        this.currentUser = { ...match };
+        this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
       } else {
-        const fallback = this.users.find(u => u.id === 'usr-001') || this.users[0];
-        if (fallback) this.currentUser = { ...fallback };
+        this.currentUser = { ...GUEST_USER_PROFILE };
+        try {
+          if (typeof sessionStorage !== 'undefined') {
+            sessionStorage.removeItem(STORAGE_KEYS.AUTH_SESSION);
+          }
+        } catch {}
       }
-      this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
     }
     this.crewHistory = this.loadFromStorage(STORAGE_KEYS.CREW_HISTORY, INITIAL_CREW_HISTORY);
     this.areaApprovals = this.loadFromStorage(STORAGE_KEYS.AREA_APPROVALS, INITIAL_AREA_APPROVALS);
@@ -1738,7 +1752,18 @@ class LogisticsStore {
   }
 
   public getCurrentUser(): UserProfile {
-    return this.currentUser;
+    return this.currentUser || { ...GUEST_USER_PROFILE };
+  }
+
+  public isAuthenticated(): boolean {
+    if (!this.currentUser || this.currentUser.id === 'guest' || this.currentUser.status !== 'approved') {
+      return false;
+    }
+    if (typeof sessionStorage !== 'undefined') {
+      const sessionUserId = sessionStorage.getItem(STORAGE_KEYS.AUTH_SESSION);
+      return Boolean(sessionUserId && sessionUserId === this.currentUser.id);
+    }
+    return true;
   }
 
   /**
@@ -2434,6 +2459,11 @@ class LogisticsStore {
     }
 
     this.currentUser = existing;
+    try {
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.setItem(STORAGE_KEYS.AUTH_SESSION, existing.id);
+      }
+    } catch {}
     this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
     this.syncCurrentUserToCrew();
     this.notify();
@@ -2444,6 +2474,11 @@ class LogisticsStore {
     const target = this.users.find(u => u.id === userId);
     if (target) {
       this.currentUser = target;
+      try {
+        if (typeof sessionStorage !== 'undefined') {
+          sessionStorage.setItem(STORAGE_KEYS.AUTH_SESSION, target.id);
+        }
+      } catch {}
       this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
       this.syncCurrentUserToCrew();
       this.notify();
@@ -2452,23 +2487,23 @@ class LogisticsStore {
 
   public setCurrentUser(user: UserProfile) {
     this.currentUser = user;
+    try {
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.setItem(STORAGE_KEYS.AUTH_SESSION, user.id);
+      }
+    } catch {}
     this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
     this.syncCurrentUserToCrew();
     this.notify();
   }
 
   public logoutUser() {
-    // Return to default admin profile or guest
-    this.currentUser = {
-      id: 'guest',
-      email: 'tamu@akk-packaging.co.id',
-      fullName: 'Tamu / Belum Login',
-      role: 'driver',
-      department: 'AKK Visitor',
-      status: 'pending'
-    };
-    this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
+    this.currentUser = { ...GUEST_USER_PROFILE };
     try {
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.removeItem(STORAGE_KEYS.AUTH_SESSION);
+      }
+      localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
       localStorage.removeItem('akk_driver_auth_session');
     } catch {}
     this.notify();

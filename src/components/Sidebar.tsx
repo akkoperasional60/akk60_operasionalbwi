@@ -815,7 +815,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <button
             onClick={() => {
               logisticsStore.logoutUser();
-              onOpenAuth('login');
             }}
             className="p-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-rose-400 hover:border-rose-500/40 transition cursor-pointer"
             title="Keluar Sesi (Logout)"
@@ -861,7 +860,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             type="button"
             onClick={() => {
               logisticsStore.logoutUser();
-              onOpenAuth('login');
             }}
             className="w-full py-2 px-3 rounded-lg bg-slate-900 border border-slate-800 hover:bg-rose-500/15 hover:border-rose-500/30 text-slate-300 hover:text-rose-400 text-xs font-bold flex items-center justify-center gap-2 transition cursor-pointer"
             title="Keluar Sesi / Log Out dari Sistem PT AKK"

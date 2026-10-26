@@ -18,6 +18,7 @@ import { SalesKpi } from './components/sales/SalesKpi';
 import { PurchasingStockAnalysis } from './components/purchasing/PurchasingStockAnalysis';
 import { HelpDeskChat } from './components/HelpDeskChat';
 import { AuthModal } from './components/AuthModal';
+import { LoginPage } from './components/LoginPage';
 import { ThemeSwitcher } from './components/ThemeSwitcher';
 import { SystemActivityLog } from './components/SystemActivityLog';
 import { DepartmentDashboard } from './components/DepartmentDashboard';
@@ -99,6 +100,14 @@ export default function App() {
 
   const { notifications, setOnNavigateCallback, setIsDrawerOpen } = useToast();
   const unreadCount = notifications.filter(n => !n.read).length;
+
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => logisticsStore.isAuthenticated());
+
+  useEffect(() => {
+    return logisticsStore.subscribe(() => {
+      setIsAuthenticated(logisticsStore.isAuthenticated());
+    });
+  }, []);
 
   useEffect(() => {
     setOnNavigateCallback((tab) => setCurrentTab(tab as NavTab));
@@ -213,6 +222,26 @@ export default function App() {
     setIsAuthOpen(true);
   };
 
+  if (!isAuthenticated) {
+    return (
+      <LoginPage
+        onLoginSuccess={(loggedInUser) => {
+          setIsAuthenticated(true);
+          try {
+            const searchParams = new URLSearchParams(window.location.search);
+            const tabParam = searchParams.get('tab');
+            if (tabParam) {
+              setCurrentTab(tabParam as NavTab);
+              return;
+            }
+          } catch {}
+          const defaultTab = getDefaultTabForRole(loggedInUser.role) as NavTab;
+          setCurrentTab(defaultTab);
+        }}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex antialiased selection:bg-amber-500 selection:text-slate-950">
       {/* Network Connectivity & Offline Real-Time Tracking Warning Banner */}
@@ -298,7 +327,7 @@ export default function App() {
                 {currentUser.fullName ? currentUser.fullName.charAt(0).toUpperCase() : 'U'}
               </div>
               <span className="font-bold max-w-[120px] truncate text-white">
-                {isAdmin() ? 'Super Admin' : currentUser.fullName}
+                {currentUser.fullName || 'Pengguna'}
               </span>
             </button>
           </div>
