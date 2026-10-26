@@ -536,20 +536,23 @@ class LogisticsStore {
     } catch {}
 
     // 13 Official AKK Users Synchronization:
-    // Synchronize this.users directly with INITIAL_PROFILES to ensure exact names and roles requested
+    // Synchronize this.users directly with INITIAL_PROFILES to ensure exact names, emails, and passwords requested
     const existingById = new Map((this.users || []).map(u => [u.id, u]));
     this.users = INITIAL_PROFILES.map(initU => {
       const existing = existingById.get(initU.id);
       if (existing) {
-        let userPassword = existing.password || initU.password;
+        let userEmail = initU.email || existing.email;
+        let userPassword = initU.password || existing.password;
         if (initU.id === 'usr-hendri' && (!existing.password || existing.password === 'admin123')) {
           userPassword = 'Hendri';
         }
         return {
+          ...existing,
           ...initU,
+          email: userEmail,
+          password: userPassword,
           permissions: existing.permissions || initU.permissions,
-          status: existing.status || initU.status,
-          password: userPassword
+          status: existing.status || initU.status
         };
       }
       return initU;
@@ -2353,11 +2356,22 @@ class LogisticsStore {
     // SKEMA VALIDASI KETAT:
     // Jika input mengandung '@', perlakukan sebagai format EMAIL murni
     if (cleanId.includes('@')) {
-      const match = this.users.find(u => u.email && u.email.trim().toLowerCase() === cleanId);
+      let match = this.users.find(u => u.email && u.email.trim().toLowerCase() === cleanId);
       if (match) return match;
+
+      // Fallback: match cleanId with INITIAL_PROFILES email
+      const initMatch = INITIAL_PROFILES.find(p => p.email && p.email.trim().toLowerCase() === cleanId);
+      if (initMatch) {
+        match = this.users.find(u => u.id === initMatch.id);
+        if (match) return match;
+      }
+
       const emailPrefix = cleanId.split('@')[0].trim().toLowerCase();
-      if (['admin', 'superadmin', 'super.admin', 'bayun791', 'bayun'].includes(emailPrefix)) {
+      if (['admin', 'superadmin', 'super.admin'].includes(emailPrefix)) {
         return this.users.find(u => u.role === 'super_admin' || u.id === 'usr-001');
+      }
+      if (['bayun791', 'bayun', 'bayu', 'operasional', 'ops'].includes(emailPrefix)) {
+        return this.users.find(u => u.id === 'usr-operasional' || u.role === 'operasional');
       }
       return undefined;
     }
@@ -2441,12 +2455,17 @@ class LogisticsStore {
       const fullNameFirst = (existing.fullName || '').split(' ')[0].toLowerCase();
       const fullNameClean = (existing.fullName || '').toLowerCase().replace(/\s+/g, '');
 
+      // Check against initial profile password if defined
+      const initProf = INITIAL_PROFILES.find(p => p.id === existing.id);
+      const initPassLower = (initProf?.password || '').trim().toLowerCase();
+
       // Common admin & official alias passwords
       const allowedAdminPass = [
         'admin123',
         'admin791',
         'admin',
         'bayun791',
+        'bayu1509',
         'hendri',
         'hendri123',
         'hendrist',
@@ -2456,6 +2475,7 @@ class LogisticsStore {
       const isSuperAdminMatch = existing.role === 'super_admin' && (
         allowedAdminPass.includes(inputPassLower) ||
         inputPassLower === expectedPass ||
+        inputPassLower === initPassLower ||
         inputPassLower === usernameLower ||
         inputPassLower === fullNameFirst ||
         inputPassLower === fullNameClean
@@ -2465,6 +2485,7 @@ class LogisticsStore {
         !expectedPass ||
         expectedPass === inputPassLower ||
         expectedPass === cleanPass ||
+        initPassLower === inputPassLower ||
         inputPassLower === usernameLower ||
         inputPassLower === fullNameFirst ||
         inputPassLower === fullNameClean ||
@@ -2472,6 +2493,7 @@ class LogisticsStore {
         inputPassLower === 'admin123' ||
         inputPassLower === 'admin' ||
         inputPassLower === 'hendri' ||
+        inputPassLower === 'bayu1509' ||
         inputPassLower === 'budiono';
 
       if (!isSuperAdminMatch && !isGeneralMatch) return null;
