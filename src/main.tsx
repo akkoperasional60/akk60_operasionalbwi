@@ -15,7 +15,7 @@ window.addEventListener('error', (event) => {
   }
 });
 
-// Auto-recover from stale chunk preloads on Vercel deployments
+// Auto-recover from stale chunk preloads on deployments
 window.addEventListener('vite:preloadError', (event) => {
   event.preventDefault();
   window.location.reload();

@@ -699,7 +699,7 @@ create policy "Drivers and Dispatchers can insert GPS tracking logs"
               <span>Arsitektur PostgreSQL & Panduan Produksi Supabase</span>
             </div>
             <h2 className="text-xl font-bold text-white tracking-tight">
-              Skema Database Supabase & Panduan Deploy Vercel
+              Skema Database Supabase & Panduan Deploy Hostinger
             </h2>
             <p className="text-slate-400 text-sm mt-1 max-w-2xl">
               Skrip SQL DDL PostgreSQL lengkap dengan definisi tabel, foreign key relasional, indeks performa, enum peran (RBAC), serta kebijakan Row Level Security (RLS) siap pakai di Supabase SQL Editor.
@@ -1151,61 +1151,249 @@ create policy "Drivers and Dispatchers can insert GPS tracking logs"
         )}
       </div>
 
-      {/* SQL Script Viewer */}
+      {/* Hostinger MySQL Database Inspector & Configuration */}
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-sm space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Database className="w-5 h-5 text-emerald-400" />
+            <h3 className="text-base font-bold text-white">Integritas Database Hostinger MySQL (mysql2 Engine)</h3>
+          </div>
+          <span className="text-xs px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 font-mono font-semibold border border-emerald-500/20">
+            Node.js Web App + MySQL 8.0 / MariaDB
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+          <div>
+            <label className="text-slate-400 block mb-1">HOSTINGER DB HOST & PORT</label>
+            <input
+              type="text"
+              readOnly
+              value="127.0.0.1:3306"
+              className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 font-mono"
+            />
+          </div>
+          <div>
+            <label className="text-slate-400 block mb-1">HOSTINGER DB NAME & USER</label>
+            <input
+              type="text"
+              readOnly
+              value="u194997008_akk_operasional / u194997008_akk_app"
+              className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-slate-300 font-mono"
+            />
+          </div>
+        </div>
+
+        <div className="p-3 rounded-lg bg-slate-950/80 border border-slate-800 text-xs text-slate-400 leading-relaxed">
+          💡 <strong className="text-white">Petunjuk Kredensial:</strong> Masukkan <code className="text-amber-300">DB_PASSWORD</code> pada Hostinger Dashboard -&gt; Environment Variables. Password tidak disimpan di dalam kode/GitHub demi keamanan enterprise.
+        </div>
+      </div>
+
+      {/* SQL Script Viewer for Hostinger phpMyAdmin */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
         <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Code2 className="w-4 h-4 text-emerald-400" />
-            <span className="text-xs font-bold text-white">schema.sql (PostgreSQL Supabase DDL)</span>
+            <span className="text-xs font-bold text-white">schema.sql (Hostinger MySQL / phpMyAdmin DDL)</span>
           </div>
 
           <button
-            onClick={() => copyToClipboard(fullSqlSchema, 'all-sql-header')}
+            onClick={() => copyToClipboard(`-- ====================================================================
+-- HOSTINGER MYSQL ENTERPRISE LOGISTICS & OPERATIONAL DATABASE SCHEMA
+-- For PT Anugrah Kemasan Kreatif (PT AKK Logistics Banyuwangi DC)
+-- Engine: MySQL / MariaDB (Importable via Hostinger phpMyAdmin)
+-- ====================================================================
+
+SET FOREIGN_KEY_CHECKS = 0;
+
+CREATE TABLE IF NOT EXISTS \`users\` (
+  \`id\` VARCHAR(64) NOT NULL PRIMARY KEY,
+  \`email\` VARCHAR(191) NOT NULL UNIQUE,
+  \`password_hash\` VARCHAR(255) NOT NULL,
+  \`full_name\` VARCHAR(255) NOT NULL,
+  \`role\` ENUM('super_admin', 'spv_logistik', 'driver') NOT NULL DEFAULT 'spv_logistik',
+  \`department\` VARCHAR(100) DEFAULT 'Logistics Operations',
+  \`phone\` VARCHAR(50) NULL,
+  \`status\` VARCHAR(20) DEFAULT 'approved',
+  \`created_at\` DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS \`fleets\` (
+  \`id\` VARCHAR(64) NOT NULL PRIMARY KEY,
+  \`plate_number\` VARCHAR(30) NOT NULL UNIQUE,
+  \`vehicle_type\` VARCHAR(100) NOT NULL,
+  \`tonnage_capacity\` DECIMAL(5,2) NOT NULL DEFAULT 0.00,
+  \`current_tonnage\` DECIMAL(5,2) DEFAULT 0.00,
+  \`status\` ENUM('available', 'on-duty', 'maintenance') DEFAULT 'available',
+  \`gps_imei\` VARCHAR(100) NULL,
+  \`fuel_level_percent\` INT DEFAULT 100,
+  \`odometer_km\` INT DEFAULT 0,
+  \`year\` INT DEFAULT 2024
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS \`crews\` (
+  \`id\` VARCHAR(64) NOT NULL PRIMARY KEY,
+  \`name\` VARCHAR(191) NOT NULL,
+  \`phone\` VARCHAR(50) NOT NULL,
+  \`role\` VARCHAR(50) NOT NULL,
+  \`license_number\` VARCHAR(100) NOT NULL,
+  \`license_type\` VARCHAR(50) NOT NULL,
+  \`status\` ENUM('available', 'on-duty', 'off') DEFAULT 'available',
+  \`trips_completed\` INT DEFAULT 0,
+  \`rating\` DECIMAL(3,2) DEFAULT 5.00
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS \`stores\` (
+  \`id\` VARCHAR(64) NOT NULL PRIMARY KEY,
+  \`store_code\` VARCHAR(50) NOT NULL UNIQUE,
+  \`store_name\` VARCHAR(191) NOT NULL,
+  \`island\` VARCHAR(100) NOT NULL,
+  \`province\` VARCHAR(100) NOT NULL,
+  \`city\` VARCHAR(100) NOT NULL,
+  \`address\` TEXT NOT NULL,
+  \`latitude\` DECIMAL(10, 8) NOT NULL,
+  \`longitude\` DECIMAL(11, 8) NOT NULL,
+  \`contact_person\` VARCHAR(100) NOT NULL,
+  \`phone\` VARCHAR(50) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS \`schedules\` (
+  \`id\` VARCHAR(64) NOT NULL PRIMARY KEY,
+  \`tracking_number\` VARCHAR(100) NOT NULL UNIQUE,
+  \`origin_name\` VARCHAR(191) DEFAULT 'Gudang Pusat Banyuwangi DC',
+  \`store_id\` VARCHAR(64) NULL,
+  \`fleet_id\` VARCHAR(64) NULL,
+  \`crew_id\` VARCHAR(64) NULL,
+  \`status\` ENUM('scheduled', 'in_transit', 'delivered', 'delayed') DEFAULT 'scheduled',
+  \`departure_date\` DATETIME NOT NULL,
+  \`estimated_arrival\` DATETIME NOT NULL,
+  \`cargo_description\` TEXT NOT NULL,
+  \`cargo_weight_ton\` DECIMAL(5,2) NOT NULL DEFAULT 0.00
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+SET FOREIGN_KEY_CHECKS = 1;
+`, 'all-sql-header')}
             className="text-xs text-slate-400 hover:text-white flex items-center gap-1"
           >
             {copiedSection === 'all-sql-header' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-            <span>Salin SQL</span>
+            <span>Salin MySQL DDL</span>
           </button>
         </div>
 
         <pre className="p-4 text-xs font-mono bg-slate-950 text-slate-300 overflow-x-auto max-h-[420px] leading-relaxed select-all">
-          {fullSqlSchema}
+{`-- ====================================================================
+-- HOSTINGER MYSQL ENTERPRISE LOGISTICS & OPERATIONAL DATABASE SCHEMA
+-- For PT Anugrah Kemasan Kreatif (PT AKK Logistics Banyuwangi DC)
+-- Engine: MySQL / MariaDB (Importable via Hostinger phpMyAdmin)
+-- ====================================================================
+
+SET FOREIGN_KEY_CHECKS = 0;
+
+CREATE TABLE IF NOT EXISTS \`users\` (
+  \`id\` VARCHAR(64) NOT NULL PRIMARY KEY,
+  \`email\` VARCHAR(191) NOT NULL UNIQUE,
+  \`password_hash\` VARCHAR(255) NOT NULL,
+  \`full_name\` VARCHAR(255) NOT NULL,
+  \`role\` ENUM('super_admin', 'spv_logistik', 'driver') NOT NULL DEFAULT 'spv_logistik',
+  \`department\` VARCHAR(100) DEFAULT 'Logistics Operations',
+  \`phone\` VARCHAR(50) NULL,
+  \`status\` VARCHAR(20) DEFAULT 'approved',
+  \`created_at\` DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS \`fleets\` (
+  \`id\` VARCHAR(64) NOT NULL PRIMARY KEY,
+  \`plate_number\` VARCHAR(30) NOT NULL UNIQUE,
+  \`vehicle_type\` VARCHAR(100) NOT NULL,
+  \`tonnage_capacity\` DECIMAL(5,2) NOT NULL DEFAULT 0.00,
+  \`current_tonnage\` DECIMAL(5,2) DEFAULT 0.00,
+  \`status\` ENUM('available', 'on-duty', 'maintenance') DEFAULT 'available',
+  \`gps_imei\` VARCHAR(100) NULL,
+  \`fuel_level_percent\` INT DEFAULT 100,
+  \`odometer_km\` INT DEFAULT 0,
+  \`year\` INT DEFAULT 2024
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS \`crews\` (
+  \`id\` VARCHAR(64) NOT NULL PRIMARY KEY,
+  \`name\` VARCHAR(191) NOT NULL,
+  \`phone\` VARCHAR(50) NOT NULL,
+  \`role\` VARCHAR(50) NOT NULL,
+  \`license_number\` VARCHAR(100) NOT NULL,
+  \`license_type\` VARCHAR(50) NOT NULL,
+  \`status\` ENUM('available', 'on-duty', 'off') DEFAULT 'available',
+  \`trips_completed\` INT DEFAULT 0,
+  \`rating\` DECIMAL(3,2) DEFAULT 5.00
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS \`stores\` (
+  \`id\` VARCHAR(64) NOT NULL PRIMARY KEY,
+  \`store_code\` VARCHAR(50) NOT NULL UNIQUE,
+  \`store_name\` VARCHAR(191) NOT NULL,
+  \`island\` VARCHAR(100) NOT NULL,
+  \`province\` VARCHAR(100) NOT NULL,
+  \`city\` VARCHAR(100) NOT NULL,
+  \`address\` TEXT NOT NULL,
+  \`latitude\` DECIMAL(10, 8) NOT NULL,
+  \`longitude\` DECIMAL(11, 8) NOT NULL,
+  \`contact_person\` VARCHAR(100) NOT NULL,
+  \`phone\` VARCHAR(50) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS \`schedules\` (
+  \`id\` VARCHAR(64) NOT NULL PRIMARY KEY,
+  \`tracking_number\` VARCHAR(100) NOT NULL UNIQUE,
+  \`origin_name\` VARCHAR(191) DEFAULT 'Gudang Pusat Banyuwangi DC',
+  \`store_id\` VARCHAR(64) NULL,
+  \`fleet_id\` VARCHAR(64) NULL,
+  \`crew_id\` VARCHAR(64) NULL,
+  \`status\` ENUM('scheduled', 'in_transit', 'delivered', 'delayed') DEFAULT 'scheduled',
+  \`departure_date\` DATETIME NOT NULL,
+  \`estimated_arrival\` DATETIME NOT NULL,
+  \`cargo_description\` TEXT NOT NULL,
+  \`cargo_weight_ton\` DECIMAL(5,2) NOT NULL DEFAULT 0.00
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+SET FOREIGN_KEY_CHECKS = 1;`}
         </pre>
       </div>
 
-      {/* Vercel Deployment & Setup Walkthrough */}
+      {/* Hostinger Deployment & Setup Walkthrough */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-sm space-y-4">
         <div className="flex items-center gap-2">
           <Globe className="w-5 h-5 text-blue-400" />
-          <h3 className="text-base font-bold text-white">Panduan Deploy ke Vercel & Supabase Production</h3>
+          <h3 className="text-base font-bold text-white">Panduan Import Database ke Hostinger phpMyAdmin</h3>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs pt-2">
           <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2">
             <div className="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-400 font-bold flex items-center justify-center">1</div>
-            <h4 className="font-bold text-white text-sm">Buat Database Supabase</h4>
+            <h4 className="font-bold text-white text-sm">Impor ke phpMyAdmin</h4>
             <p className="text-slate-400 leading-relaxed">
-              Login ke <strong>supabase.com</strong>, buat project baru, buka menu <strong>SQL Editor</strong>, lalu tempel skrip SQL di atas dan klik <strong>Run</strong>.
+              Buka <strong>Hostinger Dashboard &gt; Databases &gt; phpMyAdmin</strong>, pilih database <code className="text-emerald-300">u194997008_akk_operasional</code>, masuk ke tab <strong>SQL</strong>, tempel DDL di atas dan klik <strong>Go</strong>.
             </p>
           </div>
 
           <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2">
             <div className="w-7 h-7 rounded-lg bg-blue-500/10 text-blue-400 font-bold flex items-center justify-center">2</div>
-            <h4 className="font-bold text-white text-sm">Atur Environment Variables</h4>
+            <h4 className="font-bold text-white text-sm">Isi Environment Variables</h4>
             <p className="text-slate-400 leading-relaxed">
-              Salin <strong>Project URL</strong> dan <strong>anon key</strong> dari Supabase Project Settings &gt; API. Simpan ke <code>.env.local</code> atau panel Vercel:
+              Di <strong>Hostinger Node.js Web App Dashboard &gt; Environment Variables</strong>, atur variabel runtime berikut:
             </p>
-            <div className="font-mono text-[11px] p-2 rounded bg-slate-900 text-slate-300">
-              NEXT_PUBLIC_SUPABASE_URL=...<br/>
-              NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+            <div className="font-mono text-[11px] p-2 rounded bg-slate-900 text-slate-300 leading-normal">
+              DB_HOST=127.0.0.1<br/>
+              DB_PORT=3306<br/>
+              DB_NAME=u194997008_akk_operasional<br/>
+              DB_USER=u194997008_akk_app<br/>
+              DB_PASSWORD=[PASSWORD_AKU]
             </div>
           </div>
 
           <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2">
             <div className="w-7 h-7 rounded-lg bg-purple-500/10 text-purple-400 font-bold flex items-center justify-center">3</div>
-            <h4 className="font-bold text-white text-sm">Deploy ke Vercel</h4>
+            <h4 className="font-bold text-white text-sm">Auto-Deploy via GitHub</h4>
             <p className="text-slate-400 leading-relaxed">
-              Push kode ke GitHub, buka <strong>vercel.com</strong>, pilih <strong>Import Project</strong>, tambahkan environment variables di atas, lalu klik <strong>Deploy</strong>. Selesai dalam hitungan menit!
+              Push perubahan ke GitHub main. Hostinger akan otomatis melakukan build (<code className="text-white">npm run build</code>) dan menjalankan server (<code className="text-white">npm start</code>) pada Node 22.x!
             </p>
           </div>
         </div>

@@ -199,7 +199,7 @@ export const E2ETesterModule: React.FC<E2ETesterModuleProps> = ({ onNavigate }) 
             <span>Pusat Pengujian E2E &amp; Simulasi Akun Pengguna</span>
           </h1>
           <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
-            Menjalankan validasi otomatis alur kerja operasional antar peran (Super Admin, SPV Logistik, Driver, Helper, Sales) untuk memastikan tidak ada alur yang terlewat, izin RBAC bocor, atau gagal diproses sebelum dan sesudah dipublikasikan ke Vercel / GitHub.
+            Menjalankan validasi otomatis alur kerja operasional antar peran (Super Admin, SPV Logistik, Driver, Helper, Sales) untuk memastikan tidak ada alur yang terlewat, izin RBAC bocor, atau gagal diproses sebelum dan sesudah dipublikasikan ke Hostinger / GitHub.
           </p>
         </div>
 
@@ -540,21 +540,21 @@ export const E2ETesterModule: React.FC<E2ETesterModuleProps> = ({ onNavigate }) 
       </div>
 
       {/* ========================================================================= */}
-      {/* 5. VERCEL & GITHUB DEPLOYMENT SECURITY AUDIT CARD                         */}
+      {/* 5. HOSTINGER & GITHUB DEPLOYMENT SECURITY AUDIT CARD                      */}
       {/* ========================================================================= */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
         <h3 className="text-sm font-bold text-white flex items-center gap-2">
           <Server className="w-4 h-4 text-cyan-400" />
-          <span>Status Kesiapan Publikasi Vercel &amp; Repositori GitHub</span>
+          <span>Status Kesiapan Publikasi Hostinger &amp; Repositori GitHub</span>
         </h3>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1 text-xs">
           <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1">
             <div className="flex items-center gap-2 text-emerald-400 font-bold">
               <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>vercel.json Terkonfigurasi</span>
+              <span>Hostinger Node 22 Terkonfigurasi</span>
             </div>
             <p className="text-[11px] text-slate-400">
-              Output build diatur ke folder <code className="text-white">dist</code> dan routing SPA rewrite <code className="text-white">/(.*) -&gt; /index.html</code> aktif.
+              Build command <code className="text-white">npm run build</code>, start command <code className="text-white">tsx server.ts</code>, dan Node <code className="text-white">22.x</code> aktif.
             </p>
           </div>
 

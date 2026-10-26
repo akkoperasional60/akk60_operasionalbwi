@@ -1,231 +1,207 @@
 -- ====================================================================
--- SUPABASE POSTGRESQL ENTERPRISE LOGISTICS & B2B SUPPLY CHAIN SCHEMA
--- Includes Row Level Security (RLS), Indexes, and Foreign Key Cascades
+-- HOSTINGER MYSQL ENTERPRISE LOGISTICS & OPERATIONAL DATABASE SCHEMA
+-- For PT Anugrah Kemasan Kreatif (PT AKK Logistics Banyuwangi DC)
+-- Engine: MySQL / MariaDB (Importable via Hostinger phpMyAdmin)
 -- ====================================================================
 
--- 1. Enable Required Extensions
-create extension if not exists "uuid-ossp";
+SET FOREIGN_KEY_CHECKS = 0;
 
--- 2. User Roles Enum for RBAC
-create type user_role as enum ('super_admin', 'spv_logistik', 'driver');
+-- 1. USERS & PROFILES (Authentication & Role Based Access Control)
+CREATE TABLE IF NOT EXISTS `users` (
+  `id` VARCHAR(64) NOT NULL PRIMARY KEY,
+  `email` VARCHAR(191) NOT NULL UNIQUE,
+  `password_hash` VARCHAR(255) NOT NULL,
+  `full_name` VARCHAR(255) NOT NULL,
+  `role` ENUM('super_admin', 'spv_logistik', 'driver') NOT NULL DEFAULT 'spv_logistik',
+  `department` VARCHAR(100) DEFAULT 'Logistics Operations',
+  `phone` VARCHAR(50) NULL,
+  `status` VARCHAR(20) DEFAULT 'approved',
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 3. PROFILES (Extends Supabase auth.users)
-create table public.profiles (
-  id uuid references auth.users on delete cascade primary key,
-  email text unique not null,
-  full_name text not null,
-  role user_role default 'spv_logistik'::user_role,
-  department text default 'Logistics Operations',
-  phone text,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
-);
+-- 2. FLEETS (Armada Kendaraan Operasional)
+CREATE TABLE IF NOT EXISTS `fleets` (
+  `id` VARCHAR(64) NOT NULL PRIMARY KEY,
+  `plate_number` VARCHAR(30) NOT NULL UNIQUE,
+  `vehicle_type` VARCHAR(100) NOT NULL, -- 'Pick Up Box', 'Engkel STD', 'Engkel Long', 'Double STD'
+  `tonnage_capacity` DECIMAL(5,2) NOT NULL DEFAULT 0.00, -- metric tons
+  `current_tonnage` DECIMAL(5,2) DEFAULT 0.00,
+  `status` ENUM('available', 'on-duty', 'maintenance') DEFAULT 'available',
+  `gps_imei` VARCHAR(100) NULL,
+  `fuel_level_percent` INT DEFAULT 100,
+  `odometer_km` INT DEFAULT 0,
+  `year` INT DEFAULT 2024,
+  `last_maintenance` DATE NULL,
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-alter table public.profiles enable row level security;
+-- 3. CREWS (Supir dan Helper / Kernet)
+CREATE TABLE IF NOT EXISTS `crews` (
+  `id` VARCHAR(64) NOT NULL PRIMARY KEY,
+  `name` VARCHAR(191) NOT NULL,
+  `phone` VARCHAR(50) NOT NULL,
+  `role` VARCHAR(50) NOT NULL, -- 'Driver Utama', 'Driver Cadangan', 'Kernet / Helper'
+  `license_number` VARCHAR(100) NOT NULL,
+  `license_type` VARCHAR(50) NOT NULL, -- 'SIM B2 Umum', 'SIM B1 Umum', 'SIM A'
+  `status` ENUM('available', 'on-duty', 'off') DEFAULT 'available',
+  `trips_completed` INT DEFAULT 0,
+  `rating` DECIMAL(3,2) DEFAULT 5.00,
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-create policy "Public profiles are viewable by authenticated users."
-  on public.profiles for select
-  to authenticated
-  using (true);
+-- 4. STORES (Toko Retail & Outlet Pelanggan)
+CREATE TABLE IF NOT EXISTS `stores` (
+  `id` VARCHAR(64) NOT NULL PRIMARY KEY,
+  `store_code` VARCHAR(50) NOT NULL UNIQUE,
+  `store_name` VARCHAR(191) NOT NULL,
+  `island` VARCHAR(100) NOT NULL, -- 'Jawa', 'Bali & Nusa Tenggara', 'Sumatera', etc.
+  `province` VARCHAR(100) NOT NULL,
+  `city` VARCHAR(100) NOT NULL,
+  `address` TEXT NOT NULL,
+  `latitude` DECIMAL(10, 8) NOT NULL,
+  `longitude` DECIMAL(11, 8) NOT NULL,
+  `contact_person` VARCHAR(100) NOT NULL,
+  `phone` VARCHAR(50) NOT NULL,
+  `delivery_window` VARCHAR(50) DEFAULT '08:00 - 17:00',
+  `store_category` VARCHAR(50) DEFAULT 'Supermarket',
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-create policy "Users can update their own profile."
-  on public.profiles for update
-  to authenticated
-  using (auth.uid() = id);
+-- 5. SCHEDULES (Jadwal Pengiriman & Penugasan Logistik)
+CREATE TABLE IF NOT EXISTS `schedules` (
+  `id` VARCHAR(64) NOT NULL PRIMARY KEY,
+  `tracking_number` VARCHAR(100) NOT NULL UNIQUE,
+  `origin_name` VARCHAR(191) DEFAULT 'Gudang Pusat Banyuwangi DC',
+  `origin_latitude` DECIMAL(10, 8) DEFAULT -8.19060000,
+  `origin_longitude` DECIMAL(11, 8) DEFAULT 114.37080000,
+  `store_id` VARCHAR(64) NULL,
+  `fleet_id` VARCHAR(64) NULL,
+  `crew_id` VARCHAR(64) NULL,
+  `status` ENUM('scheduled', 'in_transit', 'delivered', 'delayed') DEFAULT 'scheduled',
+  `departure_date` DATETIME NOT NULL,
+  `estimated_arrival` DATETIME NOT NULL,
+  `actual_arrival` DATETIME NULL,
+  `cargo_description` TEXT NOT NULL,
+  `cargo_weight_ton` DECIMAL(5,2) NOT NULL DEFAULT 0.00,
+  `is_inter_island` TINYINT(1) DEFAULT 0,
+  `ferry_booking_code` VARCHAR(100) NULL,
+  `transit_port` VARCHAR(100) NULL,
+  `notes` TEXT NULL,
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (`store_id`) REFERENCES `stores`(`id`) ON DELETE SET NULL,
+  FOREIGN KEY (`fleet_id`) REFERENCES `fleets`(`id`) ON DELETE SET NULL,
+  FOREIGN KEY (`crew_id`) REFERENCES `crews`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-create policy "Super admins can manage all profiles."
-  on public.profiles for all
-  to authenticated
-  using (
-    exists (
-      select 1 from public.profiles
-      where profiles.id = auth.uid() and profiles.role = 'super_admin'
-    )
-  );
+-- 6. TRACKING_LOGS (Historis GPS & Tracking Operations)
+CREATE TABLE IF NOT EXISTS `tracking_logs` (
+  `id` VARCHAR(64) NOT NULL PRIMARY KEY,
+  `schedule_id` VARCHAR(64) NOT NULL,
+  `timestamp` DATETIME NOT NULL,
+  `latitude` DECIMAL(10, 8) NOT NULL,
+  `longitude` DECIMAL(11, 8) NOT NULL,
+  `speed` DECIMAL(5, 2) DEFAULT 0.00,
+  `engine_status` ENUM('RUNNING', 'STOP', 'IDLE') DEFAULT 'IDLE',
+  `location_name` VARCHAR(255) NULL,
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (`schedule_id`) REFERENCES `schedules`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 4. FLEETS (Armada Kendaraan)
-create table public.fleets (
-  id uuid default uuid_generate_v4() primary key,
-  plate_number text unique not null,
-  vehicle_type text not null, -- 'Pick Up Box', 'Engkel STD', 'Engkel Long', 'Double STD'
-  tonnage_capacity numeric(5,2) not null, -- in metric tons
-  current_tonnage numeric(5,2) default 0,
-  status text default 'available' check (status in ('available', 'on-duty', 'maintenance')),
-  gps_imei text,
-  fuel_level_percent integer default 100 check (fuel_level_percent between 0 and 100),
-  odometer_km integer default 0,
-  year integer default 2024,
-  last_maintenance date default current_date,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
-);
+-- 7. DATABRIDGE_SYNC_LOGS (Google Sheets & External API Sync Audit)
+CREATE TABLE IF NOT EXISTS `databridge_sync_logs` (
+  `id` VARCHAR(64) NOT NULL PRIMARY KEY,
+  `timestamp` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `status` ENUM('success', 'warning', 'error', 'in_progress') DEFAULT 'success',
+  `source_type` VARCHAR(100) DEFAULT 'google_sheets_api',
+  `sheet_name` VARCHAR(100) NULL,
+  `stores_count` INT DEFAULT 0,
+  `schedules_count` INT DEFAULT 0,
+  `fleets_count` INT DEFAULT 0,
+  `crews_count` INT DEFAULT 0,
+  `details` JSON NULL,
+  `message` TEXT NULL,
+  `duration_ms` INT DEFAULT 0
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-alter table public.fleets enable row level security;
+-- 8. SPARE_PARTS (Inventaris & Stok Bengkel)
+CREATE TABLE IF NOT EXISTS `spare_parts` (
+  `id` VARCHAR(64) NOT NULL PRIMARY KEY,
+  `code` VARCHAR(50) NOT NULL UNIQUE,
+  `name` VARCHAR(191) NOT NULL,
+  `category` VARCHAR(100) NOT NULL,
+  `stock` INT DEFAULT 0,
+  `min_stock` INT DEFAULT 5,
+  `unit_price` DECIMAL(12,2) DEFAULT 0.00,
+  `supplier` VARCHAR(191) NULL,
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-create policy "Fleets readable by all authenticated users"
-  on public.fleets for select
-  to authenticated
-  using (true);
+-- 9. FUEL_LOGS (Pencatatan Klaim BBM & Efisiensi)
+CREATE TABLE IF NOT EXISTS `fuel_logs` (
+  `id` VARCHAR(64) NOT NULL PRIMARY KEY,
+  `fleet_id` VARCHAR(64) NOT NULL,
+  `driver_name` VARCHAR(191) NOT NULL,
+  `fuel_liters` DECIMAL(8,2) NOT NULL,
+  `cost_rupiah` DECIMAL(12,2) NOT NULL,
+  `odometer_km` INT NOT NULL,
+  `spbu_location` VARCHAR(191) NOT NULL,
+  `logged_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (`fleet_id`) REFERENCES `fleets`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-create policy "Fleets modifiable by admins and spv_logistiks"
-  on public.fleets for all
-  to authenticated
-  using (
-    exists (
-      select 1 from public.profiles
-      where profiles.id = auth.uid() and profiles.role in ('super_admin', 'spv_logistik')
-    )
-  );
 
--- 5. CREWS (Supir dan Kernet)
-create table public.crews (
-  id uuid default uuid_generate_v4() primary key,
-  name text not null,
-  phone text not null,
-  role text not null check (role in ('Driver Utama', 'Driver Cadangan', 'Kernet / Helper')),
-  license_number text not null,
-  license_type text not null check (license_type in ('SIM B2 Umum', 'SIM B1 Umum', 'SIM A')),
-  status text default 'available' check (status in ('available', 'on-duty', 'off')),
-  trips_completed integer default 0,
-  rating numeric(3,2) default 5.00,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
-);
+-- ====================================================================
+-- SEED DATA SETUP (Data Operasional Awal PT AKK Logistics)
+-- ====================================================================
 
-alter table public.crews enable row level security;
+-- Default Users (Super Admin & Head of Logistics)
+INSERT IGNORE INTO `users` (`id`, `email`, `password_hash`, `full_name`, `role`, `department`, `phone`, `status`) VALUES
+('usr-001', 'bayun791@gmail.com', 'Bayu1509', 'Bayu Novianto Dimas Permana, S.Si', 'super_admin', 'Direksi Operasional & Supply Chain', '0812-1351-3590', 'approved'),
+('usr-002', 'hendri@akk.co.id', 'Hendri', 'Hendri ST', 'spv_logistik', 'Head of Logistics', '0812-3456-7890', 'approved'),
+('usr-003', 'zainul@akk.co.id', 'driver123', 'Zainul Agustiar', 'driver', 'Fleet Driver', '0821-4455-6677', 'approved');
 
-create policy "Crews viewable by authenticated users"
-  on public.crews for select
-  to authenticated
-  using (true);
+-- Default Fleets (12 Unit Utama PT AKK Logistics)
+INSERT IGNORE INTO `fleets` (`id`, `plate_number`, `vehicle_type`, `tonnage_capacity`, `current_tonnage`, `status`, `fuel_level_percent`, `odometer_km`, `year`) VALUES
+('flt-001', 'P 8125 VC', 'Pick Up Box L300', 1.50, 1.20, 'on-duty', 85, 125400, 2022),
+('flt-002', 'P 8509 VQ', 'Pick Up Box Traga', 1.80, 1.50, 'on-duty', 90, 98200, 2023),
+('flt-003', 'P 8848 U', 'Engkel STD Canter', 3.50, 0.00, 'available', 100, 142100, 2021),
+('flt-004', 'P 9677 VB', 'Engkel STD Canter', 3.50, 3.10, 'on-duty', 75, 115000, 2022),
+('flt-005', 'P 8801 UV', 'Engkel STD Canter', 3.50, 0.00, 'available', 100, 131400, 2021),
+('flt-006', 'P 8381 VE', 'Engkel Long Hino', 5.00, 0.00, 'maintenance', 50, 189000, 2020),
+('flt-007', 'P 8711 UW', 'Engkel Long Hino', 5.00, 0.00, 'available', 95, 162300, 2021),
+('flt-008', 'P 9281 VA', 'Double STD Hino', 8.00, 0.00, 'available', 90, 210500, 2019),
+('flt-009', 'P 8928 UR', 'Double STD Hino', 8.00, 0.00, 'available', 80, 198000, 2020),
+('flt-010', 'P 9194 SA', 'Double STD Hino', 8.00, 0.00, 'available', 85, 205000, 2019),
+('flt-011', 'W 8229 US', 'Double STD Isuzu NMR', 8.00, 0.00, 'available', 90, 175400, 2022),
+('flt-012', 'W 8603 PG', 'Double STD Isuzu NMR', 8.00, 0.00, 'available', 95, 168900, 2022);
 
-create policy "Crews modifiable by admins and spv_logistiks"
-  on public.crews for all
-  to authenticated
-  using (
-    exists (
-      select 1 from public.profiles
-      where profiles.id = auth.uid() and profiles.role in ('super_admin', 'spv_logistik')
-    )
-  );
+-- Default Crews
+INSERT IGNORE INTO `crews` (`id`, `name`, `phone`, `role`, `license_number`, `license_type`, `status`, `trips_completed`) VALUES
+('crw-001', 'Zainul Agustiar', '0821-4455-6677', 'Driver Utama', 'B2U-99882211', 'SIM B2 Umum', 'on-duty', 142),
+('crw-002', 'Aan Adi Saputra', '0821-4455-6688', 'Kernet / Helper', 'HLP-10293847', 'SIM A', 'on-duty', 110),
+('crw-003', 'Ach Taufiq', '0813-8877-6655', 'Driver Utama', 'B2U-77665544', 'SIM B2 Umum', 'on-duty', 128),
+('crw-004', 'Bintang Wahyu Pratama', '0813-8877-6666', 'Kernet / Helper', 'HLP-20394857', 'SIM A', 'on-duty', 95),
+('crw-005', 'Aldi Wahyu Pradana', '0857-1122-3344', 'Driver Utama', 'B1U-55443322', 'SIM B1 Umum', 'available', 86),
+('crw-006', 'Alphian Bayu Nugraha', '0857-1122-3355', 'Kernet / Helper', 'HLP-30495867', 'SIM A', 'available', 78),
+('crw-007', 'Suwarno', '0812-9900-1122', 'Driver Cadangan', 'B2U-33221100', 'SIM B2 Umum', 'available', 65),
+('crw-008', 'Adit', '0812-9900-1133', 'Driver Cadangan', 'B1U-44332211', 'SIM B1 Umum', 'available', 52);
 
--- 6. STORES (Toko Retail & Koordinat Pelanggan)
-create table public.stores (
-  id uuid default uuid_generate_v4() primary key,
-  store_code text unique not null,
-  store_name text not null,
-  island text not null, -- 'Jawa', 'Sumatera', 'Bali & Nusa Tenggara', 'Kalimantan', 'Sulawesi', 'Papua & Maluku'
-  province text not null,
-  city text not null,
-  address text not null,
-  latitude numeric(10, 8) not null,
-  longitude numeric(11, 8) not null,
-  contact_person text not null,
-  phone text not null,
-  delivery_window text default '08:00 - 17:00',
-  store_category text default 'Supermarket' check (store_category in ('Hypermarket', 'Supermarket', 'Distribution Hub', 'Minimarket Cluster')),
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
-);
+-- Default Stores
+INSERT IGNORE INTO `stores` (`id`, `store_code`, `store_name`, `island`, `province`, `city`, `address`, `latitude`, `longitude`, `contact_person`, `phone`, `store_category`) VALUES
+('str-001', 'STR-BALI-01', 'Hypermart Mall Bali Galleria', 'Bali & Nusa Tenggara', 'Bali', 'Badung', 'Jl. Bypass Ngurah Rai, Kuta, Badung, Bali', -8.71880000, 115.18340000, 'I Made Suardana', '0819-3344-5566', 'Hypermarket'),
+('str-002', 'STR-SBY-02', 'Lotte Grosir Surabaya', 'Jawa', 'Jawa Timur', 'Surabaya', 'Jl. Raya Mastrip No.5, Warugunung, Surabaya', -7.34120000, 112.69800000, 'Budi Santoso', '0812-8899-0011', 'Distribution Hub'),
+('str-003', 'STR-BPN-03', 'Transmart Balikpapan', 'Kalimantan', 'Kalimantan Timur', 'Balikpapan', 'Jl. MT Haryono No.18, Balikpapan', -1.24830000, 116.86120000, 'Eko Prasetyo', '0822-7766-5544', 'Hypermarket'),
+('str-004', 'STR-BWI-04', 'Abba Mart Sobo Banyuwangi', 'Jawa', 'Jawa Timur', 'Banyuwangi', 'Jl. S. Parman No.42, Sobo, Banyuwangi', -8.22510000, 114.36820000, 'Hj. Fatimah', '0813-1122-3344', 'Supermarket');
 
-alter table public.stores enable row level security;
+-- Default Schedules
+INSERT IGNORE INTO `schedules` (`id`, `tracking_number`, `origin_name`, `origin_latitude`, `origin_longitude`, `store_id`, `fleet_id`, `crew_id`, `status`, `departure_date`, `estimated_arrival`, `cargo_description`, `cargo_weight_ton`, `is_inter_island`, `ferry_booking_code`, `transit_port`) VALUES
+('sch-001', 'TRK-2026-09-082', 'Gudang Pusat Banyuwangi DC', -8.19060000, 114.37080000, 'str-001', 'flt-001', 'crw-001', 'in_transit', '2026-09-10 08:00:00', '2026-09-10 16:00:00', 'Karton Kemasan Makanan & Botol Plastik (120 Karton)', 1.20, 1, 'ASDP-KTG-GIL-882109', 'Pelabuhan Ketapang'),
+('sch-002', 'TRK-2026-09-083', 'Gudang Pusat Banyuwangi DC', -8.19060000, 114.37080000, 'str-002', 'flt-002', 'crw-003', 'in_transit', '2026-09-10 09:30:00', '2026-09-10 18:00:00', 'Kemasan Fleksibel Standup Pouch (150 Box)', 1.50, 0, NULL, NULL),
+('sch-003', 'TRK-2026-09-084', 'Gudang Pusat Banyuwangi DC', -8.19060000, 114.37080000, 'str-003', 'flt-004', 'crw-005', 'scheduled', '2026-09-11 06:00:00', '2026-09-13 12:00:00', 'Palet Kemasan Produk Industri Fast Moving Consumer Goods', 3.10, 1, 'PELNI-DF7-99201', 'Pelabuhan Tanjung Perak');
 
-create policy "Stores viewable by all authenticated users"
-  on public.stores for select
-  to authenticated
-  using (true);
-
-create policy "Stores modifiable by spv_logistiks and admins"
-  on public.stores for all
-  to authenticated
-  using (
-    exists (
-      select 1 from public.profiles
-      where profiles.id = auth.uid() and profiles.role in ('super_admin', 'spv_logistik')
-    )
-  );
-
--- 7. SCHEDULES (Jadwal Pengiriman & Penugasan Logistik)
-create table public.schedules (
-  id uuid default uuid_generate_v4() primary key,
-  tracking_number text unique not null,
-  origin_name text default 'Gudang Pusat Banyuwangi DC',
-  origin_latitude numeric(10, 8) default -8.1906,
-  origin_longitude numeric(11, 8) default 114.3708,
-  store_id uuid references public.stores(id) on delete cascade not null,
-  fleet_id uuid references public.fleets(id) on delete set null,
-  crew_id uuid references public.crews(id) on delete set null,
-  status text default 'scheduled' check (status in ('scheduled', 'in_transit', 'delivered', 'delayed')),
-  departure_date timestamp with time zone not null,
-  estimated_arrival timestamp with time zone not null,
-  actual_arrival timestamp with time zone,
-  cargo_description text not null,
-  cargo_weight_ton numeric(5,2) not null,
-  is_inter_island boolean default false,
-  ferry_booking_code text,
-  transit_port text,
-  notes text,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
-);
-
-alter table public.schedules enable row level security;
-
-create policy "Schedules viewable by all authenticated users"
-  on public.schedules for select
-  to authenticated
-  using (true);
-
-create policy "Schedules modifiable by spv_logistiks and admins"
-  on public.schedules for all
-  to authenticated
-  using (
-    exists (
-      select 1 from public.profiles
-      where profiles.id = auth.uid() and profiles.role in ('super_admin', 'spv_logistik')
-    )
-  );
-
--- 8. TRACKING_LOGS (Data Historis Import Excel GPS & Tracksolid)
-create table public.tracking_logs (
-  id uuid default uuid_generate_v4() primary key,
-  schedule_id uuid references public.schedules(id) on delete cascade not null,
-  timestamp timestamp with time zone not null,
-  latitude numeric(10, 8) not null,
-  longitude numeric(11, 8) not null,
-  speed numeric(5, 2) default 0, -- in km/h
-  engine_status text default 'IDLE' check (engine_status in ('RUNNING', 'STOP', 'IDLE')),
-  location_name text,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
-);
-
-create index idx_tracking_logs_schedule on public.tracking_logs(schedule_id);
-create index idx_tracking_logs_timestamp on public.tracking_logs(timestamp);
-
-alter table public.tracking_logs enable row level security;
-
-create policy "Tracking logs accessible by authenticated users"
-  on public.tracking_logs for all
-  to authenticated
-  using (true);
-
--- 9. DATABRIDGE POLICIES & SYNC AUDIT LOGS (Google Sheets to Supabase DataBridge)
--- Memungkinkan integrasi otomatis dua arah & upsert terjadwal dari Google Sheets API
-create policy "DataBridge sync stores" on public.stores for all to anon, authenticated using (true) with check (true);
-create policy "DataBridge sync fleets" on public.fleets for all to anon, authenticated using (true) with check (true);
-create policy "DataBridge sync crews" on public.crews for all to anon, authenticated using (true) with check (true);
-create policy "DataBridge sync schedules" on public.schedules for all to anon, authenticated using (true) with check (true);
-create policy "DataBridge sync tracking logs" on public.tracking_logs for all to anon, authenticated using (true) with check (true);
-
-create table if not exists public.databridge_sync_logs (
-  id uuid default uuid_generate_v4() primary key,
-  timestamp timestamp with time zone default timezone('utc'::text, now()) not null,
-  status text not null check (status in ('success', 'warning', 'error', 'in_progress')),
-  source_type text default 'google_sheets_api',
-  sheet_name text,
-  stores_count integer default 0,
-  schedules_count integer default 0,
-  fleets_count integer default 0,
-  crews_count integer default 0,
-  details jsonb,
-  message text,
-  duration_ms integer default 0
-);
-
-alter table public.databridge_sync_logs enable row level security;
-create policy "DataBridge logs viewable and insertable" on public.databridge_sync_logs for all to anon, authenticated using (true) with check (true);
+SET FOREIGN_KEY_CHECKS = 1;

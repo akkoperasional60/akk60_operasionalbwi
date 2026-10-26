@@ -11,10 +11,13 @@
     "build:driver": "BUILD_TARGET=driver vite build",
     "build:both": "BUILD_TARGET=portal vite build && BUILD_TARGET=driver vite build",
     "build:apk": "python3 scripts/build_apk.py",
-    "start": "node server.ts",
+    "start": "tsx server.ts",
     "clean": "rm -rf dist dist-portal dist-driver",
     "lint": "tsc --noEmit",
     "test": "tsx scripts/run_e2e_tests.ts"
+  },
+  "engines": {
+    "node": "22.x"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -40,6 +43,7 @@
     "leaflet.markercluster": "^1.5.3",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
+    "mysql2": "^3.24.6",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "react-to-print": "^3.3.0",

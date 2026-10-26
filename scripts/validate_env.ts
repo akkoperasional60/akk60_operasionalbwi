@@ -37,7 +37,7 @@ for (const key of requiredKeys) {
 if (missingRequired.length > 0) {
   console.warn('⚠️ [Pre-Build Warning] Variabel lingkungan berikut belum diatur:');
   missingRequired.forEach(k => console.warn(`   - ${k}`));
-  console.warn('   Pastikan telah mengonfigurasinya di Vercel Dashboard (Settings -> Environment Variables) atau berkas .env lokal.');
+  console.warn('   Pastikan telah mengonfigurasinya di Hostinger Dashboard (Website -> Environment Variables) atau berkas .env lokal.');
   console.warn('   Aplikasi akan menggunakan fallback default bawaan, namun disarankan untuk mengatur variabel ini untuk produksi.');
 } else {
   console.log('✅ [Pre-Build] Semua variabel lingkungan esensial terpenuhi.');

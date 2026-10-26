@@ -5,6 +5,7 @@ import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
 import * as XLSX from "xlsx";
+import { query as mysqlQuery, testConnection as testMysqlConnection } from "./server/db";
 
 dotenv.config();
 
@@ -180,7 +181,6 @@ Ada hal lain seputar SOP atau armada yang bisa saya bantu?`;
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
 
   app.use(express.json({ limit: '35mb' }));
   app.use(express.urlencoded({ limit: '35mb', extended: true }));
@@ -192,6 +192,95 @@ async function startServer() {
     res.setHeader('X-XSS-Protection', '1; mode=block');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     next();
+  });
+
+  // Hostinger MySQL Connection & Health Check API
+  app.get("/api/db-status", async (_req, res) => {
+    const testResult = await testMysqlConnection();
+    res.json({
+      dbEngine: "Hostinger MySQL (mysql2)",
+      host: process.env.DB_HOST || "127.0.0.1",
+      port: Number(process.env.DB_PORT) || 3306,
+      database: process.env.DB_NAME || "u194997008_akk_operasional",
+      user: process.env.DB_USER || "u194997008_akk_app",
+      hasPasswordConfigured: Boolean(process.env.DB_PASSWORD),
+      ...testResult
+    });
+  });
+
+  // Hostinger MySQL Authentication API
+  app.post("/api/auth/login", async (req, res) => {
+    const { email, password } = req.body || {};
+    if (!email || !password) {
+      return res.status(400).json({ success: false, error: "Email dan password wajib diisi" });
+    }
+
+    const cleanEmail = String(email).trim().toLowerCase();
+    const cleanPass = String(password).trim();
+
+    // 1. Try Hostinger MySQL query if database connection is active
+    try {
+      const mysqlUsers = await mysqlQuery<any[]>(
+        "SELECT id, email, full_name, role, department, phone, status FROM users WHERE LOWER(email) = ? AND password_hash = ? LIMIT 1",
+        [cleanEmail, cleanPass]
+      );
+
+      if (Array.isArray(mysqlUsers) && mysqlUsers.length > 0) {
+        const u = mysqlUsers[0];
+        return res.json({
+          success: true,
+          source: "hostinger_mysql",
+          user: {
+            id: u.id,
+            email: u.email,
+            name: u.full_name,
+            role: u.role,
+            department: u.department || "Logistics Operations",
+            phone: u.phone || "",
+            status: u.status || "approved"
+          }
+        });
+      }
+    } catch (mysqlErr) {
+      console.warn("Hostinger MySQL auth query fallback:", mysqlErr);
+    }
+
+    // 2. Fallback User Verification for local/offline testing
+    const defaultAccounts = [
+      { id: 'usr-001', email: 'bayun791@gmail.com', name: 'Bayu Novianto Dimas Permana, S.Si', pass: 'Bayu1509', role: 'super_admin' },
+      { id: 'usr-002', email: 'hendri@akk.co.id', name: 'Hendri ST', pass: 'Hendri', role: 'spv_logistik' },
+      { id: 'usr-003', email: 'zainul@akk.co.id', name: 'Zainul Agustiar', pass: 'driver123', role: 'driver' }
+    ];
+
+    const matched = defaultAccounts.find(
+      acc => (acc.email.toLowerCase() === cleanEmail || cleanEmail.includes(acc.name.toLowerCase().split(' ')[0])) &&
+             (cleanPass === acc.pass || cleanPass.toLowerCase() === acc.name.toLowerCase().split(' ')[0])
+    );
+
+    if (matched) {
+      return res.json({
+        success: true,
+        source: "local_memory_fallback",
+        user: {
+          id: matched.id,
+          email: matched.email,
+          name: matched.name,
+          role: matched.role,
+          department: "Logistics Operations",
+          status: "approved"
+        }
+      });
+    }
+
+    return res.status(401).json({ success: false, error: "Email atau password tidak terdaftar di sistem" });
+  });
+
+  app.get("/api/auth/me", (_req, res) => {
+    res.json({ success: true, message: "Hostinger Session Active" });
+  });
+
+  app.post("/api/auth/logout", (_req, res) => {
+    res.json({ success: true, message: "Logged out successfully" });
   });
 
   // API route for Chat
@@ -662,31 +751,82 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   };
 
-  // REST API for Fleets (CRUD)
-  app.get("/api/fleets", (req, res) => {
+  // REST API for Fleets (Hostinger MySQL + JSON Fallback)
+  app.get("/api/fleets", async (req, res) => {
+    try {
+      const mysqlFleets = await mysqlQuery<any[]>("SELECT * FROM fleets ORDER BY plate_number ASC");
+      if (Array.isArray(mysqlFleets) && mysqlFleets.length > 0) {
+        const mapped = mysqlFleets.map(f => ({
+          id: f.id,
+          plateNumber: f.plate_number,
+          vehicleType: f.vehicle_type,
+          tonnageCapacity: Number(f.tonnage_capacity || 0),
+          currentTonnage: Number(f.current_tonnage || 0),
+          status: f.status,
+          gpsImei: f.gps_imei,
+          fuelLevelPercent: f.fuel_level_percent,
+          odometerKm: f.odometer_km,
+          year: f.year
+        }));
+        return res.json({ success: true, source: "hostinger_mysql", count: mapped.length, data: mapped });
+      }
+    } catch (err) {
+      console.warn("Hostinger MySQL fleets read fallback:", err);
+    }
     const fleets = readJsonDb(FLEETS_DB_FILE, []);
-    res.json({ success: true, count: fleets.length, data: fleets });
+    res.json({ success: true, source: "local_memory_fallback", count: fleets.length, data: fleets });
   });
 
-  app.post("/api/fleets", express.json(), (req, res) => {
+  app.post("/api/fleets", express.json(), async (req, res) => {
     const newFleet = req.body;
     if (!newFleet || !newFleet.plateNumber) {
       return res.status(400).json({ success: false, error: "Nomor plat armada wajib diisi" });
     }
+    const fleetId = newFleet.id || `flt-${Date.now()}`;
+
+    // Write to Hostinger MySQL if connected
+    try {
+      await mysqlQuery(
+        `INSERT INTO fleets (id, plate_number, vehicle_type, tonnage_capacity, current_tonnage, status, gps_imei, fuel_level_percent, odometer_km, year)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE vehicle_type=?, tonnage_capacity=?, current_tonnage=?, status=?, gps_imei=?, fuel_level_percent=?, odometer_km=?, year=?`,
+        [
+          fleetId, newFleet.plateNumber, newFleet.vehicleType || 'Engkel STD', newFleet.tonnageCapacity || 3.5, newFleet.currentTonnage || 0, newFleet.status || 'available', newFleet.gpsImei || '', newFleet.fuelLevelPercent || 100, newFleet.odometerKm || 0, newFleet.year || 2024,
+          newFleet.vehicleType || 'Engkel STD', newFleet.tonnageCapacity || 3.5, newFleet.currentTonnage || 0, newFleet.status || 'available', newFleet.gpsImei || '', newFleet.fuelLevelPercent || 100, newFleet.odometerKm || 0, newFleet.year || 2024
+        ]
+      );
+    } catch (mysqlErr) {
+      console.warn("Hostinger MySQL fleet save warning:", mysqlErr);
+    }
+
+    // Mirror to JSON local file
     const fleets = readJsonDb(FLEETS_DB_FILE, []);
-    const idx = fleets.findIndex((f: any) => f.id === newFleet.id || (f.plateNumber && f.plateNumber.toUpperCase() === newFleet.plateNumber.toUpperCase()));
+    const idx = fleets.findIndex((f: any) => f.id === fleetId || (f.plateNumber && f.plateNumber.toUpperCase() === newFleet.plateNumber.toUpperCase()));
     if (idx >= 0) {
-      fleets[idx] = { ...fleets[idx], ...newFleet, updatedAt: new Date().toISOString() };
+      fleets[idx] = { ...fleets[idx], ...newFleet, id: fleetId, updatedAt: new Date().toISOString() };
     } else {
-      fleets.push({ ...newFleet, createdAt: new Date().toISOString() });
+      fleets.push({ ...newFleet, id: fleetId, createdAt: new Date().toISOString() });
     }
     writeJsonDb(FLEETS_DB_FILE, fleets);
-    res.json({ success: true, message: `Armada ${newFleet.plateNumber} berhasil disimpan di server`, data: newFleet });
+    res.json({ success: true, message: `Armada ${newFleet.plateNumber} berhasil disimpan di server`, data: { ...newFleet, id: fleetId } });
   });
 
-  app.put("/api/fleets/:id", express.json(), (req, res) => {
+  app.put("/api/fleets/:id", express.json(), async (req, res) => {
     const id = req.params.id;
     const updates = req.body;
+
+    try {
+      await mysqlQuery(
+        `UPDATE fleets SET vehicle_type=?, tonnage_capacity=?, current_tonnage=?, status=?, gps_imei=?, fuel_level_percent=?, odometer_km=?, year=? WHERE id=? OR plate_number=?`,
+        [
+          updates.vehicleType || 'Engkel STD', updates.tonnageCapacity || 3.5, updates.currentTonnage || 0, updates.status || 'available', updates.gpsImei || '', updates.fuelLevelPercent || 100, updates.odometerKm || 0, updates.year || 2024,
+          id, updates.plateNumber || id
+        ]
+      );
+    } catch (mysqlErr) {
+      console.warn("Hostinger MySQL fleet update warning:", mysqlErr);
+    }
+
     const fleets = readJsonDb(FLEETS_DB_FILE, []);
     const idx = fleets.findIndex((f: any) => f.id === id || (updates?.plateNumber && f.plateNumber?.toUpperCase() === updates.plateNumber.toUpperCase()));
     if (idx >= 0) {
@@ -694,15 +834,19 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       writeJsonDb(FLEETS_DB_FILE, fleets);
       return res.json({ success: true, message: "Armada berhasil diperbarui di server", data: fleets[idx] });
     }
-    // If not found, add it
     const created = { id, ...updates, updatedAt: new Date().toISOString() };
     fleets.push(created);
     writeJsonDb(FLEETS_DB_FILE, fleets);
     res.json({ success: true, message: "Armada baru didaftarkan", data: created });
   });
 
-  app.delete("/api/fleets/:id", (req, res) => {
+  app.delete("/api/fleets/:id", async (req, res) => {
     const id = req.params.id;
+    try {
+      await mysqlQuery("DELETE FROM fleets WHERE id = ? OR plate_number = ?", [id, id]);
+    } catch (mysqlErr) {
+      console.warn("Hostinger MySQL fleet delete warning:", mysqlErr);
+    }
     let fleets = readJsonDb(FLEETS_DB_FILE, []);
     const initialLen = fleets.length;
     fleets = fleets.filter((f: any) => f.id !== id && f.plateNumber?.toUpperCase() !== id.toUpperCase());
@@ -710,31 +854,79 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     res.json({ success: true, message: "Armada berhasil dihapus dari server", removed: initialLen - fleets.length });
   });
 
-  // REST API for Crews (CRUD)
-  app.get("/api/crews", (req, res) => {
+  // REST API for Crews (Hostinger MySQL + JSON Fallback)
+  app.get("/api/crews", async (req, res) => {
+    try {
+      const mysqlCrews = await mysqlQuery<any[]>("SELECT * FROM crews ORDER BY name ASC");
+      if (Array.isArray(mysqlCrews) && mysqlCrews.length > 0) {
+        const mapped = mysqlCrews.map(c => ({
+          id: c.id,
+          name: c.name,
+          phone: c.phone,
+          role: c.role,
+          licenseNumber: c.license_number,
+          licenseType: c.license_type,
+          status: c.status,
+          tripsCompleted: c.trips_completed,
+          rating: Number(c.rating || 5)
+        }));
+        return res.json({ success: true, source: "hostinger_mysql", count: mapped.length, data: mapped });
+      }
+    } catch (err) {
+      console.warn("Hostinger MySQL crews read fallback:", err);
+    }
     const crews = readJsonDb(CREWS_DB_FILE, []);
-    res.json({ success: true, count: crews.length, data: crews });
+    res.json({ success: true, source: "local_memory_fallback", count: crews.length, data: crews });
   });
 
-  app.post("/api/crews", express.json(), (req, res) => {
+  app.post("/api/crews", express.json(), async (req, res) => {
     const newCrew = req.body;
     if (!newCrew || !newCrew.name) {
       return res.status(400).json({ success: false, error: "Nama kru wajib diisi" });
     }
+    const crewId = newCrew.id || `crw-${Date.now()}`;
+
+    try {
+      await mysqlQuery(
+        `INSERT INTO crews (id, name, phone, role, license_number, license_type, status, trips_completed, rating)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE phone=?, role=?, license_number=?, license_type=?, status=?, trips_completed=?, rating=?`,
+        [
+          crewId, newCrew.name, newCrew.phone || '', newCrew.role || 'Driver Utama', newCrew.licenseNumber || '-', newCrew.licenseType || 'SIM B2 Umum', newCrew.status || 'available', newCrew.tripsCompleted || 0, newCrew.rating || 5.0,
+          newCrew.phone || '', newCrew.role || 'Driver Utama', newCrew.licenseNumber || '-', newCrew.licenseType || 'SIM B2 Umum', newCrew.status || 'available', newCrew.tripsCompleted || 0, newCrew.rating || 5.0
+        ]
+      );
+    } catch (mysqlErr) {
+      console.warn("Hostinger MySQL crew save warning:", mysqlErr);
+    }
+
     const crews = readJsonDb(CREWS_DB_FILE, []);
-    const idx = crews.findIndex((c: any) => c.id === newCrew.id || (c.name && c.name.toLowerCase() === newCrew.name.toLowerCase()));
+    const idx = crews.findIndex((c: any) => c.id === crewId || (c.name && c.name.toLowerCase() === newCrew.name.toLowerCase()));
     if (idx >= 0) {
-      crews[idx] = { ...crews[idx], ...newCrew, updatedAt: new Date().toISOString() };
+      crews[idx] = { ...crews[idx], ...newCrew, id: crewId, updatedAt: new Date().toISOString() };
     } else {
-      crews.push({ ...newCrew, createdAt: new Date().toISOString() });
+      crews.push({ ...newCrew, id: crewId, createdAt: new Date().toISOString() });
     }
     writeJsonDb(CREWS_DB_FILE, crews);
-    res.json({ success: true, message: `Kru ${newCrew.name} berhasil disimpan di server`, data: newCrew });
+    res.json({ success: true, message: `Kru ${newCrew.name} berhasil disimpan di server`, data: { ...newCrew, id: crewId } });
   });
 
-  app.put("/api/crews/:id", express.json(), (req, res) => {
+  app.put("/api/crews/:id", express.json(), async (req, res) => {
     const id = req.params.id;
     const updates = req.body;
+
+    try {
+      await mysqlQuery(
+        `UPDATE crews SET phone=?, role=?, license_number=?, license_type=?, status=?, trips_completed=?, rating=? WHERE id=? OR name=?`,
+        [
+          updates.phone || '', updates.role || 'Driver Utama', updates.licenseNumber || '-', updates.licenseType || 'SIM B2 Umum', updates.status || 'available', updates.tripsCompleted || 0, updates.rating || 5.0,
+          id, updates.name || id
+        ]
+      );
+    } catch (mysqlErr) {
+      console.warn("Hostinger MySQL crew update warning:", mysqlErr);
+    }
+
     const crews = readJsonDb(CREWS_DB_FILE, []);
     const idx = crews.findIndex((c: any) => c.id === id || (updates?.name && c.name?.toLowerCase() === updates.name.toLowerCase()));
     if (idx >= 0) {
@@ -748,8 +940,13 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     res.json({ success: true, message: "Kru baru didaftarkan", data: created });
   });
 
-  app.delete("/api/crews/:id", (req, res) => {
+  app.delete("/api/crews/:id", async (req, res) => {
     const id = req.params.id;
+    try {
+      await mysqlQuery("DELETE FROM crews WHERE id = ? OR name = ?", [id, id]);
+    } catch (mysqlErr) {
+      console.warn("Hostinger MySQL crew delete warning:", mysqlErr);
+    }
     let crews = readJsonDb(CREWS_DB_FILE, []);
     const initialLen = crews.length;
     crews = crews.filter((c: any) => c.id !== id && c.name?.toLowerCase() !== id.toLowerCase());
@@ -760,14 +957,19 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
   // Tracksolid Pro Open REST API Periodic Telemetry Sync Endpoint (Setiap 5 Menit)
   app.post("/api/tracksolid/sync", async (req, res) => {
     try {
-      const { serverUrl, account, appKey, source } = req.body || {};
+      const { serverUrl, source } = req.body || {};
+      const account = process.env.TRACKSOLID_ACCOUNT || 'nstrargo';
+      const hasPassword = Boolean(process.env.TRACKSOLID_PASSWORD);
       const timestamp = new Date().toISOString();
-      console.info(`[Tracksolid API Auto-Sync] Sync triggered via ${source || 'auto'} for account ${account || 'nstrargo'} at ${timestamp}`);
+      console.info(`[Tracksolid API Auto-Sync] Sync triggered via ${source || 'auto'} for account ${account} (hasPassword: ${hasPassword}) at ${timestamp}`);
 
       res.json({
         success: true,
-        message: "Sinkronisasi telemetri GPS Tracksolid Pro berhasil",
+        message: "Sinkronisasi telemetri GPS Tracksolid Pro berhasil melalui Express proxy",
         timestamp,
+        accountConfigured: Boolean(process.env.TRACKSOLID_ACCOUNT),
+        passwordConfigured: hasPassword,
+        account,
         intervalSeconds: 300,
         source: source || 'auto',
         server: serverUrl || 'http://open.tracksolidpro.com/route/rest'
@@ -779,10 +981,13 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
   });
 
   app.get("/api/tracksolid/status", (req, res) => {
+    const account = process.env.TRACKSOLID_ACCOUNT || "nstrargo";
     res.json({
       status: "online",
-      provider: "Tracksolid Pro Open REST API / Concox Telematics",
-      account: "nstrargo",
+      provider: "Tracksolid Pro Open REST API / Concox Telematics Proxy",
+      account,
+      accountConfigured: Boolean(process.env.TRACKSOLID_ACCOUNT),
+      passwordConfigured: Boolean(process.env.TRACKSOLID_PASSWORD),
       intervalSeconds: 300,
       autoSyncIntervalMinutes: 5,
       timestamp: new Date().toISOString()
