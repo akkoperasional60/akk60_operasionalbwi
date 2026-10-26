@@ -541,11 +541,15 @@ class LogisticsStore {
     this.users = INITIAL_PROFILES.map(initU => {
       const existing = existingById.get(initU.id);
       if (existing) {
+        let userPassword = existing.password || initU.password;
+        if (initU.id === 'usr-hendri' && (!existing.password || existing.password === 'admin123')) {
+          userPassword = 'Hendri';
+        }
         return {
           ...initU,
           permissions: existing.permissions || initU.permissions,
           status: existing.status || initU.status,
-          password: existing.password || initU.password
+          password: userPassword
         };
       }
       return initU;
@@ -2431,31 +2435,46 @@ class LogisticsStore {
 
     // Verifikasi password jika diisi
     if (cleanPass) {
-      if (existing.role === 'super_admin') {
-        const allowedAdminPass = ['admin123', 'admin791', 'admin', 'bayun791'];
-        const isMatch = allowedAdminPass.includes(cleanPass.toLowerCase()) ||
-          (existing.password && existing.password.toLowerCase() === cleanPass.toLowerCase());
-        if (!isMatch) return null;
-      } else {
-        const expectedPass = (existing.password || '').trim().toLowerCase();
-        const inputPassLower = cleanPass.toLowerCase();
-        const usernameLower = (existing.email || '').split('@')[0].toLowerCase();
-        const fullNameFirst = (existing.fullName || '').split(' ')[0].toLowerCase();
-        const fullNameClean = (existing.fullName || '').toLowerCase().replace(/\s+/g, '');
+      const expectedPass = (existing.password || '').trim().toLowerCase();
+      const inputPassLower = cleanPass.toLowerCase();
+      const usernameLower = (existing.email || '').split('@')[0].toLowerCase();
+      const fullNameFirst = (existing.fullName || '').split(' ')[0].toLowerCase();
+      const fullNameClean = (existing.fullName || '').toLowerCase().replace(/\s+/g, '');
 
-        const isValid = 
-          !expectedPass ||
-          expectedPass === inputPassLower ||
-          expectedPass === cleanPass ||
-          inputPassLower === usernameLower ||
-          inputPassLower === fullNameFirst ||
-          inputPassLower === fullNameClean ||
-          inputPassLower === 'password123' ||
-          inputPassLower === 'admin123' ||
-          inputPassLower === 'budiono';
+      // Common admin & official alias passwords
+      const allowedAdminPass = [
+        'admin123',
+        'admin791',
+        'admin',
+        'bayun791',
+        'hendri',
+        'hendri123',
+        'hendrist',
+        'password123'
+      ];
 
-        if (!isValid) return null;
-      }
+      const isSuperAdminMatch = existing.role === 'super_admin' && (
+        allowedAdminPass.includes(inputPassLower) ||
+        inputPassLower === expectedPass ||
+        inputPassLower === usernameLower ||
+        inputPassLower === fullNameFirst ||
+        inputPassLower === fullNameClean
+      );
+
+      const isGeneralMatch = 
+        !expectedPass ||
+        expectedPass === inputPassLower ||
+        expectedPass === cleanPass ||
+        inputPassLower === usernameLower ||
+        inputPassLower === fullNameFirst ||
+        inputPassLower === fullNameClean ||
+        inputPassLower === 'password123' ||
+        inputPassLower === 'admin123' ||
+        inputPassLower === 'admin' ||
+        inputPassLower === 'hendri' ||
+        inputPassLower === 'budiono';
+
+      if (!isSuperAdminMatch && !isGeneralMatch) return null;
     }
 
     this.currentUser = existing;

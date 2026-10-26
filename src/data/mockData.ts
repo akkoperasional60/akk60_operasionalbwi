@@ -116,7 +116,7 @@ export const INITIAL_PROFILES: UserProfile[] = [
   {
     id: 'usr-hendri',
     email: 'hendri.st@gmail.com',
-    password: 'admin123',
+    password: 'Hendri',
     fullName: 'Hendri ST',
     role: 'super_admin',
     department: 'Manajemen & Direksi',
