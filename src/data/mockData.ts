@@ -45,8 +45,8 @@ export const INITIAL_PROFILES: UserProfile[] = [
   },
   {
     id: 'usr-operasional',
-    email: 'operasional@gmail.com',
-    password: 'password123',
+    email: 'bayun791@gmail.com',
+    password: 'Bayu1509',
     fullName: 'Bayu Novianto Dimas Permana',
     role: 'operasional',
     department: 'Operasional',
