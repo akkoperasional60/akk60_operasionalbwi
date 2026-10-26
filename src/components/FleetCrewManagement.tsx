@@ -712,17 +712,17 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
   });
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {/* Compact Header & Sub-Tabs Toolbar */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xs">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 shadow-xs">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2.5">
           <div className="min-w-0">
-            <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
+            <div className="text-[10px] text-slate-400 flex items-center gap-1.5">
               <span className="font-semibold text-blue-400">Logistik AKK</span>
               <span>&middot;</span>
               <span>{!isCrewsMode ? 'Manajemen Armada Terpadu' : 'Manajemen Personel & Rotasi Kru'}</span>
             </div>
-            <h2 className="text-base sm:text-lg font-bold text-white tracking-tight truncate">
+            <h2 className="text-sm sm:text-base font-bold text-white tracking-tight truncate">
               {!isCrewsMode
                 ? 'Data Armada Terpadu (Spesifikasi, BBM, Sparepart & Ritase)'
                 : 'Kru Pengiriman & Audit Rotasi Wilayah'}
@@ -730,14 +730,14 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
           </div>
 
           {/* Sub-Tabs & Primary CTA */}
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
             <div className="flex flex-wrap items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
               {!isCrewsMode ? (
                 <>
                   <button
                     type="button"
                     onClick={() => setActiveTab('fleets')}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition cursor-pointer ${
                       activeTab === 'fleets'
                         ? 'bg-blue-600 text-white'
                         : 'text-slate-400 hover:text-white'

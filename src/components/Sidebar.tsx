@@ -438,7 +438,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
               {(!isMinimized ? isSalesAdminOpen : true) && (
                 <div className={`space-y-0.5 ${!isMinimized ? 'pl-2 border-l border-slate-800 ml-2.5 my-1' : ''}`}>
-                  {canSalesDash && renderNavItem('sales_dashboard', 'Dashboard Penjualan', <ShoppingBag className="w-4 h-4" />)}
                   {canSalesActs && renderNavItem('sales_activities', 'Aktivitas Harian Admin', <Activity className="w-4 h-4" />)}
                   {canSalesSched && renderNavItem('sales_schedules', 'Jadwal Admin & Produksi', <Calendar className="w-4 h-4" />)}
                   {canSalesDur && renderNavItem('sales_loading_duration', 'Durasi Muat Admin', <Timer className="w-4 h-4" />)}

@@ -66,6 +66,18 @@ import {
 } from '../data/fuelMockData';
 import { getDefaultPermissionsForRole } from '../utils/rbac';
 import { AREA_CODE_MAP, standardizeAreaName } from '../utils/areaNormalizer';
+import { googleSheetsApiService } from './googleSheetsApiService';
+import { supabaseRealtimeSync } from './supabaseRealtimeSync';
+import {
+  getSupabaseClient,
+  createFleetInSupabase,
+  updateFleetInSupabase,
+  deleteFleetInSupabase,
+  createCrewInSupabase,
+  updateCrewInSupabase,
+  deleteCrewInSupabase,
+  syncFleetsAndCrewsWithSupabase as syncSupabaseFleetsAndCrews
+} from './supabaseService';
 
 export interface ScheduleChangeLogEntry {
   id: string;
@@ -87,7 +99,7 @@ const STORAGE_KEYS = {
   SCHEDULES: 'akk_schedules_v1',
   DEVICES: 'akk_devices_v1',
   CURRENT_USER: 'akk_user_v2',
-  USERS: 'akk_users_list_v4',
+  USERS: 'akk_users_list_v5',
   SUPABASE_CONFIG: 'akk_supabase_config_v1',
   CREW_HISTORY: 'akk_crew_history_v1',
   AREA_APPROVALS: 'akk_area_approvals_v1',
@@ -143,8 +155,8 @@ export const INITIAL_SCHEDULE_CHANGE_LOGS: ScheduleChangeLogEntry[] = [
 
 export const INITIAL_SECURITY_LOGS: SecurityGateLog[] = [
   { id: 'SEC-101', timestamp: new Date(Date.now() - 3600000 * 5).toISOString(), time: '08:15 WIB', type: 'Kendaraan Masuk', entity: 'Truk Box Isuzu W 8229 US', driver: 'Ach Taufiq', purpose: 'Muat Karton Box Ekspedisi Bali', status: 'Diizinkan', plateNumber: 'W 8229 US', securityOfficer: 'Regu A (Bripka Joko)' },
-  { id: 'SEC-102', timestamp: new Date(Date.now() - 3600000 * 4).toISOString(), time: '09:30 WIB', type: 'Tamu Rekanan', entity: 'PT Surya Paperindo Utama', driver: 'Ir. Hendra (Vendor Kertas)', purpose: 'Inspeksi Bahan Baku Roll', status: 'Selesai', securityOfficer: 'Regu A (Slamet Riyadi)' },
-  { id: 'SEC-103', timestamp: new Date(Date.now() - 3600000 * 2).toISOString(), time: '11:00 WIB', type: 'Kendaraan Keluar', entity: 'Pick Up Box P 8125 VC [N1]', initialCode: 'N1', driver: 'Zainul Agustiar', purpose: 'Pengiriman Retail Banyuwangi', status: 'Gate-Out', plateNumber: 'P 8125 VC', securityOfficer: 'Regu A (Slamet Riyadi)' },
+  { id: 'SEC-102', timestamp: new Date(Date.now() - 3600000 * 4).toISOString(), time: '09:30 WIB', type: 'Tamu Rekanan', entity: 'PT Surya Paperindo Utama', driver: 'Ir. Hendra (Vendor Kertas)', purpose: 'Inspeksi Bahan Baku Roll', status: 'Selesai', securityOfficer: 'Regu A (Hairul Rozikin)' },
+  { id: 'SEC-103', timestamp: new Date(Date.now() - 3600000 * 2).toISOString(), time: '11:00 WIB', type: 'Kendaraan Keluar', entity: 'Pick Up Box P 8125 VC [N1]', initialCode: 'N1', driver: 'Zainul Agustiar', purpose: 'Pengiriman Retail Banyuwangi', status: 'Gate-Out', plateNumber: 'P 8125 VC', securityOfficer: 'Regu A (Hairul Rozikin)' },
   { id: 'SEC-104', timestamp: new Date(Date.now() - 1800000).toISOString(), time: '13:45 WIB', type: 'Patroli Satpam', entity: 'Area Gudang DC & Tangki Solar', driver: 'Regu A (Bripka Joko dkk)', purpose: 'Pengecekan Segel Gerbang & APAR', status: 'Aman', securityOfficer: 'Regu A (Bripka Joko)' }
 ];
 
@@ -505,62 +517,40 @@ class LogisticsStore {
       }
     } catch {}
 
-    // Ensure super admin user has generic name 'Super Admin' and email 'bayun791@gmail.com'
-    const superAdminUser = this.users.find(u => u.role === 'super_admin' || u.id === 'usr-001');
-    if (superAdminUser) {
-      if (superAdminUser.fullName !== 'Super Admin' || superAdminUser.email !== 'bayun791@gmail.com') {
-        superAdminUser.fullName = 'Super Admin';
-        superAdminUser.email = 'bayun791@gmail.com';
-        this.saveToStorage(STORAGE_KEYS.USERS, this.users);
+    // 13 Official AKK Users Synchronization:
+    // Synchronize this.users directly with INITIAL_PROFILES to ensure exact names and roles requested
+    const existingById = new Map((this.users || []).map(u => [u.id, u]));
+    this.users = INITIAL_PROFILES.map(initU => {
+      const existing = existingById.get(initU.id);
+      if (existing) {
+        return {
+          ...initU,
+          permissions: existing.permissions || initU.permissions,
+          status: existing.status || initU.status,
+          password: existing.password || initU.password
+        };
       }
-    }
+      return initU;
+    });
+    this.saveToStorage(STORAGE_KEYS.USERS, this.users);
 
-    // Ensure operasional and security accounts exist
-    let usersUpdated = false;
-    if (!this.users.some(u => u.role === 'operasional')) {
-      this.users.push({
-        id: 'usr-operasional',
-        email: 'operasional@gmail.com',
-        password: 'password123',
-        fullName: 'Hadi Purnomo',
-        role: 'operasional',
-        department: 'Operasional',
-        phone: '0812-3456-7801',
-        status: 'approved',
-        createdAt: '2026-01-10T08:00:00Z',
-        approvedAt: '2026-01-10T08:05:00Z',
-        approvedBy: 'Super Admin',
-        notes: 'Operational Lead & Manajer Operasional'
-      });
-      usersUpdated = true;
-    }
-    if (!this.users.some(u => u.role === 'security')) {
-      this.users.push({
-        id: 'usr-security',
-        email: 'security.dc@gmail.com',
-        password: 'password123',
-        fullName: 'Slamet Riyadi (Security)',
-        role: 'security',
-        department: 'Keamanan / Pos Satpam',
-        phone: '0813-9876-5432',
-        status: 'approved',
-        createdAt: '2026-01-10T08:00:00Z',
-        approvedAt: '2026-01-10T08:05:00Z',
-        approvedBy: 'Super Admin',
-        notes: 'Petugas Pos Keamanan Gerbang DC 24 Jam'
-      });
-      usersUpdated = true;
-    }
-    if (usersUpdated) {
-      this.saveToStorage(STORAGE_KEYS.USERS, this.users);
-    }
-
-    if (this.currentUser && (this.currentUser.email.includes('@akk-packaging.co.id') || this.currentUser.fullName.includes(', S.') || this.currentUser.role === 'super_admin')) {
-      this.currentUser = {
-        ...this.currentUser,
-        email: this.currentUser.role === 'super_admin' ? 'bayun791@gmail.com' : this.currentUser.email.replace('@akk-packaging.co.id', '@gmail.com'),
-        fullName: this.currentUser.role === 'super_admin' ? 'Super Admin' : this.currentUser.fullName.replace(/,\s*S\.[A-Za-z.]+/g, '').trim()
-      };
+    // Sync current active session
+    if (this.currentUser) {
+      const match = this.users.find(u => u.id === this.currentUser.id || (u.id === 'usr-001' && this.currentUser.role === 'super_admin'));
+      if (match) {
+        this.currentUser = {
+          ...this.currentUser,
+          id: match.id,
+          fullName: match.fullName,
+          department: match.department,
+          phone: match.phone,
+          email: match.email,
+          role: match.role
+        };
+      } else {
+        const fallback = this.users.find(u => u.id === 'usr-001') || this.users[0];
+        if (fallback) this.currentUser = { ...fallback };
+      }
       this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
     }
     this.crewHistory = this.loadFromStorage(STORAGE_KEYS.CREW_HISTORY, INITIAL_CREW_HISTORY);
@@ -1067,10 +1057,9 @@ class LogisticsStore {
     setTimeout(async () => {
       try {
         if (event.entityType === 'schedule') {
-          const apiModule = await import('./googleSheetsApiService');
-          if (apiModule && apiModule.googleSheetsApiService) {
+          if (googleSheetsApiService) {
             if (event.action === 'create' || event.action === 'update' || event.action === 'status_change') {
-              apiModule.googleSheetsApiService.writeScheduleToGoogleSheets(event.data, event.action === 'status_change' ? 'update' : event.action).catch(() => {});
+              googleSheetsApiService.writeScheduleToGoogleSheets(event.data, event.action === 'status_change' ? 'update' : event.action).catch(() => {});
             }
           }
         } else if (event.entityType === 'admin_schedule' && event.action === 'update') {
@@ -1091,9 +1080,8 @@ class LogisticsStore {
     setTimeout(async () => {
       try {
         if (event.entityType === 'fleet' && (event.action === 'status_change' || event.action === 'update')) {
-          const apiModule = await import('./googleSheetsApiService');
-          if (apiModule && apiModule.googleSheetsApiService) {
-            apiModule.googleSheetsApiService.writeFleetStatusToGoogleSheets(
+          if (googleSheetsApiService) {
+            googleSheetsApiService.writeFleetStatusToGoogleSheets(
               event.id,
               event.data?.status || 'available',
               event.data
@@ -1134,9 +1122,8 @@ class LogisticsStore {
         }
 
         // Send to backend attachment proxy
-        const apiModule = await import('./googleSheetsApiService');
-        if (apiModule && apiModule.googleSheetsApiService) {
-          apiModule.googleSheetsApiService.writeImageAttachmentToBackend(
+        if (googleSheetsApiService) {
+          googleSheetsApiService.writeImageAttachmentToBackend(
             newImg.entityId,
             newImg.imageUrl,
             newImg.category,
@@ -1317,11 +1304,16 @@ class LogisticsStore {
       let sanitizedData = data;
       if (Array.isArray(data)) {
         if (key === STORAGE_KEYS.SCHEDULES) {
-          // Strip duplicated heavy sub-objects before stringify while preserving full dataset (up to 5,000 items)
+          // Strip duplicated heavy sub-objects before stringify while preserving lightweight crew/helper identity
           sanitizedData = data.slice(0, 5000).map((sch: any) => {
             if (!sch || typeof sch !== 'object') return sch;
-            const { store, fleet, crew, crewHelper, ...compact } = sch;
-            return compact;
+            const { store, fleet, crew, crewHelper, crewHelper2, ...compact } = sch;
+            return {
+              ...compact,
+              ...(crew && crew.name ? { crew: { id: crew.id, name: crew.name, phone: crew.phone, role: crew.role } } : {}),
+              ...(crewHelper && crewHelper.name ? { crewHelper: { id: crewHelper.id, name: crewHelper.name, phone: crewHelper.phone, role: crewHelper.role } } : {}),
+              ...(crewHelper2 && crewHelper2.name ? { crewHelper2: { id: crewHelper2.id, name: crewHelper2.name, phone: crewHelper2.phone, role: crewHelper2.role } } : {})
+            };
           });
         } else if (key === STORAGE_KEYS.CREW_HISTORY) {
           // Compact crew history records and limit to 50 items max
@@ -1705,14 +1697,26 @@ class LogisticsStore {
         storeCategory: 'Distribution Hub'
       };
 
+      const findMatchingCrew = (id?: string, refCrew?: Crew): Crew | undefined => {
+        if (id) {
+          const byId = this.crews.find(c => c.id === id);
+          if (byId) return byId;
+        }
+        if (refCrew?.name) {
+          const byName = this.crews.find(c => c.name.trim().toLowerCase() === refCrew.name.trim().toLowerCase());
+          if (byName) return byName;
+        }
+        return refCrew;
+      };
+
       return {
         ...sch,
         areaName,
         store: areaStore,
         fleet: this.fleets.find(f => f.id === sch.fleetId) || sch.fleet,
-        crew: this.crews.find(c => c.id === sch.crewId) || sch.crew,
-        crewHelper: sch.crewHelperId ? (this.crews.find(c => c.id === sch.crewHelperId) || sch.crewHelper) : undefined,
-        crewHelper2: sch.crewHelper2Id ? (this.crews.find(c => c.id === sch.crewHelper2Id) || sch.crewHelper2) : undefined
+        crew: findMatchingCrew(sch.crewId, sch.crew),
+        crewHelper: (sch.crewHelperId || sch.crewHelper) ? findMatchingCrew(sch.crewHelperId, sch.crewHelper) : undefined,
+        crewHelper2: (sch.crewHelper2Id || sch.crewHelper2) ? findMatchingCrew(sch.crewHelper2Id, sch.crewHelper2) : undefined
       };
     });
   }
@@ -2702,9 +2706,9 @@ class LogisticsStore {
     });
 
     // Publish real-time assignment notification via Supabase Realtime (filtered to assigned driver)
-    import('./supabaseRealtimeSync').then(({ supabaseRealtimeSync }) => {
-      supabaseRealtimeSync.publishScheduleChange('INSERT', hydratedNewSchedule, null);
-    }).catch(() => {});
+    try {
+      supabaseRealtimeSync.publishScheduleChange('INSERT', hydratedNewSchedule, null).catch(() => {});
+    } catch {}
 
     return hydratedNewSchedule;
   }
@@ -2743,9 +2747,9 @@ class LogisticsStore {
         timestamp: new Date().toISOString()
       });
 
-      import('./supabaseRealtimeSync').then(({ supabaseRealtimeSync }) => {
-        supabaseRealtimeSync.publishScheduleChange('UPDATE', hydratedUpdated, oldSch);
-      }).catch(() => {});
+      try {
+        supabaseRealtimeSync.publishScheduleChange('UPDATE', hydratedUpdated, oldSch).catch(() => {});
+      } catch {}
     }
 
     this.notify();
@@ -3007,10 +3011,10 @@ class LogisticsStore {
         crewHelper2: sch.crewHelper2Id ? (this.crews.find(c => c.id === sch.crewHelper2Id) || sch.crewHelper2) : undefined
       };
 
-      import('./supabaseRealtimeSync').then(({ supabaseRealtimeSync }) => {
-        supabaseRealtimeSync.publishScheduleChange('UPDATE', hydratedStatusSch, sch);
-        supabaseRealtimeSync.publishScheduleStatusChange(hydratedStatusSch, sch.status, extraNotes);
-      }).catch(() => {});
+      try {
+        supabaseRealtimeSync.publishScheduleChange('UPDATE', hydratedStatusSch, sch).catch(() => {});
+        supabaseRealtimeSync.publishScheduleStatusChange(hydratedStatusSch, sch.status, extraNotes).catch(() => {});
+      } catch {}
 
       const updateItem: OfflineScheduleStatusUpdate = {
         id: 'off-upd-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
@@ -3103,7 +3107,6 @@ class LogisticsStore {
 
   private async syncSingleUpdateToSupabase(item: OfflineScheduleStatusUpdate): Promise<boolean> {
     try {
-      const { getSupabaseClient } = await import('./supabaseService');
       const supabase = getSupabaseClient();
       if (!supabase) return false;
 
@@ -3192,15 +3195,13 @@ class LogisticsStore {
     this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
 
     // Asynchronous backend integration with Supabase
-    import('./supabaseService').then(({ createFleetInSupabase }) => {
-      createFleetInSupabase(newFleet).then(res => {
-        if (res.data?.id && res.data.id !== newFleet.id) {
-          newFleet.id = res.data.id;
-          this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
-          this.notify();
-        }
-      }).catch(err => console.warn('[Supabase Store Auto-Create Fleet Note]', err));
-    }).catch(() => {});
+    createFleetInSupabase(newFleet).then(res => {
+      if (res.data?.id && res.data.id !== newFleet.id) {
+        newFleet.id = res.data.id;
+        this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
+        this.notify();
+      }
+    }).catch(err => console.warn('[Supabase Store Auto-Create Fleet Note]', err));
 
     this.dispatchMiddleware({
       entityType: 'fleet',
@@ -3260,9 +3261,7 @@ class LogisticsStore {
     this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
 
     // Asynchronous backend integration with Supabase
-    import('./supabaseService').then(({ updateFleetInSupabase }) => {
-      updateFleetInSupabase(id, { status, currentTonnage: tonnage }).catch(err => console.warn('[Supabase Fleet Status Sync Note]', err));
-    }).catch(() => {});
+    updateFleetInSupabase(id, { status, currentTonnage: tonnage }).catch(err => console.warn('[Supabase Fleet Status Sync Note]', err));
 
     this.dispatchMiddleware({
       entityType: 'fleet',
@@ -3290,9 +3289,7 @@ class LogisticsStore {
 
     if (updatedFleet) {
       // Asynchronous backend integration with Supabase
-      import('./supabaseService').then(({ updateFleetInSupabase }) => {
-        updateFleetInSupabase(id, updatedFields).catch(err => console.warn('[Supabase Fleet Update Sync Note]', err));
-      }).catch(() => {});
+      updateFleetInSupabase(id, updatedFields).catch(err => console.warn('[Supabase Fleet Update Sync Note]', err));
 
       this.dispatchMiddleware({
         entityType: 'fleet',
@@ -3314,9 +3311,7 @@ class LogisticsStore {
       this.logActivity('Hapus Armada', deletedFleet.plateNumber, `Menghapus armada ${deletedFleet.plateNumber} (${deletedFleet.vehicleType})`);
       
       // Asynchronous backend integration with Supabase
-      import('./supabaseService').then(({ deleteFleetInSupabase }) => {
-        deleteFleetInSupabase(id, deletedFleet.plateNumber).catch(err => console.warn('[Supabase Fleet Delete Sync Note]', err));
-      }).catch(() => {});
+      deleteFleetInSupabase(id, deletedFleet.plateNumber).catch(err => console.warn('[Supabase Fleet Delete Sync Note]', err));
 
       this.dispatchMiddleware({
         entityType: 'fleet',
@@ -3373,15 +3368,13 @@ class LogisticsStore {
     this.logActivity('Tambah Kru', newCrew.name, `Menambahkan kru baru ${newCrew.name} sebagai ${newCrew.role}`);
     
     // Asynchronous backend integration with Supabase
-    import('./supabaseService').then(({ createCrewInSupabase }) => {
-      createCrewInSupabase(newCrew).then(res => {
-        if (res.data?.id && res.data.id !== newCrew.id) {
-          newCrew.id = res.data.id;
-          this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
-          this.notify();
-        }
-      }).catch(err => console.warn('[Supabase Crew Create Sync Note]', err));
-    }).catch(() => {});
+    createCrewInSupabase(newCrew).then(res => {
+      if (res.data?.id && res.data.id !== newCrew.id) {
+        newCrew.id = res.data.id;
+        this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
+        this.notify();
+      }
+    }).catch(err => console.warn('[Supabase Crew Create Sync Note]', err));
 
     this.dispatchMiddleware({
       entityType: 'crew',
@@ -3400,9 +3393,7 @@ class LogisticsStore {
     this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
     
     // Asynchronous backend integration with Supabase
-    import('./supabaseService').then(({ updateCrewInSupabase }) => {
-      updateCrewInSupabase(id, { status }).catch(err => console.warn('[Supabase Crew Status Sync Note]', err));
-    }).catch(() => {});
+    updateCrewInSupabase(id, { status }).catch(err => console.warn('[Supabase Crew Status Sync Note]', err));
 
     this.dispatchMiddleware({
       entityType: 'crew',
@@ -3428,9 +3419,7 @@ class LogisticsStore {
 
     if (updatedCrew) {
       // Asynchronous backend integration with Supabase
-      import('./supabaseService').then(({ updateCrewInSupabase }) => {
-        updateCrewInSupabase(id, updatedFields).catch(err => console.warn('[Supabase Crew Update Sync Note]', err));
-      }).catch(() => {});
+      updateCrewInSupabase(id, updatedFields).catch(err => console.warn('[Supabase Crew Update Sync Note]', err));
 
       this.dispatchMiddleware({
         entityType: 'crew',
@@ -3452,9 +3441,7 @@ class LogisticsStore {
       this.logActivity('Hapus Kru', deletedCrew.name, `Menghapus kru ${deletedCrew.name} (${deletedCrew.role}) dari sistem armada`);
       
       // Asynchronous backend integration with Supabase
-      import('./supabaseService').then(({ deleteCrewInSupabase }) => {
-        deleteCrewInSupabase(id, deletedCrew.name).catch(err => console.warn('[Supabase Crew Delete Sync Note]', err));
-      }).catch(() => {});
+      deleteCrewInSupabase(id, deletedCrew.name).catch(err => console.warn('[Supabase Crew Delete Sync Note]', err));
 
       this.dispatchMiddleware({
         entityType: 'crew',
@@ -3468,8 +3455,7 @@ class LogisticsStore {
   }
 
   public async syncFleetsAndCrewsWithSupabase(): Promise<{ success: boolean; fleetsCount: number; crewsCount: number; message: string }> {
-    const { syncFleetsAndCrewsWithSupabase } = await import('./supabaseService');
-    return syncFleetsAndCrewsWithSupabase();
+    return syncSupabaseFleetsAndCrews();
   }
 
   public addStore(store: Omit<RetailStore, 'id'>): RetailStore {

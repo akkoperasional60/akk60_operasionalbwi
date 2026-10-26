@@ -81,12 +81,12 @@ export const DocumentSigningWorkflow: React.FC<DocumentSigningWorkflowProps> = (
     },
     acknowledgedBy: {
       label: 'Mengetahui (Operasional)',
-      name: waybill.acknowledgedByName || 'Hadi Purnomo',
+      name: waybill.acknowledgedByName || 'Bayu Novianto Dimas Permana',
       title: 'Manajer Operasional / Leader'
     },
     security: {
       label: 'Security (Pos Gerbang DC)',
-      name: waybill.securityOfficerName || 'Slamet Riyadi (Security)',
+      name: waybill.securityOfficerName || 'Hairul Rozikin (Security)',
       title: 'Petugas Pos Satpam 24 Jam'
     },
     driver: {
@@ -342,7 +342,7 @@ export const DocumentSigningWorkflow: React.FC<DocumentSigningWorkflowProps> = (
               <div className={`p-3 rounded-xl border flex flex-col justify-between ${waybill.acknowledgedBySigned !== false ? 'bg-indigo-950/20 border-indigo-500/40 text-indigo-200' : 'bg-slate-950 border-slate-800 text-slate-400'}`}>
                 <div>
                   <div className="text-[10px] font-bold text-slate-300">2. Operasional</div>
-                  <div className="font-bold text-white text-xs mt-1 truncate">{waybill.acknowledgedByName || 'Hadi Purnomo'}</div>
+                  <div className="font-bold text-white text-xs mt-1 truncate">{waybill.acknowledgedByName || 'Bayu Novianto Dimas Permana'}</div>
                 </div>
                 <div className="mt-3 pt-2 border-t border-slate-800 flex items-center justify-between text-[10px]">
                   {waybill.acknowledgedBySigned !== false ? (
@@ -360,7 +360,7 @@ export const DocumentSigningWorkflow: React.FC<DocumentSigningWorkflowProps> = (
               <div className={`p-3 rounded-xl border flex flex-col justify-between ${waybill.securitySigned !== false ? 'bg-emerald-950/20 border-emerald-500/40 text-emerald-200' : 'bg-slate-950 border-slate-800 text-slate-400'}`}>
                 <div>
                   <div className="text-[10px] font-bold text-slate-300">3. Security</div>
-                  <div className="font-bold text-white text-xs mt-1 truncate">{waybill.securityOfficerName || 'Slamet Riyadi'}</div>
+                  <div className="font-bold text-white text-xs mt-1 truncate">{waybill.securityOfficerName || 'Hairul Rozikin'}</div>
                 </div>
                 <div className="mt-3 pt-2 border-t border-slate-800 flex items-center justify-between text-[10px]">
                   {waybill.securitySigned !== false ? (

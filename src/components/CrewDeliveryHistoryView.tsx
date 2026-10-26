@@ -12,7 +12,8 @@ import {
   AlertTriangle,
   Eye,
   LayoutGrid,
-  ListFilter
+  ListFilter,
+  Calendar
 } from 'lucide-react';
 import { Crew, CrewDeliveryHistory, AreaApprovalRequest, Fleet } from '../types';
 import { logisticsStore } from '../services/store';
@@ -46,7 +47,7 @@ export const CrewDeliveryHistoryView: React.FC = () => {
   const [selectedAreaFilter, setSelectedAreaFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [areaQuickFilter, setAreaQuickFilter] = useState<string>('');
-  const [activeSubTab, setActiveSubTab] = useState<'area_stats' | 'fleet_stats'>('area_stats');
+  const [activeSubTab, setActiveSubTab] = useState<'area_stats' | 'fleet_stats' | 'kanvas_lkt'>('area_stats');
 
   // Toggle Switches States
   const [isFilterSidebarOpen, setIsFilterSidebarOpen] = useState<boolean>(true);
@@ -459,10 +460,16 @@ export const CrewDeliveryHistoryView: React.FC = () => {
     );
   }, [crewAreaStatsList, totalExceededAreasCount]);
 
+  const kanvasLktHistoryList = useMemo(() => {
+    return filteredHistory
+      .filter(h => (h.areaName || h.area || '').toLowerCase().includes('kanvas') || (h.storeName || '').toLowerCase().includes('kanvas'))
+      .sort((a, b) => new Date(b.deliveryDate || b.completionDate).getTime() - new Date(a.deliveryDate || a.completionDate).getTime());
+  }, [filteredHistory]);
+
   return (
-    <div className="space-y-4">
-      {/* Top Action & Widget Strip (3. WIDGETS + 9. BADGE + 10. PROGRESS BAR) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+    <div className="space-y-3">
+      {/* Top Action & Widget Strip (Compact & Padat) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
         <UiWidget
           kicker="Frekuensi Personel"
           title="Kru & Supir Terdata"
@@ -703,14 +710,14 @@ export const CrewDeliveryHistoryView: React.FC = () => {
         </UiCollapsibleSidebar>
 
         {/* Right Main Content Area */}
-        <div className="flex-1 min-w-0 w-full space-y-3">
+        <div className="flex-1 min-w-0 w-full space-y-2.5">
           {/* Sub-Tab Bar & Layout Controls */}
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-lg border border-slate-800">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-2.5 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
               <button
                 type="button"
                 onClick={() => setActiveSubTab('area_stats')}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
                   activeSubTab === 'area_stats'
                     ? 'bg-blue-600 text-white'
                     : 'text-slate-400 hover:text-white'
@@ -727,7 +734,7 @@ export const CrewDeliveryHistoryView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setActiveSubTab('fleet_stats')}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
                   activeSubTab === 'fleet_stats'
                     ? 'bg-amber-600 text-white'
                     : 'text-slate-400 hover:text-white'
@@ -738,6 +745,23 @@ export const CrewDeliveryHistoryView: React.FC = () => {
                 <UiBadge
                   count={fleetAreaStatsList.length}
                   variant={activeSubTab === 'fleet_stats' ? 'slate' : 'amber'}
+                />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveSubTab('kanvas_lkt')}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-semibold transition cursor-pointer ${
+                  activeSubTab === 'kanvas_lkt'
+                    ? 'bg-purple-600 text-white'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Calendar className="w-3.5 h-3.5" />
+                <span>Jadwal &amp; History Kanvas LKT</span>
+                <UiBadge
+                  count={kanvasLktHistoryList.length}
+                  variant={activeSubTab === 'kanvas_lkt' ? 'slate' : 'blue'}
                 />
               </button>
             </div>
@@ -1180,6 +1204,84 @@ export const CrewDeliveryHistoryView: React.FC = () => {
                 </div>
               )}
             </>
+          )}
+
+          {/* TAB 3: JADWAL & HISTORY KANVAS LKT */}
+          {activeSubTab === 'kanvas_lkt' && (
+            <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xs">
+              <div className="px-4 py-3 border-b border-slate-800 bg-slate-950/60 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-xs sm:text-sm font-black text-white flex items-center gap-2">
+                    <Truck className="w-4 h-4 text-purple-400" />
+                    <span>Jadwal &amp; History Pengiriman Kanvas LKT</span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                      {kanvasLktHistoryList.length} Riwayat Tercatat
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Rekapitulasi jadwal penugasan dan histori keberangkatan kru serta armada rute Kanvas LKT.
+                  </p>
+                </div>
+              </div>
+
+              {kanvasLktHistoryList.length === 0 ? (
+                <div className="p-8 text-center text-xs text-slate-400">
+                  Belum ada jadwal atau riwayat Kanvas LKT pada filter saat ini.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead className="bg-slate-950 text-slate-400 uppercase tracking-wider text-[10px] font-bold border-b border-slate-800">
+                      <tr>
+                        <th className="py-2.5 px-3 w-10 text-center">#</th>
+                        <th className="py-2.5 px-3">Tanggal Kirim</th>
+                        <th className="py-2.5 px-3">Nama Kru</th>
+                        <th className="py-2.5 px-3">Peran</th>
+                        <th className="py-2.5 px-3">Armada</th>
+                        <th className="py-2.5 px-3">Area Tujuan</th>
+                        <th className="py-2.5 px-3 text-center">Status History</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/70 text-slate-300">
+                      {kanvasLktHistoryList.map((entry, idx) => (
+                        <tr key={entry.id || `klkt-${idx}`} className="hover:bg-slate-800/40 transition">
+                          <td className="py-2 px-3 text-center font-mono text-slate-500 font-bold">{idx + 1}</td>
+                          <td className="py-2 px-3 font-mono font-bold text-white whitespace-nowrap">
+                            {new Date(entry.deliveryDate || entry.completionDate).toLocaleDateString('id-ID', {
+                              weekday: 'short',
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric'
+                            })}
+                          </td>
+                          <td className="py-2 px-3 font-bold text-white">{entry.crewName}</td>
+                          <td className="py-2 px-3">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700">
+                              {entry.crewRole || 'Driver Utama'}
+                            </span>
+                          </td>
+                          <td className="py-2 px-3">
+                            <span className="px-2 py-0.5 rounded font-mono font-bold text-[11px] bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                              {entry.plateNumber || 'NP1'}
+                            </span>
+                          </td>
+                          <td className="py-2 px-3">
+                            <span className="px-2 py-0.5 rounded font-bold text-[10px] uppercase bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                              {entry.areaName || 'Kanvas LKT'}
+                            </span>
+                          </td>
+                          <td className="py-2 px-3 text-center">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                              <CheckCircle2 className="w-3 h-3" /> Selesai / Terjadwal
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           )}
         </div>
       </div>

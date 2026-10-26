@@ -178,14 +178,18 @@ export interface CrewDeliveryHistory {
   trackingNumber: string;
   storeName: string;
   area: string; // e.g. "Sumatera (Lampung)", "Jawa Barat (Bandung)", "Jawa Timur (Surabaya)", "Bali"
+  areaName?: string;
   city: string;
   island: string;
   vehiclePlate: string;
+  plateNumber?: string;
   initialCode?: string; // Inisial Mobil (e.g. DS1, DS3, NS2, NL1, N20)
   vehicleType: VehicleType;
+  crewRole?: string;
   cargoWeightTon: number;
   cargoDescription: string;
   completionDate: string;
+  deliveryDate?: string;
   status: 'delivered' | 'returned' | 'partial';
   onTimeStatus: 'Tepat Waktu' | 'Terlambat' | 'Lebih Cepat';
   delayReason?: string;

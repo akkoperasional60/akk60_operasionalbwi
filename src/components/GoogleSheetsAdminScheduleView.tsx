@@ -141,7 +141,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
   const [selectedDayFilter, setSelectedDayFilter] = useState<string>('all');
   const [selectedMonth, setSelectedMonth] = useState<number>(() => new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState<number>(() => new Date().getFullYear());
-  const [categoryFilter, setCategoryFilter] = useState<'all' | 'luar_kota' | 'lokal'>('all');
+  const [categoryFilter, setCategoryFilter] = useState<'all' | 'luar_kota' | 'lokal' | 'kanvas_lkt'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [scheduleStatusFilter, setScheduleStatusFilter] = useState<'all' | 'scheduled' | 'picked_up' | 'in_transit' | 'delivered' | 'delayed'>('all');
   const [armadaFilter, setArmadaFilter] = useState<string>('all');
@@ -230,7 +230,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     return {
       dateIso: getTodayIso(),
       driver: initDrivers[0]?.fullName || 'Budiono',
-      helper: initHelpers[0]?.fullName || 'Saiful Rizal',
+      helper: initHelpers[0]?.fullName || 'Saifur Rizal',
       helper2: '',
       area: 'Denpasar 1',
       armada: 'DS3',
@@ -358,7 +358,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
   const handleOpenAddTripModal = (dayNumber: number, dateString: string) => {
     const defaultDriver = getIntegratedDrivers()[0]?.name || 'Budiono';
-    const defaultHelper = getIntegratedHelpers()[0]?.name || 'Saiful Rizal';
+    const defaultHelper = getIntegratedHelpers()[0]?.name || 'Saifur Rizal';
     setEditingTripModal({
       isOpen: true,
       dayNumber,
@@ -2199,25 +2199,23 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
   };
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-3.5">
       {activeSubPage === 'schedule' ? (
         <>
-      {/* 1. Header Card: Excel Delivery Schedule Integrated Banner */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
-
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 relative z-10">
+      {/* 1. Header Card: Compact & Dense */}
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 shadow-md relative overflow-hidden">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 relative z-10">
           <div>
-            <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2">
+            <h2 className="text-base sm:text-lg font-black text-white tracking-tight flex items-center gap-2">
               Jadwal Pengiriman &amp; Penugasan Armada
             </h2>
-            <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-2xl leading-relaxed">
-              Tabel jadwal pengiriman armada, penugasan kru supir &amp; helper, serta alokasi area distribusi terintegrasi.
+            <p className="text-[11px] text-slate-400 mt-0.5 max-w-2xl">
+              Tabel jadwal pengiriman armada, penugasan kru supir &amp; helper, jadwal Kanvas LKT, serta alokasi area distribusi terintegrasi.
             </p>
           </div>
 
           {/* Simplified Header Actions */}
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <input 
               type="file" 
               ref={fileInputRef}
@@ -2234,7 +2232,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 }));
                 setIsUploadConfigModalOpen(true);
               }}
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black border border-emerald-400/40 shadow-md shadow-emerald-950/40 transition cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black border border-emerald-400/40 shadow-xs transition cursor-pointer"
               title="Pop-up Form Tambah Jadwal Baru (Manual)"
             >
               <Plus className="w-3.5 h-3.5" />
@@ -2248,7 +2246,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 setImportYear(String(selectedYear));
                 setActiveSubPage('upload_excel');
               }}
-              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-black border border-blue-400/40 shadow-md shadow-blue-950/40 transition cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-black border border-blue-400/40 shadow-xs transition cursor-pointer"
               title="Halaman Unggah File Jadwal Excel (.xls, .xlsx, .csv)"
             >
               <Upload className="w-3.5 h-3.5" />
@@ -2260,7 +2258,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 setActiveMappingCategory('area');
                 setIsAreaMappingModalOpen(true);
               }}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition cursor-pointer relative"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition cursor-pointer relative"
               title="Pemetaan Area Kirim"
             >
               <MapPin className="w-3.5 h-3.5 text-rose-400" />
@@ -2272,7 +2270,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 setActiveMappingCategory('crew');
                 setIsAreaMappingModalOpen(true);
               }}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition cursor-pointer relative"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition cursor-pointer relative"
               title="Pemetaan Kru (Driver & Helper)"
             >
               <Users className="w-3.5 h-3.5 text-blue-400" />
@@ -2281,7 +2279,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
             <button
               onClick={handleExportXLSX}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition cursor-pointer"
               title="Ekspor ke Excel (.xlsx)"
             >
               <Download className="w-3.5 h-3.5 text-blue-400" />
@@ -2293,7 +2291,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 setScheduleChangeLogs(logisticsStore.getScheduleChangeLogs());
                 setIsHistoryModalOpen(true);
               }}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs font-bold border border-slate-700 transition cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 text-xs font-bold border border-slate-700 transition cursor-pointer"
               title="Riwayat / Log Unggah & Perubahan Jadwal"
             >
               <HistoryIcon className="w-3.5 h-3.5 text-amber-400" />
@@ -2304,30 +2302,30 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
         {/* Sync Success Banner */}
         {syncSuccessMessage && (
-          <div className="mt-4 p-3.5 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in duration-300">
-            <div className="flex items-center gap-2.5">
-              <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+          <div className="mt-3 p-2.5 rounded-lg bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
               <span className="font-semibold">{syncSuccessMessage}</span>
             </div>
           </div>
         )}
 
         {/* 1. Keterangan Periode Selection Bar */}
-        <div className="mt-5 p-4 rounded-2xl bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold text-sm shadow-2xs">
-              <Calendar className="w-5 h-5" />
+        <div className="mt-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold text-sm">
+              <Calendar className="w-4 h-4" />
             </div>
             <div>
               <span className="text-[10px] uppercase font-black text-emerald-600 dark:text-emerald-400 tracking-wider block">
                 Keterangan Periode Jadwal Pengiriman
               </span>
-              <h4 className="text-sm sm:text-base font-black text-slate-900 dark:text-white flex items-center gap-2 mt-0.5 flex-wrap">
+              <h4 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5 mt-0.5 flex-wrap">
                 <span>{selectedMonth === -1 ? `Semua Bulan ${selectedYear}` : `${MONTH_NAMES[selectedMonth]} ${selectedYear}`}</span>
-                <span className="text-xs font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/80 px-2.5 py-0.5 rounded-full border border-emerald-300 dark:border-emerald-800">
+                <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/80 px-2 py-0.5 rounded-full border border-emerald-300 dark:border-emerald-800">
                   {stats.totalTrips} Ritase Total
                 </span>
-                <span className="text-xs font-bold text-rose-700 dark:text-rose-300 bg-rose-100 dark:bg-rose-950/80 px-2.5 py-0.5 rounded-full border border-rose-300 dark:border-rose-800">
+                <span className="text-[11px] font-bold text-rose-700 dark:text-rose-300 bg-rose-100 dark:bg-rose-950/80 px-2 py-0.5 rounded-full border border-rose-300 dark:border-rose-800">
                   📍 {stats.totalUniqueAreas} Total Area Kirim
                 </span>
               </h4>
@@ -2335,12 +2333,12 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
           </div>
 
           {/* Month & Year Selectors */}
-          <div className="flex items-center gap-2 bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-semibold shadow-2xs">
-            <span className="text-slate-600 dark:text-slate-300 font-extrabold px-1 text-xs">Pilih Periode:</span>
+          <div className="flex items-center gap-1.5 bg-white dark:bg-slate-900 p-1 rounded-lg border border-slate-200 dark:border-slate-800 text-xs font-semibold">
+            <span className="text-slate-600 dark:text-slate-300 font-extrabold px-1 text-[11px]">Periode:</span>
             <select
               value={selectedMonth}
               onChange={(e) => setSelectedMonth(Number(e.target.value))}
-              className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white rounded-lg px-3 py-1.5 text-xs font-bold focus:outline-none focus:border-emerald-500 cursor-pointer"
+              className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white rounded-md px-2.5 py-1 text-xs font-bold focus:outline-none focus:border-emerald-500 cursor-pointer"
             >
               <option value={-1}>Semua Bulan</option>
               {MONTH_NAMES.map((m, idx) => (
@@ -2350,7 +2348,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             <select
               value={selectedYear}
               onChange={(e) => setSelectedYear(Number(e.target.value))}
-              className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white rounded-lg px-3 py-1.5 text-xs font-bold focus:outline-none focus:border-emerald-500 cursor-pointer"
+              className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white rounded-md px-2.5 py-1 text-xs font-bold focus:outline-none focus:border-emerald-500 cursor-pointer"
             >
               {[2024, 2025, 2026, 2027, 2028].map(yr => (
                 <option key={yr} value={yr}>{yr}</option>
@@ -2359,95 +2357,99 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
           </div>
         </div>
 
-        {/* Aggregate KPI Chips */}
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-4">
-          <div className="bg-slate-50 dark:bg-slate-950/60 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs">
+        {/* Aggregate KPI Chips - Compact */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 mt-3">
+          <div className="bg-slate-50 dark:bg-slate-950/60 px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800">
             <div className="flex items-center justify-between">
               <span className="text-[10px] uppercase font-bold text-slate-500 dark:text-slate-400">Total Ritase Kirim</span>
-              <Truck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              <Truck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
             </div>
-            <div className="text-xl font-black text-slate-900 dark:text-white mt-1">
-              {stats.totalTrips} <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Rute Aktif</span>
+            <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mt-0.5 leading-none">
+              {stats.totalTrips} <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Rute</span>
             </div>
           </div>
 
-          <div className="bg-slate-50 dark:bg-slate-950/60 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs">
+          <div className="bg-slate-50 dark:bg-slate-950/60 px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800">
             <div className="flex items-center justify-between">
               <span className="text-[10px] uppercase font-bold text-rose-600 dark:text-rose-400">Total Area Kirim</span>
-              <MapPin className="w-4 h-4 text-rose-600 dark:text-rose-400" />
+              <MapPin className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
             </div>
-            <div className="text-xl font-black text-slate-900 dark:text-white mt-1">
-              {stats.totalUniqueAreas} <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Area ({selectedMonth === -1 ? 'Semua Bulan' : MONTH_NAMES[selectedMonth]})</span>
+            <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mt-0.5 leading-none">
+              {stats.totalUniqueAreas} <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Area</span>
             </div>
           </div>
 
-          <div className="bg-slate-50 dark:bg-slate-950/60 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs">
+          <div className="bg-slate-50 dark:bg-slate-950/60 px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800">
             <div className="flex items-center justify-between">
               <span className="text-[10px] uppercase font-bold text-blue-600 dark:text-blue-400">Luar Kota / Bali</span>
-              <Ship className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+              <Ship className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
             </div>
-            <div className="text-xl font-black text-blue-700 dark:text-blue-300 mt-1">
-              {stats.totalLuarKota} <span className="text-xs font-semibold text-blue-600/80 dark:text-blue-400">Ferry ASDP</span>
+            <div className="text-xl sm:text-2xl font-black text-blue-700 dark:text-blue-300 mt-0.5 leading-none">
+              {stats.totalLuarKota} <span className="text-[11px] font-semibold text-blue-600/80 dark:text-blue-400">Ferry ASDP</span>
             </div>
           </div>
 
-          <div className="bg-slate-50 dark:bg-slate-950/60 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs">
+          <div className="bg-slate-50 dark:bg-slate-950/60 px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800">
             <div className="flex items-center justify-between">
               <span className="text-[10px] uppercase font-bold text-emerald-600 dark:text-emerald-400">Distribusi Lokal</span>
-              <Truck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              <Truck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
             </div>
-            <div className="text-xl font-black text-emerald-700 dark:text-emerald-300 mt-1">
-              {stats.totalLokal} <span className="text-xs font-semibold text-emerald-600/80 dark:text-emerald-400">Jawa Timur</span>
+            <div className="text-xl sm:text-2xl font-black text-emerald-700 dark:text-emerald-300 mt-0.5 leading-none">
+              {stats.totalLokal} <span className="text-[11px] font-semibold text-emerald-600/80 dark:text-emerald-400">Jawa Timur</span>
             </div>
           </div>
 
-          <div className="bg-slate-50 dark:bg-slate-950/60 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 shadow-2xs col-span-2 sm:col-span-1">
+          <div className="bg-slate-50 dark:bg-slate-950/60 px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 col-span-2 sm:col-span-1">
             <div className="flex items-center justify-between">
               <span className="text-[10px] uppercase font-bold text-amber-600 dark:text-amber-400">Total Personel Kru</span>
-              <Users className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+              <Users className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
             </div>
-            <div className="text-xl font-black text-slate-900 dark:text-white mt-1">
-              {officialCrewsList.length} <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">Terdaftar</span>
+            <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mt-0.5 leading-none">
+              {officialCrewsList.length} <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">Terdaftar</span>
             </div>
           </div>
         </div>
       </div>
 
       {/* Main Content: Interactive Calendar & Selected Day Grid Details */}
-      <div className="space-y-6">
-        {/* Calendar Container - Bright Non-Black Style */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
+      <div className="space-y-4">
+        {/* Calendar Container - Compact */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 shadow-xs space-y-2.5">
             {/* Calendar Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold shadow-md">
-                  <Calendar className="w-5 h-5" />
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 pb-2.5">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold shadow-xs">
+                  <Calendar className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="text-base font-black text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                  <h3 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
                     <span>KALENDER PENGIRIMAN - {selectedMonth === -1 ? `SEMUA BULAN (${calendarGridData.monthName.toUpperCase()})` : calendarGridData.monthName.toUpperCase()} {calendarGridData.year}</span>
                   </h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
                     Klik pada salah satu tanggal untuk melihat rincian supir, helper, area kirim, dan armada.
                   </p>
                 </div>
               </div>
 
               {/* Legend Badges */}
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 shadow-2xs">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                  <span>Area Lokal (Jawa Timur)</span>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  <span>Area Lokal (Jatim)</span>
                 </span>
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-blue-100 dark:bg-blue-950/80 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-800 shadow-2xs">
-                  <span className="w-2 h-2 rounded-full bg-blue-500" />
-                  <span>Area Luar Kota / Bali (Ferry ASDP)</span>
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 dark:bg-blue-950/80 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-800">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                  <span>Area Luar Kota / Bali</span>
+                </span>
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 dark:bg-purple-950/80 text-purple-800 dark:text-purple-300 border border-purple-300 dark:border-purple-800">
+                  <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
+                  <span>Kanvas LKT</span>
                 </span>
               </div>
             </div>
 
             {/* 7-Column Calendar Grid Header */}
-            <div className="grid grid-cols-7 gap-1.5 sm:gap-2 text-center text-xs font-black uppercase text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800/90 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700">
+            <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-black uppercase text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800/90 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700">
               <div className="text-rose-600 dark:text-rose-400">MINGGU</div>
               <div>SENIN</div>
               <div>SELASA</div>
@@ -2457,12 +2459,12 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               <div className="text-blue-600 dark:text-blue-400">SABTU</div>
             </div>
 
-            {/* Calendar Cells Grid */}
-            <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
+            {/* Calendar Cells Grid (Compact) */}
+            <div className="grid grid-cols-7 gap-1">
               {calendarGridData.cells.map((cell, cIdx) => {
                 if (cell.type === 'padding') {
                   return (
-                    <div key={`pad-${cIdx}`} className="min-h-[90px] sm:min-h-[105px] bg-slate-50/50 dark:bg-slate-950/20 rounded-xl border border-dashed border-slate-200 dark:border-slate-800/50" />
+                    <div key={`pad-${cIdx}`} className="min-h-[68px] sm:min-h-[78px] bg-slate-50/50 dark:bg-slate-950/20 rounded-lg border border-dashed border-slate-200 dark:border-slate-800/50" />
                   );
                 }
 
@@ -2478,17 +2480,16 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                         setSelectedDayFilter(cell.dateString);
                       }
                     }}
-                    className={`min-h-[90px] sm:min-h-[105px] p-2 rounded-xl border transition cursor-pointer flex flex-col justify-between select-none relative ${
+                    className={`min-h-[68px] sm:min-h-[78px] p-1.5 rounded-lg border transition cursor-pointer flex flex-col justify-between select-none relative ${
                       isSelected
-                        ? 'bg-emerald-100/90 dark:bg-emerald-950/60 border-emerald-500 ring-2 ring-emerald-500 shadow-md scale-[1.02] z-10'
+                        ? 'bg-emerald-100/90 dark:bg-emerald-950/60 border-emerald-500 ring-1 ring-emerald-500 shadow-sm z-10'
                         : hasDeliveries
-                        ? 'bg-white dark:bg-slate-800 hover:bg-emerald-50 dark:hover:bg-slate-700/80 border-slate-200 dark:border-slate-700 shadow-2xs'
+                        ? 'bg-white dark:bg-slate-800 hover:bg-emerald-50 dark:hover:bg-slate-700/80 border-slate-200 dark:border-slate-700'
                         : 'bg-slate-50/80 dark:bg-slate-950/40 hover:bg-slate-100 dark:hover:bg-slate-900 border-slate-200 dark:border-slate-800 opacity-80'
                     }`}
                   >
-                    {/* Day Number Header */}
                     <div className="flex items-center justify-between">
-                      <span className={`text-xs font-black px-1.5 py-0.5 rounded-md ${
+                      <span className={`text-[11px] font-black px-1.5 py-0.2 rounded ${
                         isSelected
                           ? 'bg-emerald-600 text-white'
                           : hasDeliveries
@@ -2498,31 +2499,30 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                         {String(cell.dayNumber).padStart(2, '0')}
                       </span>
                       {hasDeliveries && (
-                        <span className="text-[10px] font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/80 px-1.5 py-0.2 rounded-full border border-emerald-300 dark:border-emerald-800">
+                        <span className="text-[9px] font-extrabold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/80 px-1.5 py-0.2 rounded-full border border-emerald-300 dark:border-emerald-800">
                           {cell.totalTrips} Rit
                         </span>
                       )}
                     </div>
 
-                    {/* Delivery Breakdown Badges (Lokal vs Luar Kota) */}
                     {hasDeliveries ? (
-                      <div className="space-y-1 mt-1">
+                      <div className="space-y-0.5 mt-1">
                         {cell.lokalCount > 0 && (
-                          <div className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-950/90 text-emerald-800 dark:text-emerald-300 border border-emerald-300/80 dark:border-emerald-800 flex items-center justify-between">
+                          <div className="text-[9px] font-bold px-1 py-0.2 rounded bg-emerald-100 dark:bg-emerald-950/90 text-emerald-800 dark:text-emerald-300 border border-emerald-300/80 dark:border-emerald-800 flex items-center justify-between">
                             <span className="truncate">🚛 Lokal</span>
                             <span className="font-mono font-black">{cell.lokalCount}</span>
                           </div>
                         )}
                         {cell.luarKotaCount > 0 && (
-                          <div className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-blue-100 dark:bg-blue-950/90 text-blue-800 dark:text-blue-300 border border-blue-300/80 dark:border-blue-800 flex items-center justify-between">
+                          <div className="text-[9px] font-bold px-1 py-0.2 rounded bg-blue-100 dark:bg-blue-950/90 text-blue-800 dark:text-blue-300 border border-blue-300/80 dark:border-blue-800 flex items-center justify-between">
                             <span className="truncate">🚢 Luar Kota</span>
                             <span className="font-mono font-black">{cell.luarKotaCount}</span>
                           </div>
                         )}
                       </div>
                     ) : (
-                      <div className="text-[10px] font-medium text-slate-400 text-center py-2 italic">
-                        Bebas / Off
+                      <div className="text-[9px] font-medium text-slate-400 text-center py-1 italic">
+                        Off
                       </div>
                     )}
                   </div>
@@ -2531,21 +2531,32 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             </div>
           </div>
 
-          {/* Selected Date Details Panel (Rincian Driver, Helper, Kirim Area, Armada) */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
+          {/* Selected Date Details Panel (Rincian Driver, Helper, Kirim Area, Armada & Jadwal Kanvas LKT) */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 shadow-xs space-y-3">
             {(() => {
-              const activeDayObj = filteredWeeks
-                .flatMap((w: AdminScheduleWeek) => w.days)
-                .find((d: AdminScheduleDay) => d.dateString === selectedCalendarDate);
+              const allDaysFlat = filteredWeeks.flatMap((w: AdminScheduleWeek) => w.days);
+              const activeDayObj = allDaysFlat.find((d: AdminScheduleDay) => d.dateString === selectedCalendarDate);
+
+              // Collect all Kanvas LKT trips across the active month for the History Kanvas LKT summary
+              const kanvasLktMonthHistory = allDaysFlat.flatMap((d: AdminScheduleDay) =>
+                d.pengiriman
+                  .filter((p: DeliveryAssignment) => standardizeAreaName(p.area).toUpperCase().includes('KANVAS LKT') || p.area.toUpperCase().includes('KANVAS'))
+                  .map((p: DeliveryAssignment) => ({
+                    dayName: d.dayName,
+                    dateString: d.dateString,
+                    dayNumber: d.dayNumber,
+                    ...p
+                  }))
+              );
 
               if (!activeDayObj || activeDayObj.pengiriman.length === 0) {
                 return (
-                  <div className="p-8 text-center bg-slate-50 dark:bg-slate-950/60 rounded-xl border border-slate-200 dark:border-slate-800 space-y-2">
-                    <Calendar className="w-8 h-8 text-slate-400 mx-auto" />
-                    <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200">
+                  <div className="p-6 text-center bg-slate-50 dark:bg-slate-950/60 rounded-xl border border-slate-200 dark:border-slate-800 space-y-1.5">
+                    <Calendar className="w-6 h-6 text-slate-400 mx-auto" />
+                    <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
                       Tidak Ada Jadwal Pengiriman pada {selectedCalendarDate}
                     </h4>
-                    <p className="text-xs text-slate-500">
+                    <p className="text-[11px] text-slate-500">
                       Silakan klik tanggal lain pada kalender di atas untuk melihat rincian pengiriman.
                     </p>
                   </div>
@@ -2554,8 +2565,12 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
               let lokalInSelected = 0;
               let luarKotaInSelected = 0;
+              let kanvasLktInSelected = 0;
               activeDayObj.pengiriman.forEach((p: DeliveryAssignment) => {
-                const std = standardizeAreaName(p.area);
+                const std = standardizeAreaName(p.area).toUpperCase();
+                if (std.includes('KANVAS LKT') || p.area.toUpperCase().includes('KANVAS')) {
+                  kanvasLktInSelected++;
+                }
                 if (std.includes('DENPASAR') || std.includes('SINGARAJA') || std.includes('NEGARA') || std.includes('GIANYAR') || std.includes('TABANAN') || std.includes('KUTA') || std.includes('BALI')) {
                   luarKotaInSelected++;
                 } else {
@@ -2563,18 +2578,17 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 }
               });
 
-              // Dynamic schedule lookup and filter
               const storeSchedules = logisticsStore.getSchedules();
 
               const filteredPengiriman = activeDayObj.pengiriman.filter((p: DeliveryAssignment) => {
-                const standardArea = standardizeAreaName(p.area);
+                const standardArea = standardizeAreaName(p.area).toUpperCase();
+                const isKanvasLkt = standardArea.includes('KANVAS LKT') || p.area.toUpperCase().includes('KANVAS');
                 const isLuarPulau = standardArea.includes('DENPASAR') || standardArea.includes('SINGARAJA') || standardArea.includes('NEGARA') || standardArea.includes('GIANYAR') || standardArea.includes('TABANAN') || standardArea.includes('KUTA') || standardArea.includes('BALI');
 
-                // 1. Category Filter
+                if (categoryFilter === 'kanvas_lkt' && !isKanvasLkt) return false;
                 if (categoryFilter === 'lokal' && isLuarPulau) return false;
                 if (categoryFilter === 'luar_kota' && !isLuarPulau) return false;
 
-                // 2. Search Query (Driver, Helper, Helper2, Area, Armada)
                 if (searchQuery.trim()) {
                   const q = searchQuery.toLowerCase().trim();
                   const matchDriver = (p.driver || '').toLowerCase().includes(q);
@@ -2587,17 +2601,14 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   }
                 }
 
-                // 3. Armada Filter
                 if (armadaFilter !== 'all' && p.armada !== armadaFilter) {
                   return false;
                 }
 
-                // 4. Crew / Driver Filter
                 if (crewDriverFilter !== 'all' && p.driver !== crewDriverFilter) {
                   return false;
                 }
 
-                // 5. Schedule Status Filter
                 if (scheduleStatusFilter !== 'all') {
                   const matched = storeSchedules.find(s => {
                     if (p.id && s.id === p.id) return true;
@@ -2614,37 +2625,72 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               });
 
               return (
-                <div className="space-y-4">
-                  {/* Selected Date Title Bar - Bright Non-Black Style */}
-                  <div className="bg-slate-100 dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold shadow-xs">
-                        <Calendar className="w-5 h-5" />
+                <div className="space-y-3">
+                  {/* Selected Date Title Bar - Compact */}
+                  <div className="bg-slate-100 dark:bg-slate-800/90 p-3 rounded-xl border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold shadow-2xs">
+                        <Calendar className="w-4 h-4" />
                       </div>
                       <div>
-                        <span className="text-[10px] font-black uppercase text-emerald-700 dark:text-emerald-400 tracking-wider">
+                        <span className="text-[10px] font-black uppercase text-emerald-700 dark:text-emerald-400 tracking-wider block">
                           RINCIAN PENGIRIMAN TERFAKTUR
                         </span>
-                        <h3 className="text-base font-black text-slate-900 dark:text-white mt-0.5">
+                        <h3 className="text-sm font-black text-slate-900 dark:text-white">
                           {activeDayObj.dayName}, {activeDayObj.dateString}
                         </h3>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="px-3 py-1 rounded-xl text-xs font-black bg-emerald-600 text-white shadow-xs">
-                        {filteredPengiriman.length} {filteredPengiriman.length !== activeDayObj.pengiriman.length ? `dari ${activeDayObj.pengiriman.length}` : ''} Total Ritase
-                      </span>
-                      <span className="px-3 py-1 rounded-xl text-xs font-bold bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => setCategoryFilter('all')}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-black transition cursor-pointer ${
+                          categoryFilter === 'all'
+                            ? 'bg-emerald-600 text-white shadow-2xs'
+                            : 'bg-slate-200 dark:bg-slate-900 text-slate-700 dark:text-slate-300'
+                        }`}
+                      >
+                        Semua ({activeDayObj.pengiriman.length})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCategoryFilter(categoryFilter === 'lokal' ? 'all' : 'lokal')}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition cursor-pointer ${
+                          categoryFilter === 'lokal'
+                            ? 'bg-emerald-600 text-white border-emerald-500'
+                            : 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
+                        }`}
+                      >
                         🚛 {lokalInSelected} Area Lokal
-                      </span>
-                      <span className="px-3 py-1 rounded-xl text-xs font-bold bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-800">
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCategoryFilter(categoryFilter === 'luar_kota' ? 'all' : 'luar_kota')}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition cursor-pointer ${
+                          categoryFilter === 'luar_kota'
+                            ? 'bg-blue-600 text-white border-blue-500'
+                            : 'bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-300 border-blue-300 dark:border-blue-800'
+                        }`}
+                      >
                         🚢 {luarKotaInSelected} Area Luar Kota
-                      </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCategoryFilter(categoryFilter === 'kanvas_lkt' ? 'all' : 'kanvas_lkt')}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition cursor-pointer ${
+                          categoryFilter === 'kanvas_lkt'
+                            ? 'bg-purple-600 text-white border-purple-500'
+                            : 'bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-300 border-purple-300 dark:border-purple-800'
+                        }`}
+                      >
+                        📦 {kanvasLktInSelected} Kanvas LKT
+                      </button>
                       <button
                         type="button"
                         onClick={() => handleOpenAddTripModal(activeDayObj.dayNumber, activeDayObj.dateString)}
-                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs transition cursor-pointer"
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-black bg-emerald-600 hover:bg-emerald-500 text-white shadow-2xs transition cursor-pointer"
                         title="Tambah penugasan ritase baru pada tanggal ini"
                       >
                         <Plus className="w-3.5 h-3.5" />
@@ -2653,33 +2699,30 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     </div>
                   </div>
 
-                  {/* Shipment Details Table - Bright & High Contrast */}
+                  {/* Shipment Details Table - Compact & Rapat */}
                   <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
-                    <table className="w-full text-xs text-left border-collapse min-w-[850px]">
+                    <table className="w-full text-xs text-left border-collapse min-w-[780px]">
                       <thead>
-                        <tr className="bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-100 font-extrabold border-b border-slate-200 dark:border-slate-700 uppercase tracking-wider text-[11px]">
-                          <th className="p-3 text-center w-14 border-r border-slate-200 dark:border-slate-700"># NO</th>
-                          <th className="p-3 border-r border-slate-200 dark:border-slate-700 w-44">DRIVER (PENGEMUDI)</th>
-                          <th className="p-3 border-r border-slate-200 dark:border-slate-700 w-40">HELPER 1</th>
-                          <th className="p-3 border-r border-slate-200 dark:border-slate-700 w-40">HELPER 2</th>
-                          <th className="p-3 border-r border-slate-200 dark:border-slate-700">KIRIM AREA (TUJUAN)</th>
-                          <th className="p-3 border-r border-slate-200 dark:border-slate-700 w-44">ARMADA TRUK</th>
-                          <th className="p-3 border-r border-slate-200 dark:border-slate-700 w-40">STATUS OPERASIONAL</th>
-                          <th className="p-3 text-center w-24">AKSI</th>
+                        <tr className="bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-100 font-extrabold border-b border-slate-200 dark:border-slate-700 uppercase tracking-wider text-[10px]">
+                          <th className="py-2 px-2.5 text-center w-10 border-r border-slate-200 dark:border-slate-700">#</th>
+                          <th className="py-2 px-3 border-r border-slate-200 dark:border-slate-700 w-40">DRIVER</th>
+                          <th className="py-2 px-3 border-r border-slate-200 dark:border-slate-700 w-36">HELPER 1</th>
+                          <th className="py-2 px-3 border-r border-slate-200 dark:border-slate-700 w-36">HELPER 2</th>
+                          <th className="py-2 px-3 border-r border-slate-200 dark:border-slate-700">KIRIM AREA (TUJUAN)</th>
+                          <th className="py-2 px-3 border-r border-slate-200 dark:border-slate-700 w-32">ARMADA</th>
+                          <th className="py-2 px-3 border-r border-slate-200 dark:border-slate-700 w-36">STATUS</th>
+                          <th className="py-2 px-2.5 text-center w-20">AKSI</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y-2 divide-slate-300 dark:divide-slate-700 font-medium">
+                      <tbody className="divide-y divide-slate-200 dark:divide-slate-800 font-medium">
                         {filteredPengiriman.length === 0 ? (
                           <tr>
-                            <td colSpan={8} className="p-8 text-center bg-slate-50 dark:bg-slate-900/50">
-                              <div className="max-w-md mx-auto space-y-2">
-                                <Search className="w-6 h-6 text-slate-400 mx-auto" />
-                                <div className="text-sm font-bold text-slate-700 dark:text-slate-300">
+                            <td colSpan={8} className="p-6 text-center bg-slate-50 dark:bg-slate-900/50">
+                              <div className="max-w-md mx-auto space-y-1.5">
+                                <Search className="w-5 h-5 text-slate-400 mx-auto" />
+                                <div className="text-xs font-bold text-slate-700 dark:text-slate-300">
                                   Tidak ada jadwal ritase yang cocok dengan filter
                                 </div>
-                                <p className="text-xs text-slate-500">
-                                  Coba ubah kata kunci pencarian atau reset filter status / armada / kru.
-                                </p>
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -2689,9 +2732,9 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                     setCrewDriverFilter('all');
                                     setCategoryFilter('all');
                                   }}
-                                  className="mt-2 px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer"
+                                  className="mt-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer"
                                 >
-                                  Reset Semua Filter
+                                  Reset Filter
                                 </button>
                               </div>
                             </td>
@@ -2699,7 +2742,9 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                         ) : (
                           filteredPengiriman.map((p: DeliveryAssignment, pIdx: number) => {
                             const standardArea = standardizeAreaName(p.area);
-                            const isLuarPulau = standardArea.includes('DENPASAR') || standardArea.includes('SINGARAJA') || standardArea.includes('NEGARA') || standardArea.includes('GIANYAR') || standardArea.includes('TABANAN') || standardArea.includes('KUTA') || standardArea.includes('BALI');
+                            const upperArea = standardArea.toUpperCase();
+                            const isKanvasLkt = upperArea.includes('KANVAS LKT') || p.area.toUpperCase().includes('KANVAS');
+                            const isLuarPulau = upperArea.includes('DENPASAR') || upperArea.includes('SINGARAJA') || upperArea.includes('NEGARA') || upperArea.includes('GIANYAR') || upperArea.includes('TABANAN') || upperArea.includes('KUTA') || upperArea.includes('BALI');
                             const driverInitials = getDriverInitials(p.driver);
                             const avatarStyle = DRIVER_AVATAR_COLORS[p.driver] || { 
                               bg: 'bg-slate-100 dark:bg-slate-800', 
@@ -2707,7 +2752,6 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                               ring: 'border-slate-300 dark:border-slate-700' 
                             };
 
-                            // Resolve operational schedule from store
                             const matchedSch = storeSchedules.find(s => {
                               if (p.id && s.id === p.id) return true;
                               if (s.fleet?.initialCode === p.armada && s.crew?.name === p.driver) return true;
@@ -2729,18 +2773,22 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                             return (
                               <tr
                                 key={`cal-detail-${pIdx}-${p.driver}-${p.armada}`}
-                                className={`hover:bg-slate-50 dark:hover:bg-slate-800/60 transition border-b-2 border-slate-300 dark:border-slate-700 ${
-                                  isLuarPulau ? 'bg-blue-50/30 dark:bg-blue-950/20' : ''
+                                className={`hover:bg-slate-50 dark:hover:bg-slate-800/60 transition ${
+                                  isKanvasLkt
+                                    ? 'bg-purple-50/30 dark:bg-purple-950/15'
+                                    : isLuarPulau
+                                    ? 'bg-blue-50/30 dark:bg-blue-950/15'
+                                    : ''
                                 }`}
                               >
-                                <td className="p-3 text-center font-bold text-slate-500 border-r border-slate-200 dark:border-slate-800">
+                                <td className="py-2 px-2.5 text-center font-bold text-slate-500 border-r border-slate-200 dark:border-slate-800">
                                   {pIdx + 1}
                                 </td>
 
                                 {/* Driver */}
-                                <td className="p-3 border-r border-slate-200 dark:border-slate-800">
-                                  <div className="flex items-center gap-2.5">
-                                    <div className={`w-8 h-8 rounded-full border ${avatarStyle.bg} ${avatarStyle.ring} ${avatarStyle.text} flex items-center justify-center font-black text-xs shrink-0 shadow-2xs`}>
+                                <td className="py-2 px-3 border-r border-slate-200 dark:border-slate-800">
+                                  <div className="flex items-center gap-2">
+                                    <div className={`w-6 h-6 rounded-full border ${avatarStyle.bg} ${avatarStyle.ring} ${avatarStyle.text} flex items-center justify-center font-black text-[10px] shrink-0`}>
                                       {driverInitials}
                                     </div>
                                     <span className="font-extrabold text-slate-900 dark:text-white text-xs">
@@ -2750,69 +2798,58 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                 </td>
 
                                 {/* Helper 1 */}
-                                <td className="p-3 border-r border-slate-200 dark:border-slate-800">
+                                <td className="py-2 px-3 border-r border-slate-200 dark:border-slate-800">
                                   <span className={`font-semibold ${p.helper && p.helper !== '-' ? 'text-slate-800 dark:text-slate-200' : 'text-slate-400'}`}>
                                     {p.helper || '-'}
                                   </span>
                                 </td>
                                 {/* Helper 2 */}
-                                <td className="p-3 border-r border-slate-200 dark:border-slate-800">
+                                <td className="py-2 px-3 border-r border-slate-200 dark:border-slate-800">
                                   <span className={`font-semibold ${p.helper2 && p.helper2 !== '-' ? 'text-slate-800 dark:text-slate-200' : 'text-slate-400'}`}>
                                     {p.helper2 || '-'}
                                   </span>
                                 </td>
 
                                 {/* Kirim Area */}
-                                <td className="p-3 border-r border-slate-200 dark:border-slate-800">
-                                  <div>
-                                    <span className={`text-xs font-black uppercase px-2 py-0.5 rounded-md border ${
-                                      isLuarPulau 
-                                        ? 'bg-blue-100 text-blue-900 dark:bg-blue-950 dark:text-blue-200 border-blue-300 dark:border-blue-700' 
-                                        : 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200 border-emerald-300 dark:border-emerald-700'
-                                    }`}>
-                                      {standardArea}
-                                    </span>
-                                  </div>
+                                <td className="py-2 px-3 border-r border-slate-200 dark:border-slate-800">
+                                  <span className={`text-[11px] font-black uppercase px-2 py-0.5 rounded-md border ${
+                                    isKanvasLkt
+                                      ? 'bg-purple-100 text-purple-900 dark:bg-purple-950 dark:text-purple-200 border-purple-300 dark:border-purple-700'
+                                      : isLuarPulau 
+                                      ? 'bg-blue-100 text-blue-900 dark:bg-blue-950 dark:text-blue-200 border-blue-300 dark:border-blue-700' 
+                                      : 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200 border-emerald-300 dark:border-emerald-700'
+                                  }`}>
+                                    {standardArea}
+                                  </span>
                                 </td>
 
                                 {/* Armada */}
-                                <td className="p-3 border-r border-slate-200 dark:border-slate-800">
-                                  <div className="flex items-center gap-2">
-                                    <span className="px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950/80 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 font-mono font-black text-xs">
-                                      {p.armada}
-                                    </span>
-                                  </div>
+                                <td className="py-2 px-3 border-r border-slate-200 dark:border-slate-800">
+                                  <span className="px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950/80 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 font-mono font-black text-xs">
+                                    {p.armada}
+                                  </span>
                                 </td>
 
                                 {/* Status */}
-                                <td className="p-3 border-r border-slate-200 dark:border-slate-800">
-                                  <div className="flex flex-col gap-1.5">
-                                    <div className="flex items-center gap-1.5">
-                                      <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-extrabold border ${cfg.bg} ${cfg.text} ${cfg.border} w-fit`}>
-                                        <span className={`w-1.5 h-1.5 rounded-full ${
-                                          currentStatus === 'delivered' ? 'bg-emerald-500' :
-                                          currentStatus === 'in_transit' ? 'bg-purple-500 animate-pulse' :
-                                          currentStatus === 'picked_up' ? 'bg-amber-500' :
-                                          currentStatus === 'delayed' ? 'bg-rose-500 animate-ping' : 'bg-blue-500'
-                                        }`} />
-                                        <span>{cfg.label}</span>
-                                      </span>
-                                    </div>
-                                    {p.isManuallyEdited && (
-                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-bold bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 w-fit">
-                                        <span>✏️ Manual Edit</span>
-                                      </span>
-                                    )}
-                                  </div>
+                                <td className="py-2 px-3 border-r border-slate-200 dark:border-slate-800">
+                                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold border ${cfg.bg} ${cfg.text} ${cfg.border}`}>
+                                    <span className={`w-1.5 h-1.5 rounded-full ${
+                                      currentStatus === 'delivered' ? 'bg-emerald-500' :
+                                      currentStatus === 'in_transit' ? 'bg-purple-500 animate-pulse' :
+                                      currentStatus === 'picked_up' ? 'bg-amber-500' :
+                                      currentStatus === 'delayed' ? 'bg-rose-500 animate-ping' : 'bg-blue-500'
+                                    }`} />
+                                    <span>{cfg.label}</span>
+                                  </span>
                                 </td>
 
                                 {/* Aksi */}
-                                <td className="p-3 text-center">
-                                  <div className="flex items-center justify-center gap-1.5">
+                                <td className="py-2 px-2.5 text-center">
+                                  <div className="flex items-center justify-center gap-1">
                                     <button
                                       type="button"
                                       onClick={() => handleOpenEditTripModal(p, activeDayObj.dayNumber, activeDayObj.dateString, pIdx)}
-                                      className="p-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/25 text-amber-600 dark:text-amber-400 border border-amber-500/30 transition cursor-pointer"
+                                      className="p-1 rounded-md bg-amber-500/10 hover:bg-amber-500/25 text-amber-600 dark:text-amber-400 border border-amber-500/30 transition cursor-pointer"
                                       title="Edit Rincian Pengiriman Ini"
                                     >
                                       <Edit className="w-3.5 h-3.5" />
@@ -2820,7 +2857,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                     <button
                                       type="button"
                                       onClick={() => handleDeleteTrip(p, activeDayObj.dayNumber, pIdx)}
-                                      className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/25 text-rose-600 dark:text-rose-400 border border-rose-500/30 transition cursor-pointer"
+                                      className="p-1 rounded-md bg-rose-500/10 hover:bg-rose-500/25 text-rose-600 dark:text-rose-400 border border-rose-500/30 transition cursor-pointer"
                                       title="Hapus Rincian Pengiriman Ini"
                                     >
                                       <Trash2 className="w-3.5 h-3.5" />
@@ -2833,6 +2870,83 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                         )}
                       </tbody>
                     </table>
+                  </div>
+
+                  {/* JADWAL KANVAS LKT & HISTORY PANEL */}
+                  <div className="bg-slate-950/90 border border-purple-500/30 rounded-xl p-3.5 space-y-2.5">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="p-1.5 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                          <Truck className="w-4 h-4" />
+                        </span>
+                        <div>
+                          <h4 className="text-xs sm:text-sm font-black text-white flex items-center gap-2">
+                            <span>Jadwal Kanvas LKT &amp; History ({selectedMonth === -1 ? 'Semua Bulan' : MONTH_NAMES[selectedMonth]} {selectedYear})</span>
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                              {kanvasLktMonthHistory.length} Riwayat Ritase
+                            </span>
+                          </h4>
+                          <p className="text-[11px] text-slate-400">
+                            Rekapitulasi jadwal dan riwayat keberangkatan armada Kanvas LKT beserta kru bertugas.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {kanvasLktMonthHistory.length === 0 ? (
+                      <div className="text-center py-4 text-xs text-slate-500">
+                        Belum ada jadwal Kanvas LKT pada periode ini.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto rounded-lg border border-slate-800">
+                        <table className="w-full text-left text-xs border-collapse">
+                          <thead className="bg-slate-900 text-slate-400 text-[10px] font-bold uppercase tracking-wider border-b border-slate-800">
+                            <tr>
+                              <th className="py-2 px-3">Tanggal &amp; Hari</th>
+                              <th className="py-2 px-3">Driver Kanvas</th>
+                              <th className="py-2 px-3">Helper</th>
+                              <th className="py-2 px-3">Area Tujuan</th>
+                              <th className="py-2 px-3">Armada</th>
+                              <th className="py-2 px-3 text-center">Status History</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-800/70 text-slate-300">
+                            {kanvasLktMonthHistory.map((item, idx) => (
+                              <tr
+                                key={`kanvas-hist-${idx}-${item.dateString}`}
+                                onClick={() => setSelectedCalendarDate(item.dateString)}
+                                className="hover:bg-slate-900/70 transition cursor-pointer"
+                              >
+                                <td className="py-2 px-3 font-mono font-bold text-white whitespace-nowrap">
+                                  {item.dayName}, {item.dateString}
+                                </td>
+                                <td className="py-2 px-3 font-bold text-purple-300">
+                                  {item.driver}
+                                </td>
+                                <td className="py-2 px-3 text-slate-300">
+                                  {item.helper || '-'}
+                                </td>
+                                <td className="py-2 px-3">
+                                  <span className="px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 font-bold text-[10px] uppercase">
+                                    {standardizeAreaName(item.area)}
+                                  </span>
+                                </td>
+                                <td className="py-2 px-3">
+                                  <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono font-bold text-[11px]">
+                                    {item.armada}
+                                  </span>
+                                </td>
+                                <td className="py-2 px-3 text-center">
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                                    <CheckCircle2 className="w-3 h-3" /> Terjadwal &amp; Tercatat
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </div>
                 </div>
               );

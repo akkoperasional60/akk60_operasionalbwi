@@ -1,15 +1,12 @@
 import React from 'react';
 import {
-  LayoutDashboard,
   Activity,
   Calendar,
   Timer,
   Award,
-  Settings,
-  Briefcase
+  Settings
 } from 'lucide-react';
 import { logisticsStore } from '../../services/store';
-import { SalesDashboardTab } from './SalesDashboardTab';
 import { AdminActivitiesTab } from './AdminActivitiesTab';
 import { AdminSchedulesTab } from './AdminSchedulesTab';
 import { LoadingDurationTab } from './LoadingDurationTab';
@@ -41,58 +38,54 @@ export const SalesAdminHub: React.FC<SalesAdminHubProps> = ({
       .map(u => u.fullName.toUpperCase())
   ];
 
+  const effectiveTab: SalesAdminSubTab = activeSubTab === 'dashboard' ? 'activities' : activeSubTab;
+
   const tabs = [
     {
-      id: 'dashboard' as SalesAdminSubTab,
-      label: '1. Dashboard Penjualan',
-      icon: LayoutDashboard,
-      description: 'Omset & PO Masuk'
-    },
-    {
       id: 'activities' as SalesAdminSubTab,
-      label: '2. Aktivitas Admin',
+      label: '1. Aktivitas Admin',
       icon: Activity,
       description: 'Log Tugas & Tindak Lanjut'
     },
     {
       id: 'schedules' as SalesAdminSubTab,
-      label: '3. Jadwal Admin',
+      label: '2. Jadwal Admin',
       icon: Calendar,
       description: 'Shift & Agenda Meeting'
     },
     {
       id: 'loading_duration' as SalesAdminSubTab,
-      label: '4. Durasi Muat Admin',
+      label: '3. Durasi Muat Admin',
       icon: Timer,
       description: 'SLA Muat Truk di Gudang'
     },
     {
       id: 'skill_matrix' as SalesAdminSubTab,
-      label: '5. Skill Matrix',
+      label: '4. Skill Matrix',
       icon: Award,
       description: 'Kompetensi & Sertifikasi'
     },
     {
       id: 'jobdesk' as SalesAdminSubTab,
-      label: '6. Pengaturan Jobdesk',
+      label: '5. Pengaturan Jobdesk',
       icon: Settings,
       description: 'SOP, KPI & Batas Approval'
     }
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Sub-Navigation Tabs Bar */}
-      <div className="bg-white rounded-xl border border-slate-200 p-2 shadow-sm">
+      <div className="bg-white rounded-xl border border-slate-200 p-1.5 shadow-sm">
         <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none">
           {tabs.map(tab => {
             const Icon = tab.icon;
-            const isActive = activeSubTab === tab.id;
+            const isActive = effectiveTab === tab.id;
             return (
               <button
                 key={tab.id}
                 onClick={() => onSelectSubTab(tab.id)}
-                className={`flex items-center gap-2 px-3.5 py-2.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all duration-150 shrink-0 ${
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold whitespace-nowrap transition-all duration-150 shrink-0 ${
                   isActive
                     ? 'bg-blue-900 text-white shadow-sm'
                     : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
@@ -108,13 +101,13 @@ export const SalesAdminHub: React.FC<SalesAdminHubProps> = ({
 
       {/* Sub-Tab View Rendering */}
       <div>
-        {activeSubTab === 'dashboard' && <SalesDashboardTab />}
-        {activeSubTab === 'activities' && <AdminActivitiesTab onNavigateSubTab={onSelectSubTab} adminOptions={adminOptions} />}
-        {activeSubTab === 'schedules' && <AdminSchedulesTab onNavigateSubTab={onSelectSubTab} adminOptions={adminOptions} />}
-        {activeSubTab === 'loading_duration' && <LoadingDurationTab onNavigateSubTab={onSelectSubTab} adminOptions={adminOptions} />}
-        {activeSubTab === 'skill_matrix' && <SkillMatrixTab adminOptions={adminOptions} />}
-        {activeSubTab === 'jobdesk' && <JobdeskConfigTab onNavigateSubTab={onSelectSubTab} adminOptions={adminOptions} />}
+        {effectiveTab === 'activities' && <AdminActivitiesTab onNavigateSubTab={onSelectSubTab} adminOptions={adminOptions} />}
+        {effectiveTab === 'schedules' && <AdminSchedulesTab onNavigateSubTab={onSelectSubTab} adminOptions={adminOptions} />}
+        {effectiveTab === 'loading_duration' && <LoadingDurationTab onNavigateSubTab={onSelectSubTab} adminOptions={adminOptions} />}
+        {effectiveTab === 'skill_matrix' && <SkillMatrixTab adminOptions={adminOptions} />}
+        {effectiveTab === 'jobdesk' && <JobdeskConfigTab onNavigateSubTab={onSelectSubTab} adminOptions={adminOptions} />}
       </div>
     </div>
   );
 };
+

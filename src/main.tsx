@@ -15,6 +15,12 @@ window.addEventListener('error', (event) => {
   }
 });
 
+// Auto-recover from stale chunk preloads on Vercel deployments
+window.addEventListener('vite:preloadError', (event) => {
+  event.preventDefault();
+  window.location.reload();
+});
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>

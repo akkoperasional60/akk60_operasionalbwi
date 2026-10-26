@@ -72,7 +72,7 @@
       "destination": "/api/index.ts"
     },
     {
-      "source": "/(.*)",
+      "source": "/((?!api/|assets/|downloads/).*)",
       "destination": "/index.html"
     }
   ]

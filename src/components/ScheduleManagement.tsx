@@ -57,7 +57,8 @@ const AREA_MAP: Record<string, string> = {
   'NEGARA': 'NEGARA',
   'JEMBER_SELATAN': 'JEMBER SELATAN',
   'TOKO_DR_SOETOMO': 'TOKO DR. SOETOMO',
-  'NUSANTARA_EXPAND': 'NUSANTARA EXPAND'
+  'NUSANTARA_EXPAND': 'NUSANTARA EXPAND',
+  'KANVAS_LKT': 'KANVAS LKT'
 };
 
 export const ScheduleManagement: React.FC<ScheduleManagementProps> = ({
@@ -1583,7 +1584,7 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                   <div className="h-10 border-b border-slate-300 mt-1 flex items-center justify-center">
                     <span className="text-[9px] text-emerald-700 italic">✓ Gate Pass OK</span>
                   </div>
-                  <div className="font-bold text-slate-900 mt-1">{logisticsStore.getUsers().find(u => u.fullName.toLowerCase().includes('security') || u.department?.toLowerCase().includes('security') || u.role === ('security' as any))?.fullName || 'Pos Gerbang DC (Slamet Riyadi)'}</div>
+                  <div className="font-bold text-slate-900 mt-1">{logisticsStore.getUsers().find(u => u.fullName.toLowerCase().includes('security') || u.department?.toLowerCase().includes('security') || u.role === ('security' as any))?.fullName || 'Pos Gerbang DC (Hairul Rozikin)'}</div>
                 </div>
                 <div>
                   <div className="font-semibold text-slate-800">Dibawa Oleh:</div>

@@ -81,8 +81,8 @@ export const DriverSuratJalanModal: React.FC<DriverSuratJalanModalProps> = ({
 
   const allUsers = logisticsStore.getUsers();
   const spvUser = allUsers.find(u => u.role === 'spv_logistik' && u.status === 'approved') || { fullName: 'M. Syaiful B.', role: 'spv_logistik' };
-  const operasionalUser = allUsers.find(u => u.role === 'operasional' && u.status === 'approved') || { fullName: 'Hadi Purnomo', role: 'operasional' };
-  const securityUser = allUsers.find(u => u.role === 'security' && u.status === 'approved') || { fullName: 'Slamet Riyadi', role: 'security' };
+  const operasionalUser = allUsers.find(u => u.role === 'operasional' && u.status === 'approved') || { fullName: 'Bayu Novianto Dimas Permana', role: 'operasional' };
+  const securityUser = allUsers.find(u => u.role === 'security' && u.status === 'approved') || { fullName: 'Hairul Rozikin', role: 'security' };
   const spvConciseName = formatConcisePerson(currentWaybill?.preparedByName || spvUser.fullName);
   const operasionalConciseName = formatConcisePerson(currentWaybill?.acknowledgedByName || operasionalUser.fullName);
   const securityConciseName = formatConcisePerson(currentWaybill?.securityOfficerName || securityUser.fullName);

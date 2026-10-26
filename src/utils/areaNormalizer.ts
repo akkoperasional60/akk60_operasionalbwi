@@ -40,7 +40,8 @@ export const OFFICIAL_DESTINATION_AREAS = [
   'Jember Kota',
   'Toko DR. Soetomo',
   'Nusantara Expand',
-  'Titipan Kota Kota'
+  'Titipan Kota Kota',
+  'Kanvas LKT'
 ] as const;
 
 export type OfficialDestinationArea = typeof OFFICIAL_DESTINATION_AREAS[number];
@@ -97,20 +98,29 @@ export const AREA_CODE_MAP: Record<string, StandardAreaName> = {
   'TOKO_DR_SOETOMO': 'Toko DR. Soetomo',
   'DR_SOETOMO': 'Toko DR. Soetomo',
   'NUSANTARA_EXPAND': 'Nusantara Expand',
-  'TITIPAN_KOTA_KOTA': 'Titipan Kota Kota'
+  'TITIPAN_KOTA_KOTA': 'Titipan Kota Kota',
+  'KANVAS_LKT': 'Kanvas LKT',
+  'KANVAS LKT': 'Kanvas LKT',
+  'KANVAS': 'Kanvas LKT',
+  'LKT': 'Kanvas LKT'
 };
 
 /**
  * Normalisasi otomatis nama area variatif dari Google Sheets / Excel / Form
- * menjadi salah satu dari 36 nama area baku resmi.
+ * menjadi salah satu dari 37 nama area baku resmi.
  */
 export function standardizeAreaName(rawArea: string | undefined | null): string {
   if (!rawArea) return 'Rogojampi Retail';
   const clean = rawArea.trim().toUpperCase();
 
-  // 1. Direct case-insensitive match dengan salah satu dari 36 official areas
+  // 1. Direct case-insensitive match dengan salah satu dari official areas
   const exactMatch = OFFICIAL_DESTINATION_AREAS.find(a => a.toUpperCase() === clean);
   if (exactMatch) return exactMatch;
+
+  // 1a. Kanvas LKT
+  if (clean.includes('KANVAS LKT') || clean.includes('KANVAS_LKT') || clean.includes('KANVAS LUAR KOTA') || clean === 'KANVAS' || clean === 'LKT') {
+    return 'Kanvas LKT';
+  }
 
   // 1b. Toko DR. Soetomo, Nusantara Expand, Titipan Kota Kota
   if (clean.includes('SOETOMO') || clean.includes('SUTOMO')) {

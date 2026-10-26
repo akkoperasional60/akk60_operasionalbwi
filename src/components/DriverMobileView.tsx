@@ -81,6 +81,7 @@ import { driverChecklistService } from '../services/driverChecklistService';
 import { driverWaybillService } from '../services/driverWaybillService';
 import { driverShiftService } from '../services/driverShiftService';
 import { getSupabaseClient } from '../services/supabaseService';
+import { supabaseRealtimeSync } from '../services/supabaseRealtimeSync';
 import { useToast } from '../context/ToastContext';
 import { getDriverPortalDepartureLabel, getAreaScheduleTiming } from '../utils/areaScheduleRules';
 import { attendanceService } from '../services/attendanceService';
@@ -507,6 +508,62 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     }
   });
   const [isPostCheckinFleetModalOpen, setIsPostCheckinFleetModalOpen] = useState<boolean>(false);
+  const [waybillRefreshTick, setWaybillRefreshTick] = useState<number>(0);
+
+  // Sinkronisasi Status Bersama (Driver & Helper dalam 1 Armada / Jadwal yang sama)
+  const [sharedScheduleFlowMap, setSharedScheduleFlowMap] = useState<Record<string, {
+    scheduleId: string;
+    date: string;
+    fleetId?: string;
+    plateNumber?: string;
+    vehicleType?: string;
+    checklistCompleted?: boolean;
+    checklistCompletedBy?: string;
+    preparedForGateOut?: boolean;
+    preparedBy?: string;
+    gateOutConfirmed?: boolean;
+    gateOutBy?: string;
+  }>>(() => {
+    try {
+      const raw = localStorage.getItem('akk_shared_schedule_flow_v1');
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const updateSharedScheduleFlow = (
+    scheduleIds: string[],
+    patch: Partial<{
+      date: string;
+      fleetId: string;
+      plateNumber: string;
+      vehicleType: string;
+      checklistCompleted: boolean;
+      checklistCompletedBy: string;
+      preparedForGateOut: boolean;
+      preparedBy: string;
+      gateOutConfirmed: boolean;
+      gateOutBy: string;
+    }>
+  ) => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    setSharedScheduleFlowMap(prev => {
+      const next = { ...prev };
+      scheduleIds.filter(Boolean).forEach(id => {
+        next[id] = {
+          ...(next[id] || { scheduleId: id, date: todayStr }),
+          ...patch,
+          scheduleId: id,
+          date: patch.date || next[id]?.date || todayStr
+        };
+      });
+      try {
+        localStorage.setItem('akk_shared_schedule_flow_v1', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
 
   // Sync active shift on driver change or shift event
   useEffect(() => {
@@ -532,19 +589,23 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       }
     };
 
+    const onWaybillUpdated = () => {
+      setWaybillRefreshTick(t => t + 1);
+    };
+
     window.addEventListener('driver-shift-updated', onShiftUpdated);
+    window.addEventListener('driver-waybill-updated', onWaybillUpdated);
     return () => {
       window.removeEventListener('driver-shift-updated', onShiftUpdated);
+      window.removeEventListener('driver-waybill-updated', onWaybillUpdated);
     };
   }, [selectedDriverId]);
 
-  // Load checklists when selected driver changes
+  // Load checklists when selected driver or deliveries change
   useEffect(() => {
-    if (selectedDriverId) {
-      const list = driverChecklistService.getChecklists();
-      setChecklists(list);
-    }
-  }, [selectedDriverId]);
+    const list = driverChecklistService.getChecklists();
+    setChecklists(list);
+  }, [selectedDriverId, deliveries.length]);
 
   // 📢 Arahan & Solusi Kendala dari SPV Logistik / Super Admin (Hanya tampil pada hari tersebut, otomatis hilang keesokan harinya)
   const [driverKendalaReports, setDriverKendalaReports] = useState<DriverHelperReport[]>([]);
@@ -678,7 +739,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           'Sinkronisasi Offline Selesai',
           `${detail.syncedCount} pembaruan tugas berhasil disinkronkan ke server pusat!`
         );
-        loadDeliveries(true);
+        loadDeliveriesRef.current(true);
       }
     };
 
@@ -796,8 +857,30 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     return crews[0] ? { ...crews[0], name: portalDisplayName } : null;
   }, [crews, selectedDriverId, syncedCrew, portalDisplayName]);
 
-  // Assigned Fleet for current driver (Prioritizes locked fleet selected after Check-In)
+  // Jadwal non-selesai utama untuk sinkronisasi Driver & Helper dalam satu armada
+  const primarySharedSchedule = useMemo(() => {
+    return (
+      deliveries.find(d => ['in_transit', 'picked_up', 'delayed'].includes(d.status)) ||
+      deliveries.find(d => d.status === 'scheduled') ||
+      deliveries[0] ||
+      null
+    );
+  }, [deliveries]);
+
+  // Assigned Fleet for current driver/helper (Prioritizes shared schedule fleet or locked fleet selected after Check-In)
   const assignedFleet = useMemo(() => {
+    if (primarySharedSchedule) {
+      const sharedFlow = sharedScheduleFlowMap[primarySharedSchedule.id];
+      if (sharedFlow?.fleetId) {
+        const sharedFleetMatch = fleets.find(f => f.id === sharedFlow.fleetId);
+        if (sharedFleetMatch) return sharedFleetMatch;
+      }
+      if (primarySharedSchedule.fleetId) {
+        const schFleetMatch = fleets.find(f => f.id === primarySharedSchedule.fleetId);
+        if (schFleetMatch) return schFleetMatch;
+      }
+      if (primarySharedSchedule.fleet) return primarySharedSchedule.fleet;
+    }
     if (selectedFleetId) {
       const lockedMatch = fleets.find(f => f.id === selectedFleetId);
       if (lockedMatch) return lockedMatch;
@@ -811,7 +894,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       if (driverMatch) return driverMatch;
     }
     return fleets[0] || null;
-  }, [fleets, currentDriver, selectedFleetId]);
+  }, [fleets, currentDriver, selectedFleetId, primarySharedSchedule, sharedScheduleFlowMap]);
 
   // Status Persiapan Keluar & SJ Keluar
   const [keluarArgoMap, setKeluarArgoMap] = useState<Record<string, string>>(() => {
@@ -832,21 +915,34 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     }
   });
 
-  // Latest vehicle checklist for current driver/fleet
+  // Latest vehicle checklist for current driver/helper or their shared fleet/schedule partner
   const latestChecklist = useMemo(() => {
     const driverNameLower = (currentDriver?.name || portalDisplayName || '').trim().toLowerCase();
-    const matchesDriver = (c: DriverVehicleChecklist) =>
-      c.driverId === selectedDriverId ||
-      (driverNameLower.length > 0 && (c.driverName || '').trim().toLowerCase() === driverNameLower);
+    const partnerDriverLower = (primarySharedSchedule?.crew?.name || '').trim().toLowerCase();
+    const partnerHelperLower = (primarySharedSchedule?.crewHelper?.name || '').trim().toLowerCase();
+
+    const matchesCrewOrPartner = (c: DriverVehicleChecklist) => {
+      const cName = (c.driverName || '').trim().toLowerCase();
+      return (
+        c.driverId === selectedDriverId ||
+        (primarySharedSchedule?.crewId && c.driverId === primarySharedSchedule.crewId) ||
+        (primarySharedSchedule?.crewHelperId && c.driverId === primarySharedSchedule.crewHelperId) ||
+        (driverNameLower.length > 0 && cName === driverNameLower) ||
+        (partnerDriverLower.length > 0 && cName === partnerDriverLower) ||
+        (partnerHelperLower.length > 0 && cName === partnerHelperLower)
+      );
+    };
 
     if (assignedFleet) {
       const byFleet = checklists.find(
-        c => matchesDriver(c) && (c.fleetId === assignedFleet.id || c.plateNumber === assignedFleet.plateNumber)
+        c =>
+          (matchesCrewOrPartner(c) || c.date === new Date().toISOString().slice(0, 10)) &&
+          (c.fleetId === assignedFleet.id || c.plateNumber === assignedFleet.plateNumber)
       );
       if (byFleet) return byFleet;
     }
-    return checklists.find(c => matchesDriver(c)) || null;
-  }, [checklists, selectedDriverId, assignedFleet, currentDriver?.name, portalDisplayName]);
+    return checklists.find(c => matchesCrewOrPartner(c)) || null;
+  }, [checklists, selectedDriverId, assignedFleet, currentDriver?.name, portalDisplayName, primarySharedSchedule]);
 
   // Status apakah driver sudah klik Konfirmasi Tiba di Gudang hari ini (membuka kunci Pasca-Jalan)
   const [hasConfirmedArrivalFlag, setHasConfirmedArrivalFlag] = useState<boolean>(() => {
@@ -875,18 +971,64 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     return Boolean(hasConfirmedArrivalFlag || hasDeliveredToday);
   }, [hasConfirmedArrivalFlag, deliveries]);
 
-  const hasChecklistToday = useMemo(() => {
+  // Cek apakah jadwal/armada bersama (Driver A & Helper B) sudah selesai Checklist Pra-Jalan hari ini
+  const sharedCrewPreTripState = useMemo(() => {
     const todayStr = new Date().toISOString().slice(0, 10);
     const driverNameLower = (currentDriver?.name || portalDisplayName || '').trim().toLowerCase();
-    const hasPreTripToday = checklists.some(
-      c =>
-        c.date === todayStr &&
-        c.inspectionType === 'pre_trip' &&
-        (c.driverId === selectedDriverId ||
-          (driverNameLower.length > 0 && (c.driverName || '').trim().toLowerCase() === driverNameLower))
+    const partnerDriverLower = (primarySharedSchedule?.crew?.name || '').trim().toLowerCase();
+    const partnerHelperLower = (primarySharedSchedule?.crewHelper?.name || '').trim().toLowerCase();
+
+    const matchingPreTrip = checklists.find(c => {
+      if (c.date !== todayStr || c.inspectionType !== 'pre_trip') return false;
+      const cName = (c.driverName || '').trim().toLowerCase();
+      if (c.driverId === selectedDriverId || (driverNameLower && cName === driverNameLower)) return true;
+      if (primarySharedSchedule) {
+        if (primarySharedSchedule.crewId && c.driverId === primarySharedSchedule.crewId) return true;
+        if (primarySharedSchedule.crewHelperId && c.driverId === primarySharedSchedule.crewHelperId) return true;
+        if (partnerDriverLower && cName === partnerDriverLower) return true;
+        if (partnerHelperLower && cName === partnerHelperLower) return true;
+        if (assignedFleet && (c.fleetId === assignedFleet.id || c.plateNumber === assignedFleet.plateNumber)) return true;
+      }
+      return false;
+    });
+
+    const sharedFlow = primarySharedSchedule ? sharedScheduleFlowMap[primarySharedSchedule.id] : undefined;
+    const isPreparedOrInTransit = Boolean(
+      primarySharedSchedule &&
+        (keluarArgoMap[primarySharedSchedule.id] ||
+          sharedFlow?.checklistCompleted ||
+          sharedFlow?.preparedForGateOut ||
+          sharedFlow?.gateOutConfirmed ||
+          ['in_transit', 'picked_up'].includes(primarySharedSchedule.status))
     );
-    return Boolean(hasPreTripToday || isChecklistCompletedAfterCheckin);
-  }, [checklists, selectedDriverId, currentDriver?.name, portalDisplayName, isChecklistCompletedAfterCheckin]);
+
+    const isDone = Boolean(matchingPreTrip || isChecklistCompletedAfterCheckin || isPreparedOrInTransit);
+    const completedBy =
+      matchingPreTrip?.driverName ||
+      sharedFlow?.checklistCompletedBy ||
+      primarySharedSchedule?.crew?.name ||
+      portalDisplayName;
+
+    return {
+      isDone,
+      completedBy,
+      isPreparedOrInTransit
+    };
+  }, [
+    checklists,
+    selectedDriverId,
+    currentDriver?.name,
+    portalDisplayName,
+    primarySharedSchedule,
+    assignedFleet,
+    isChecklistCompletedAfterCheckin,
+    sharedScheduleFlowMap,
+    keluarArgoMap
+  ]);
+
+  const hasChecklistToday = useMemo(() => {
+    return sharedCrewPreTripState.isDone;
+  }, [sharedCrewPreTripState.isDone]);
 
   const isUserHelperRole = useMemo(() => {
     return (
@@ -896,15 +1038,15 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     );
   }, [syncedUserRoleInfo.roleLabel, currentUser?.role, isHelperPositionSkipped]);
 
-  // Syarat Persiapan Keluar: 1. Check-In Shift -> 2. Pemilihan Armada -> 3. Pengisian Checklist Pra-Jalan (atau Helper Skip)
+  // Syarat Persiapan Keluar: 1. Check-In Shift -> 2. Pemilihan Armada -> 3. Pengisian Checklist Pra-Jalan (atau sudah diselesaikan partner Driver/Helper)
   const canClickPersiapanKeluar = useMemo(() => {
     const hasShift = Boolean(activeShift);
-    const hasFleet = Boolean(isFleetLockedAfterCheckin || isUserHelperRole);
+    const hasFleet = Boolean(isFleetLockedAfterCheckin || sharedCrewPreTripState.isDone || isUserHelperRole);
     const hasChecklist = Boolean(hasChecklistToday || isChecklistCompletedAfterCheckin || isUserHelperRole);
     return hasShift && hasFleet && hasChecklist;
-  }, [activeShift, isFleetLockedAfterCheckin, isUserHelperRole, hasChecklistToday, isChecklistCompletedAfterCheckin]);
+  }, [activeShift, isFleetLockedAfterCheckin, sharedCrewPreTripState.isDone, isUserHelperRole, hasChecklistToday, isChecklistCompletedAfterCheckin]);
 
-  // Helper to lock selected fleet after check-in and propagate to active schedules
+  // Helper to lock selected fleet after check-in and propagate to active schedules (Driver & Helper)
   const lockSelectedFleetForDriver = (fleetIdToLock: string) => {
     const targetF = fleets.find(f => f.id === fleetIdToLock) || assignedFleet || fleets[0];
     if (!targetF) return null;
@@ -919,15 +1061,18 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     if (selectedDriverId) {
       logisticsStore.updateCrew(selectedDriverId, { currentFleetId: targetF.id });
     }
-    // Kunci nomor kendaraan armada pada jadwal aktif driver ini secara batch
+    const accountName = (currentUser?.fullName || portalDisplayName || currentDriver?.name || '').trim();
     const currentSchedules = logisticsStore.getSchedules();
     const updates: { id: string; data: Partial<Schedule> }[] = [];
+    const matchedScheduleIds: string[] = [];
     currentSchedules.forEach(s => {
       if (
         s.status !== 'delivered' &&
         (s.crewId === selectedDriverId ||
-          (currentDriver && s.crew?.name?.toLowerCase() === currentDriver.name.toLowerCase()))
+          s.crewHelperId === selectedDriverId ||
+          isScheduleAssignedToPerson(s, accountName, selectedDriverId))
       ) {
+        matchedScheduleIds.push(s.id);
         updates.push({
           id: s.id,
           data: {
@@ -937,6 +1082,13 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         });
       }
     });
+    if (matchedScheduleIds.length > 0) {
+      updateSharedScheduleFlow(matchedScheduleIds, {
+        fleetId: targetF.id,
+        plateNumber: targetF.plateNumber,
+        vehicleType: targetF.vehicleType
+      });
+    }
     if (updates.length > 0) {
       logisticsStore.batchSyncSchedules([], updates);
     }
@@ -946,6 +1098,10 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
   // Filter kru khusus untuk SPV Logistik & Super Admin di Portal Driver ('all' = tampilkan semua jadwal kru)
   const [spvCrewFilter, setSpvCrewFilter] = useState<string>('all');
+  const spvCrewFilterRef = useRef<string>('all');
+  useEffect(() => {
+    spvCrewFilterRef.current = spvCrewFilter;
+  }, [spvCrewFilter]);
 
   // Cek apakah role akun saat ini adalah SPV Logistik atau Super Admin (bisa melihat semua jadwal & menghapus jadwal)
   const canManageAllPortalSchedules = useMemo(() => {
@@ -957,7 +1113,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     );
   }, [currentUser?.role, syncedUserRoleInfo.rawRole]);
 
-  // Helper pencocokan nama kru secara akurat berdasarkan token kata (mencegah 'Budi' tercampur dengan 'Budiono', namun 'Rizal' cocok dengan 'Saiful Rizal')
+  // Helper pencocokan nama kru secara akurat berdasarkan token kata (mencegah 'Budi' tercampur dengan 'Budiono', namun 'Rizal' cocok dengan 'Saifur Rizal')
   const doesCrewNameMatch = (schedulePersonName: string | undefined, targetAccountName: string | undefined): boolean => {
     const a = (schedulePersonName || '').trim().toLowerCase();
     const b = (targetAccountName || '').trim().toLowerCase();
@@ -970,9 +1126,25 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   };
 
   // Cek apakah sebuah jadwal ditugaskan kepada kru (Driver atau Helper) tertentu
-  const isScheduleAssignedToPerson = (s: Schedule, personName: string, personId?: string): boolean => {
+  const isScheduleAssignedToPerson = (
+    s: Schedule,
+    personName: string,
+    personId?: string,
+    crewPool?: Crew[]
+  ): boolean => {
+    const activeCrewPool = crewPool || crews;
     const cleanName = (personName || '').trim();
     const cleanId = (personId || '').trim().toLowerCase();
+
+    const driverNameOnSch = s.crew?.name || activeCrewPool.find(c => c.id === s.crewId)?.name || '';
+    const helper1OnSch = s.crewHelper?.name || (s.crewHelperId ? activeCrewPool.find(c => c.id === s.crewHelperId)?.name : '') || '';
+    const helper2OnSch = s.crewHelper2?.name || (s.crewHelper2Id ? activeCrewPool.find(c => c.id === s.crewHelper2Id)?.name : '') || '';
+
+    if (cleanName) {
+      if (doesCrewNameMatch(driverNameOnSch, cleanName)) return true;
+      if (doesCrewNameMatch(helper1OnSch, cleanName)) return true;
+      if (doesCrewNameMatch(helper2OnSch, cleanName)) return true;
+    }
 
     if (cleanId && cleanId.length > 2) {
       const strippedTargetId = cleanId.replace(/^(usr-|crw-)/, '');
@@ -981,10 +1153,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         .map(x => String(x).trim().toLowerCase());
 
       if (scheduleIds.includes(cleanId)) {
-        // Pastikan nama kru pada jadwal juga selaras jika tersedia (agar crw-06 fallback tidak salah cocok)
-        const driverNameOnSch = s.crew?.name || crews.find(c => c.id === s.crewId)?.name || '';
-        const helper1OnSch = s.crewHelper?.name || (s.crewHelperId ? crews.find(c => c.id === s.crewHelperId)?.name : '') || '';
-        const helper2OnSch = s.crewHelper2?.name || (s.crewHelper2Id ? crews.find(c => c.id === s.crewHelper2Id)?.name : '') || '';
+        if (!cleanName || (!driverNameOnSch && !helper1OnSch && !helper2OnSch)) return true;
         if (
           doesCrewNameMatch(driverNameOnSch, cleanName) ||
           doesCrewNameMatch(helper1OnSch, cleanName) ||
@@ -1001,16 +1170,6 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       }
     }
 
-    if (!cleanName) return false;
-
-    const driverName = s.crew?.name || crews.find(c => c.id === s.crewId)?.name || '';
-    const helper1Name = s.crewHelper?.name || (s.crewHelperId ? crews.find(c => c.id === s.crewHelperId)?.name : '') || '';
-    const helper2Name = s.crewHelper2?.name || (s.crewHelper2Id ? crews.find(c => c.id === s.crewHelper2Id)?.name : '') || '';
-
-    if (doesCrewNameMatch(driverName, cleanName)) return true;
-    if (doesCrewNameMatch(helper1Name, cleanName)) return true;
-    if (doesCrewNameMatch(helper2Name, cleanName)) return true;
-
     return false;
   };
 
@@ -1025,23 +1184,47 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         return;
       }
 
+      // Always read fresh user & crew state from store to prevent stale closure bugs after status updates
+      const latestUser = propUser || logisticsStore.getCurrentUser();
+      const latestCrews = logisticsStore.getCrews();
+      const latestActiveCrew = logisticsStore.getActiveDriverCrew();
+      const latestUsersList = logisticsStore.getUsers();
+      const matchedUserInStore = latestUsersList.find(
+        u =>
+          (latestUser?.id && u.id === latestUser.id) ||
+          (latestUser?.email && u.email.toLowerCase() === latestUser.email.toLowerCase()) ||
+          (latestUser?.fullName && u.fullName.toLowerCase() === latestUser.fullName.toLowerCase())
+      );
+      const effectiveRole = String(matchedUserInStore?.role || latestUser?.role || '').toLowerCase();
+      const isManagerPortal = ['super_admin', 'spv_logistik', 'admin'].includes(effectiveRole);
+      const activeSpvFilter = spvCrewFilterRef.current;
+
       let targetList: Schedule[] = [];
 
-      if (canManageAllPortalSchedules) {
+      if (isManagerPortal) {
         // Role SPV Logistik & Super Admin: Semua jadwal terbaca di portal (atau difilter sesuai pilihan kru)
-        if (spvCrewFilter === 'all') {
+        if (activeSpvFilter === 'all') {
           targetList = localSchedules;
         } else {
-          targetList = localSchedules.filter(s => isScheduleAssignedToPerson(s, spvCrewFilter));
+          targetList = localSchedules.filter(s =>
+            isScheduleAssignedToPerson(s, activeSpvFilter, undefined, latestCrews)
+          );
         }
       } else {
-        // Role Driver / Helper: HANYA jadwal milik akun yang sedang login (misal Budi -> jadwal Budi, Rizal -> jadwal Rizal)
-        const accountName = (currentUser?.fullName || portalDisplayName || '').trim();
-        const accountId = currentUser?.id || selectedDriverId;
-        targetList = localSchedules.filter(s => isScheduleAssignedToPerson(s, accountName, accountId));
+        // Role Driver / Helper: HANYA jadwal milik akun yang sedang login (baik sebagai Driver maupun Helper)
+        const accountName = (
+          latestUser?.fullName ||
+          portalDisplayName ||
+          latestActiveCrew?.name ||
+          ''
+        ).trim();
+        const accountId = latestActiveCrew?.id || latestUser?.id || selectedDriverId;
+        targetList = localSchedules.filter(s =>
+          isScheduleAssignedToPerson(s, accountName, accountId, latestCrews)
+        );
       }
 
-      // Prioritas status agar jika ada jadwal ganda di tanggal yang sama untuk kru yang sama, jadwal aktif diprioritaskan
+      // Prioritas status agar jadwal aktif dan jadwal selesai (delivered) keduanya terjaga dengan baik
       const getStatusRank = (s: Schedule): number => {
         if (s.status === 'in_transit' || s.status === 'picked_up' || s.status === 'delayed') return 4;
         if (s.status === 'delivered') return 3;
@@ -1058,7 +1241,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       });
 
       const seenIds = new Set<string>();
-      const seenCrewDates = new Set<string>();
+      const seenComposite = new Set<string>();
       const deduplicated: Schedule[] = [];
 
       for (const item of sortedRaw) {
@@ -1066,13 +1249,12 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         const dateKey = (item.departureDate || item.createdAt || '').slice(0, 10);
         const crewKey = (item.crew?.name || item.crewId || '').toLowerCase();
         const areaKey = (item.areaName || item.store?.storeName || '').toLowerCase();
-        const compositeKey = canManageAllPortalSchedules && spvCrewFilter === 'all'
-          ? `${dateKey}_${crewKey}_${areaKey}`
-          : `${dateKey}_${crewKey}`;
+        // Sertakan status & areaKey agar jadwal yang sudah selesai ('delivered') tidak pernah tertimpa/hilang
+        const compositeKey = `${dateKey}_${crewKey}_${areaKey}_${item.status}`;
 
-        if (dateKey && seenCrewDates.has(compositeKey)) continue;
+        if (dateKey && seenComposite.has(compositeKey)) continue;
         seenIds.add(item.id);
-        if (dateKey) seenCrewDates.add(compositeKey);
+        if (dateKey) seenComposite.add(compositeKey);
         deduplicated.push(item);
       }
 
@@ -1094,11 +1276,14 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     }
   };
 
+  const loadDeliveriesRef = useRef(loadDeliveries);
+  loadDeliveriesRef.current = loadDeliveries;
+
   useEffect(() => {
     loadDeliveries();
   }, [selectedDriverId, currentUser?.id, currentUser?.fullName, currentUser?.role, portalDisplayName, spvCrewFilter, canManageAllPortalSchedules]);
 
-  // React to store updates
+  // React to store updates without stale closure
   useEffect(() => {
     const unsub = logisticsStore.subscribe(() => {
       const active = logisticsStore.getCurrentUser();
@@ -1111,7 +1296,15 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       }
       setCrews(logisticsStore.getCrews());
       setFleets(logisticsStore.getFleets());
-      loadDeliveries(true);
+      setChecklists(driverChecklistService.getChecklists());
+      try {
+        const rawArgo = localStorage.getItem('akk_driver_keluar_argo_v1');
+        if (rawArgo) setKeluarArgoMap(JSON.parse(rawArgo));
+        const rawShared = localStorage.getItem('akk_shared_schedule_flow_v1');
+        if (rawShared) setSharedScheduleFlowMap(JSON.parse(rawShared));
+      } catch {}
+      setWaybillRefreshTick(t => t + 1);
+      loadDeliveriesRef.current(true);
     });
     return unsub;
   }, []);
@@ -1185,27 +1378,25 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     let unsubscribeDriverRealtime: (() => void) | null = null;
     const activeDriverName = currentDriver?.name || portalDisplayName;
 
-    import('../services/supabaseRealtimeSync')
-      .then(({ supabaseRealtimeSync }) => {
-        unsubscribeDriverRealtime = supabaseRealtimeSync.subscribeForDriver({
-          driverId: selectedDriverId,
-          driverName: activeDriverName,
-          onNotification: () => {
-            // Notifikasi perubahan jadwal hanya muncul di menu Laporan Kiriman Kru, bukan di Portal Driver
-          },
-          onScheduleSync: () => {
-            setCrews(logisticsStore.getCrews());
-            setFleets(logisticsStore.getFleets());
-            loadDeliveries(true);
-          }
-        });
-      })
-      .catch(() => {});
+    try {
+      unsubscribeDriverRealtime = supabaseRealtimeSync.subscribeForDriver({
+        driverId: selectedDriverId,
+        driverName: activeDriverName,
+        onNotification: () => {
+          // Notifikasi perubahan jadwal hanya muncul di menu Laporan Kiriman Kru, bukan di Portal Driver
+        },
+        onScheduleSync: () => {
+          setCrews(logisticsStore.getCrews());
+          setFleets(logisticsStore.getFleets());
+          loadDeliveriesRef.current(true);
+        }
+      });
+    } catch {}
 
     const handleRealtimeSynced = () => {
       setCrews(logisticsStore.getCrews());
       setFleets(logisticsStore.getFleets());
-      loadDeliveries(true);
+      loadDeliveriesRef.current(true);
     };
 
     window.addEventListener('akk-realtime-synced', handleRealtimeSynced);
@@ -1294,41 +1485,40 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   }, [deliveries, keluarArgoMap, canManageAllPortalSchedules, spvCrewFilter]);
 
   // 📄 Surat Jalan Keluar (SJ Keluar):
-  // - Siap Out: HANYA 1 jadwal yang tampil (prioritas jadwal yang klik Persiapan Keluar / jadwal aktif, atau jika sudah berangkat maka 1 jadwal besok H+1).
-  // - Di Jalan: Ketika tim pengiriman sudah keluar dari gudang (Gate-Out / in_transit).
-  // - Selesai: Ketika pengiriman sudah tiba di gudang (delivered).
+  // Tersinkronisasi penuh antara Driver & Helper dalam satu armada/jadwal:
+  // - Menampilkan seluruh SJ untuk jadwal aktif/terjadwal (Siap Out), Di Jalan (setelah salah satu klik Gate-Out -> otomatis siap SJ Print), dan Selesai (setelah tiba di gudang).
   const driverWaybills = useMemo(() => {
-    const tomorrowDate = new Date();
-    tomorrowDate.setDate(tomorrowDate.getDate() + 1);
-    const tomorrowIso = tomorrowDate.toISOString().slice(0, 10);
-
-    // Pilih maksimal 1 jadwal berstatus 'scheduled' untuk Siap Out
-    const preparedScheduled = deliveries.find(
-      d => d.status === 'scheduled' && Boolean(keluarArgoMap[d.id])
-    );
-    const activeScheduled =
-      activeDeliveries[0]?.status === 'scheduled' ? activeDeliveries[0] : null;
-    const tomorrowScheduled =
-      scheduledDeliveries.find(
-        d => d.status === 'scheduled' && (d.departureDate || '').slice(0, 10) === tomorrowIso
-      ) ||
-      scheduledDeliveries.find(d => d.status === 'scheduled') ||
-      null;
-
-    const singleSiapOut = preparedScheduled || activeScheduled || tomorrowScheduled || null;
-
-    const eligibleSchedules = deliveries.filter(d => {
-      // Selesai ketika pengiriman sudah tiba di gudang
-      if (d.status === 'delivered') return true;
-      // Di Jalan ketika tim pengiriman sudah keluar dari gudang
-      if (['picked_up', 'in_transit', 'delayed'].includes(d.status)) return true;
-      // Siap Out: Hanya 1 jadwal yang terpilih
-      if (singleSiapOut && d.id === singleSiapOut.id) return true;
-      return false;
+    if (deliveries.length === 0) return [];
+    const hydratedDeliveries = deliveries.map(d => {
+      const shared = sharedScheduleFlowMap[d.id];
+      const effectiveStatus: ShipmentStatus =
+        d.status === 'delivered'
+          ? 'delivered'
+          : shared?.gateOutConfirmed || ['in_transit', 'picked_up', 'delayed'].includes(d.status)
+          ? 'in_transit'
+          : d.status;
+      return {
+        ...d,
+        status: effectiveStatus,
+        fleet: assignedFleet || d.fleet,
+        fleetId: assignedFleet?.id || d.fleetId
+      };
     });
+    return driverWaybillService.getWaybillsForDriver(selectedDriverId, hydratedDeliveries);
+  }, [selectedDriverId, deliveries, assignedFleet, keluarArgoMap, sharedScheduleFlowMap, waybillRefreshTick]);
 
-    return driverWaybillService.getWaybillsForDriver(selectedDriverId, eligibleSchedules);
-  }, [selectedDriverId, deliveries, activeDeliveries, scheduledDeliveries, keluarArgoMap]);
+  // Jika filter SJ Keluar sedang di 'gate_out' (Siap Out) namun partner sudah klik Gate-Out sehingga berpindah ke 'in_transit', otomatis tampilkan 'in_transit' / 'all' agar langsung muncul SJ Print
+  useEffect(() => {
+    if (waybillStatusFilter === 'gate_out' && driverWaybills.length > 0) {
+      const readyOutCount = driverWaybills.filter(w => w.status === 'checker_verified').length;
+      const inTransitCount = driverWaybills.filter(w => w.status === 'in_transit' || w.status === 'gate_out').length;
+      if (readyOutCount === 0 && inTransitCount > 0) {
+        setWaybillStatusFilter('in_transit');
+      } else if (readyOutCount === 0) {
+        setWaybillStatusFilter('all');
+      }
+    }
+  }, [waybillStatusFilter, driverWaybills]);
 
   // Helper resolusi komposisi kru (Driver Utama, Helper 1, dan Helper 2 untuk kondisi tertentu)
   const getDeliveryCrewComposition = (d: Schedule) => {
@@ -1545,8 +1735,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
     const nowTime =
       new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
-    // Simpan hanya 1 jadwal yang sedang disiapkan keluar agar Siap Out hanya 1
-    const nextMap = { [delivery.id]: nowTime };
+    const nextMap = { ...keluarArgoMap, [delivery.id]: nowTime };
     setKeluarArgoMap(nextMap);
     setSjKeluarSistemMap(nextMap);
     try {
@@ -1554,19 +1743,30 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       localStorage.setItem('akk_driver_sj_sistem_v1', JSON.stringify(nextMap));
     } catch {}
 
+    updateSharedScheduleFlow([delivery.id], {
+      fleetId: assignedFleet?.id || delivery.fleetId,
+      plateNumber: assignedFleet?.plateNumber || delivery.fleet?.plateNumber || 'P 8848 U',
+      vehicleType: assignedFleet?.vehicleType || delivery.fleet?.vehicleType || 'Engkel Long Box',
+      checklistCompleted: true,
+      checklistCompletedBy: sharedCrewPreTripState.completedBy || portalDisplayName,
+      preparedForGateOut: true,
+      preparedBy: portalDisplayName
+    });
+
     const preparedSchedule: Schedule = {
       ...delivery,
       fleet: assignedFleet || delivery.fleet,
       fleetId: assignedFleet?.id || delivery.fleetId
     };
     const wb = driverWaybillService.getWaybillForSchedule(preparedSchedule);
-    if (delivery.status === 'scheduled') {
+    if (delivery.status === 'scheduled' && wb.status !== 'in_transit') {
       driverWaybillService.updateWaybillStatus(wb.id, 'checker_verified');
     }
+    setWaybillRefreshTick(t => t + 1);
 
     // Langsung arahkan ke tab SJ Keluar pada bagian Siap Out (untuk cetak SJ & klik Gate-Out)
     setBottomNav('surat_jalan');
-    setWaybillStatusFilter('gate_out');
+    setWaybillStatusFilter(wb.status === 'in_transit' ? 'in_transit' : 'gate_out');
     try {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch {}
@@ -1575,6 +1775,42 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       'delivery',
       'Persiapan Keluar • Siap Gate-Out',
       `Jadwal ${delivery.areaName || delivery.store?.storeName || 'Pengiriman'} siap keluar (${wb.waybillNumber}). Silakan cetak SJ atau klik Gate-Out saat keluar gudang.`
+    );
+  };
+
+  // Konfirmasi Gate-Out Terintegrasi (Driver & Helper): Saat salah satu klik Gate-Out, status jadwal & SJ langsung menjadi Di Jalan / Siap Print SJ untuk keduanya
+  const handleConfirmSharedGateOut = async (delivery: Schedule) => {
+    const preparedSchedule: Schedule = {
+      ...delivery,
+      status: 'in_transit',
+      fleet: assignedFleet || delivery.fleet,
+      fleetId: assignedFleet?.id || delivery.fleetId
+    };
+    const wb = driverWaybillService.getWaybillForSchedule(preparedSchedule);
+    driverWaybillService.updateWaybillStatus(wb.id, 'in_transit');
+
+    updateSharedScheduleFlow([delivery.id], {
+      fleetId: preparedSchedule.fleetId,
+      plateNumber: preparedSchedule.fleet?.plateNumber || 'P 8848 U',
+      vehicleType: preparedSchedule.fleet?.vehicleType || 'Engkel Long Box',
+      checklistCompleted: true,
+      preparedForGateOut: true,
+      gateOutConfirmed: true,
+      gateOutBy: portalDisplayName
+    });
+
+    await handleUpdateStatus(
+      delivery,
+      'in_transit',
+      `Tim pengiriman keluar dari gerbang gudang DC (Gate-Out oleh ${portalDisplayName})`
+    );
+    setWaybillRefreshTick(t => t + 1);
+    setBottomNav('surat_jalan');
+    setWaybillStatusFilter('in_transit');
+    addNotification(
+      'schedule',
+      'Gate-Out Dikonfirmasi • Siap Cetak SJ (SJ Print)',
+      `Armada ${preparedSchedule.fleet?.plateNumber || ''} resmi keluar gerbang DC. Surat Jalan (${wb.waybillNumber}) kini siap dicetak oleh Driver & Helper.`
     );
   };
 
@@ -1761,24 +1997,33 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       podConditionNote: `${podModal.conditionNote.trim() || 'Tiba di Gudang Argo'} [${statusText}]`
     };
 
-    await handleUpdateStatus(podModal.delivery, 'delivered', podNote, podData, choice);
-    driverWaybillService.updateWaybillStatus(`WB-${podModal.delivery.id}`, 'delivered', podNote);
+    const targetDelivery = podModal.delivery;
+    await handleUpdateStatus(targetDelivery, 'delivered', podNote, podData, choice);
+    // Pastikan waybill ter-generate dan berstatus 'delivered' agar muncul di SJ Keluar & Selesai
+    driverWaybillService.getWaybillForSchedule({
+      ...targetDelivery,
+      status: 'delivered',
+      fleet: assignedFleet || targetDelivery.fleet,
+      fleetId: assignedFleet?.id || targetDelivery.fleetId
+    });
+    driverWaybillService.updateWaybillStatus(`WB-${targetDelivery.id}`, 'delivered', podNote);
+    setWaybillRefreshTick(t => t + 1);
 
     // Rekam ke Laporan Kiriman Kru agar SPV Logistik tahu status armada sampai di Argo & servis jika ada
     driverReportService.addReport({
       driverId: selectedDriverId,
       driverName: currentDriver?.name || portalDisplayName,
       userRole: syncedUserRoleInfo.roleLabel,
-      helperName: podModal.delivery?.crewHelper?.name,
-      plateNumber: assignedFleet?.plateNumber || podModal.delivery?.fleet?.plateNumber || 'P 8125 VC',
+      helperName: targetDelivery?.crewHelper?.name,
+      plateNumber: assignedFleet?.plateNumber || targetDelivery?.fleet?.plateNumber || 'P 8125 VC',
       category: 'akhir_kiriman',
-      areaName: podModal.delivery.areaName || podModal.delivery.store?.storeName || 'Gudang Argo',
-      deliveryId: podModal.delivery.id,
+      areaName: targetDelivery.areaName || targetDelivery.store?.storeName || 'Gudang Argo',
+      deliveryId: targetDelivery.id,
       notes: podNote,
       photoUrl: podModal.photoUrl
     });
 
-    // Jika dalam kondisi Check-In (activeShift), otomatis terhitung Check-Out saat klik Konfirmasi Tiba di Gudang
+    // Jika dalam kondisi Check-In (activeShift), otomatis terhitung Check-Out saat klik Konfirmasi Tiba di Gudang (termasuk sinkronisasi shift partner di armada yang sama)
     let autoCheckedOut = false;
     const currentActiveShift = activeShift || driverShiftService.getActiveShift(selectedDriverId);
     if (currentActiveShift) {
@@ -1789,15 +2034,14 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         {
           driverName: currentDriver?.name || currentActiveShift.driverName || portalDisplayName,
           userRole: syncedUserRoleInfo.roleLabel,
-          plateNumber: assignedFleet?.plateNumber || currentActiveShift.plateNumber || podModal.delivery?.fleet?.plateNumber || 'P 8125 VC',
-          areaName: podModal.delivery.areaName || podModal.delivery.store?.storeName || 'Gudang Argo'
+          plateNumber: assignedFleet?.plateNumber || currentActiveShift.plateNumber || targetDelivery?.fleet?.plateNumber || 'P 8125 VC',
+          areaName: targetDelivery.areaName || targetDelivery.store?.storeName || 'Gudang Argo'
         }
       );
       setActiveShift(null);
       autoCheckedOut = true;
     }
 
-    const targetDelivery = podModal.delivery;
     const todayStr = new Date().toISOString().slice(0, 10);
     setHasConfirmedArrivalFlag(true);
     try {
@@ -1814,6 +2058,10 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       photoTimestamp: null,
       postTripFleetStatus: 'available'
     });
+
+    // Arahkan tab langsung ke 'delivered' (Selesai) agar jadwal yang baru selesai langsung terlihat di Selesai & Semua
+    setActiveTab('delivered');
+    await loadDeliveriesRef.current(true);
 
     // Otomatis munculkan form Checklist Pasca-Jalan (Pulang) setelah klik Konfirmasi Tiba di Gudang
     const postTripTemplate = driverChecklistService.createNewChecklistTemplate(
@@ -1832,9 +2080,9 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     addNotification(
       'delivery',
       autoCheckedOut
-        ? 'Tiba di Gudang • Silakan Isi Checklist Pasca-Jalan'
-        : 'Konfirmasi Tiba di Gudang • Isi Checklist Pasca-Jalan',
-      `Armada ${targetDelivery.fleet?.plateNumber || assignedFleet?.plateNumber || ''} tiba di Gudang Argo (${statusText}). Silakan lengkapi Checklist Pasca-Jalan (Pulang).`
+        ? 'Tiba di Gudang • Masuk Tab Selesai & Isi Checklist Pulang'
+        : 'Konfirmasi Tiba di Gudang • Masuk Tab Selesai',
+      `Armada ${targetDelivery.fleet?.plateNumber || assignedFleet?.plateNumber || ''} tiba di Gudang Argo (${statusText}). Jadwal telah masuk ke tab Selesai & Semua serta Surat Jalan Keluar.`
     );
   };
 
@@ -2612,7 +2860,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               </div>
 
               {/* Filter Jadwal Berdasarkan Kru & Aksi Kosongkan Jadwal (Khusus SPV Logistik & Super Admin) */}
-              {canManageAllPortalSchedules ? (
+              {canManageAllPortalSchedules && (
                 <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-2">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <span className="text-[11px] font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
@@ -2652,13 +2900,6 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                         </option>
                       ))}
                   </select>
-                </div>
-              ) : (
-                <div className="pt-2 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between text-[11px]">
-                  <span className="text-slate-500 dark:text-slate-400">Filter Akun Aktif ({syncedUserRoleInfo.roleLabel}):</span>
-                  <span className="font-black text-emerald-600 dark:text-emerald-400">
-                    Hanya Jadwal {currentUser?.fullName || portalDisplayName}
-                  </span>
                 </div>
               )}
             </div>
@@ -2959,18 +3200,57 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                           1. Check-In -> 2. Pemilihan Armada -> 3. Pengisian Checklist -> 4. Persiapan Keluar (Otomatis ke SJ Keluar & Gate-Out) -> Di Jalan -> Konfirmasi Tiba di Gudang */}
                       <div className="pt-2 border-t border-slate-200 dark:border-slate-800/80">
                         {delivery.status === 'scheduled' && (() => {
-                          const isPrepared = Boolean(keluarArgoMap[delivery.id]);
+                          const sharedFlow = sharedScheduleFlowMap[delivery.id];
+                          const isReadyForGateOut = Boolean(
+                            keluarArgoMap[delivery.id] ||
+                              sharedFlow?.checklistCompleted ||
+                              sharedFlow?.preparedForGateOut ||
+                              sharedCrewPreTripState.isDone
+                          );
 
                           return (
                             <div className="space-y-2">
-                              <button
-                                type="button"
-                                onClick={() => handlePersiapanKeluar(delivery)}
-                                className="w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
-                              >
-                                <Truck className="w-4 h-4" />
-                                <span>Persiapan Keluar</span>
-                              </button>
+                              {isReadyForGateOut ? (
+                                <>
+                                  <div className="px-3 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[11px] font-bold flex items-center justify-between gap-2">
+                                    <span className="flex items-center gap-1.5 truncate">
+                                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                      <span className="truncate">
+                                        Checklist Armada Selesai ({sharedCrewPreTripState.completedBy}) • Tinggal Keluar Gerbang
+                                      </span>
+                                    </span>
+                                  </div>
+
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleConfirmSharedGateOut(delivery)}
+                                      className="py-2.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-md cursor-pointer"
+                                    >
+                                      <ArrowRight className="w-4 h-4" />
+                                      <span>Keluar Gerbang (Gate-Out)</span>
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handlePersiapanKeluar(delivery)}
+                                      className="py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-md cursor-pointer"
+                                    >
+                                      <FileText className="w-4 h-4" />
+                                      <span>Buka SJ Keluar</span>
+                                    </button>
+                                  </div>
+                                </>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handlePersiapanKeluar(delivery)}
+                                  className="w-full py-2.5 px-4 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
+                                >
+                                  <Truck className="w-4 h-4" />
+                                  <span>Persiapan Keluar</span>
+                                </button>
+                              )}
 
                               {activeTab !== 'active' && (
                                 <button
@@ -3610,8 +3890,14 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                       </div>
                     </div>
 
-                    {/* Action Bar per Waybill Card (Tanpa QR Code & Tanpa Tombol Konfirmasi Tiba di Gudang) */}
+                    {/* Action Bar per Waybill Card (Tersinkronisasi: Jika salah satu sudah klik Gate-Out, tampilan langsung SJ Print) */}
                     <div className="space-y-2 pt-1">
+                      {(wb.status === 'in_transit' || wb.status === 'gate_out') && (
+                        <div className="px-2.5 py-1.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[10px] font-bold flex items-center justify-between">
+                          <span>✓ Gate-Out Selesai • Tersinkronisasi Driver &amp; Helper</span>
+                          <span className="font-mono uppercase text-emerald-400">Siap SJ Print</span>
+                        </div>
+                      )}
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
@@ -3619,32 +3905,39 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                             setActiveWaybillToView(wb);
                             setIsWaybillModalOpen(true);
                           }}
-                          className="flex-1 py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer shadow-md shadow-blue-600/20"
+                          className={`flex-1 py-2.5 px-3 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer shadow-md ${
+                            wb.status === 'in_transit' || wb.status === 'gate_out' || wb.status === 'delivered'
+                              ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/20'
+                              : 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-600/20'
+                          }`}
                         >
-                          <FileText className="w-3.5 h-3.5" />
-                          <span>Buka Surat Jalan (Cetak)</span>
+                          <Printer className="w-3.5 h-3.5" />
+                          <span>
+                            {wb.status === 'in_transit' || wb.status === 'gate_out' || wb.status === 'delivered'
+                              ? 'SJ Print / Cetak Surat Jalan'
+                              : 'Buka Surat Jalan (Cetak)'}
+                          </span>
                         </button>
 
                         {wb.status === 'checker_verified' && (
                           <button
                             type="button"
                             onClick={async () => {
-                              const success = driverWaybillService.updateWaybillStatus(wb.id, 'in_transit');
-                              const matchedSchedule = deliveries.find(d => d.id === wb.scheduleId || d.trackingNumber === wb.trackingNumber);
+                              const matchedSchedule = deliveries.find(
+                                d => d.id === wb.scheduleId || d.trackingNumber === wb.trackingNumber
+                              );
                               if (matchedSchedule) {
-                                await handleUpdateStatus(matchedSchedule, 'in_transit', 'Tim pengiriman sudah keluar dari gudang (Gate-Out)');
-                              }
-                              if (success) {
-                                setWaybillStatusFilter('in_transit');
-                                addNotification(
-                                  'schedule',
-                                  'Gate-Out Dikonfirmasi • Status Di Jalan',
-                                  `Armada ${wb.fleet.plateNumber} sudah keluar dari gudang DC dan masuk ke status Di Jalan.`
-                                );
-                                loadDeliveries(true);
+                                await handleConfirmSharedGateOut(matchedSchedule);
+                              } else {
+                                const success = driverWaybillService.updateWaybillStatus(wb.id, 'in_transit');
+                                if (success) {
+                                  setWaybillRefreshTick(t => t + 1);
+                                  setWaybillStatusFilter('in_transit');
+                                  loadDeliveriesRef.current(true);
+                                }
                               }
                             }}
-                            className="py-2 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1 transition active:scale-95 cursor-pointer shrink-0"
+                            className="py-2.5 px-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1 transition active:scale-95 cursor-pointer shrink-0"
                             title="Konfirmasi Keluar Gerbang DC (Gate-Out)"
                           >
                             <ArrowRight className="w-3.5 h-3.5" />
@@ -4854,6 +5147,35 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               localStorage.setItem(`akk_fleet_locked_flag_${selectedDriverId}`, 'true');
               localStorage.setItem(`akk_checklist_done_${selectedDriverId}`, todayStr);
             } catch {}
+
+            // Sinkronkan status Checklist & Persiapan Keluar ke jadwal aktif bersama agar Partner (Driver/Helper) tidak perlu isi ulang
+            const activeScheduleIds = deliveries
+              .filter(d => d.status !== 'delivered')
+              .map(d => d.id);
+            if (activeScheduleIds.length > 0) {
+              const nowTime =
+                new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB';
+              const nextArgo = { ...keluarArgoMap };
+              activeScheduleIds.forEach(id => {
+                nextArgo[id] = nowTime;
+              });
+              setKeluarArgoMap(nextArgo);
+              setSjKeluarSistemMap(nextArgo);
+              try {
+                localStorage.setItem('akk_driver_keluar_argo_v1', JSON.stringify(nextArgo));
+                localStorage.setItem('akk_driver_sj_sistem_v1', JSON.stringify(nextArgo));
+              } catch {}
+
+              updateSharedScheduleFlow(activeScheduleIds, {
+                fleetId: saved.fleetId,
+                plateNumber: saved.plateNumber,
+                vehicleType: saved.vehicleType,
+                checklistCompleted: true,
+                checklistCompletedBy: portalDisplayName,
+                preparedForGateOut: true,
+                preparedBy: portalDisplayName
+              });
+            }
           }
           setChecklists(prev => {
             const idx = prev.findIndex(c => c.id === saved.id);
@@ -4864,16 +5186,17 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
             }
             return [saved, ...prev];
           });
+          setWaybillRefreshTick(t => t + 1);
           setBottomNav('deliveries');
           setActiveTab(saved.inspectionType === 'post_trip' ? 'delivered' : 'active');
           addNotification(
             'delivery',
             saved.inspectionType === 'post_trip'
               ? 'Checklist Pasca-Jalan Tersimpan'
-              : 'Checklist Pra-Jalan Disimpan • Persiapan Keluar Siap Diklik',
+              : 'Checklist Pra-Jalan Disimpan • Siap Keluar Gerbang',
             saved.inspectionType === 'post_trip'
               ? `Checklist Pasca-Jalan (Pulang) armada ${saved.plateNumber} telah tersimpan.`
-              : `Checklist Pra-Jalan armada ${saved.plateNumber} telah tersimpan. Tombol "Persiapan Keluar" pada jadwal aktif kini terbuka dan siap diklik.`
+              : `Checklist Pra-Jalan armada ${saved.plateNumber} telah tersimpan & tersinkronisasi untuk kru satu armada. Jadwal aktif kini siap Keluar Gerbang (Gate-Out).`
           );
         }}
       />
@@ -4892,7 +5215,33 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         initialMode={checkinModalMode}
         onCheckinSuccess={(shift) => {
           setActiveShift(shift);
-          // Alur Baru: Setelah Check-In langsung mengarah ke Isi Armada -> Isi Checklist Armada -> Simpan (Helper bisa skip)
+          const todayStr = new Date().toISOString().slice(0, 10);
+          // Jika partner (Driver/Helper dalam 1 jadwal/armada yang sama) SUDAH isi armada & checklist,
+          // langsung sinkronkan ke Jadwal Aktif (Keluar Gerbang / Check-Out) tanpa mengulang pemilihan armada/checklist!
+          if (sharedCrewPreTripState.isDone) {
+            setIsFleetLockedAfterCheckin(true);
+            setIsChecklistCompletedAfterCheckin(true);
+            if (assignedFleet?.id) {
+              setSelectedFleetId(assignedFleet.id);
+            }
+            try {
+              if (assignedFleet?.id) {
+                localStorage.setItem(`akk_locked_fleet_${selectedDriverId}`, assignedFleet.id);
+              }
+              localStorage.setItem(`akk_fleet_locked_flag_${selectedDriverId}`, 'true');
+              localStorage.setItem(`akk_checklist_done_${selectedDriverId}`, todayStr);
+            } catch {}
+            setIsPostCheckinFleetModalOpen(false);
+            setBottomNav('deliveries');
+            setActiveTab('active');
+            addNotification(
+              'delivery',
+              'Check-In Tersinkronisasi • Siap Keluar Gerbang',
+              `Armada (${assignedFleet?.plateNumber || ''}) & Checklist telah diselesaikan oleh ${sharedCrewPreTripState.completedBy}. Tampilan langsung menuju Jadwal Aktif untuk Keluar Gerbang / Check-Out tanpa aktivitas ganda.`
+            );
+            return;
+          }
+          // Jika belum ada yang mengisi armada & checklist pada jadwal ini, buka modal pemilihan armada
           setIsPostCheckinFleetModalOpen(true);
         }}
       />

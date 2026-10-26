@@ -31,7 +31,8 @@ import {
   AlertOctagon,
   ArrowRight,
   WifiOff,
-  Wifi
+  Wifi,
+  Edit
 } from 'lucide-react';
 import { driverReportService, DriverHelperReport, getLocalDateStr } from '../services/driverReportService';
 import { useToast } from '../context/ToastContext';
@@ -918,22 +919,22 @@ export const DriverReportsManagement: React.FC = () => {
         </div>
       ) : (
         <>
-          {/* Header Section */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-sm">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-rose-500/20 to-amber-500/20 border border-rose-500/30 flex items-center justify-center text-rose-400 shrink-0 shadow-inner">
-                <MapPin className="w-6 h-6" />
+          {/* Header Section - Compact & Dense */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-2.5 bg-slate-900 border border-slate-800 px-4 py-3 rounded-xl shadow-xs">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-lg bg-gradient-to-tr from-rose-500/20 to-amber-500/20 border border-rose-500/30 flex items-center justify-center text-rose-400 shrink-0 shadow-inner">
+                <MapPin className="w-4 h-4" />
               </div>
               <div>
-                <div className="flex items-center gap-2">
-                  <h1 className="text-lg font-black text-white tracking-tight">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h1 className="text-sm sm:text-base font-black text-white tracking-tight">
                     Laporan &amp; Kendala Kiriman Kru
                   </h1>
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 font-bold">
                     Tersambung ke Portal Driver
                   </span>
                 </div>
-                <p className="text-xs text-slate-400 mt-0.5">
+                <p className="text-[11px] text-slate-400">
                   Rincian kalender pertanggal, pemantauan kendala jalan, dan penyampaian solusi langsung dari SPV Logistik ke ponsel kru pengiriman
                 </p>
               </div>
@@ -942,29 +943,29 @@ export const DriverReportsManagement: React.FC = () => {
             <div className="flex items-center gap-2">
               <button
                 onClick={loadReports}
-                className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer border border-slate-700 shadow-xs"
+                className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer border border-slate-700 shadow-2xs"
                 title="Muat Ulang Data"
               >
-                <RefreshCw className="w-4 h-4" />
+                <RefreshCw className="w-3.5 h-3.5" />
               </button>
 
               <button
                 onClick={handleExportCsv}
-                className="px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-md shadow-emerald-600/20 active:scale-95"
+                className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-sm active:scale-95"
                 title="Unduh laporan dalam format CSV / Excel"
               >
-                <FileSpreadsheet className="w-4 h-4" />
+                <FileSpreadsheet className="w-3.5 h-3.5" />
                 <span>Ekspor Excel</span>
               </button>
             </div>
           </div>
 
-          {/* 🔔 NOTIFIKASI PERUBAHAN JADWAL PENGIRIMAN (HANYA MUNCUL DI LAPORAN KIRIMAN KRU) */}
+          {/* 🔔 NOTIFIKASI PERUBAHAN JADWAL PENGIRIMAN */}
           {scheduleChangeNotifs.length > 0 && (
-            <div className="bg-emerald-950/50 border border-emerald-500/40 rounded-2xl p-4 space-y-2.5 shadow-sm">
+            <div className="bg-emerald-950/50 border border-emerald-500/40 rounded-xl p-3 space-y-2 shadow-xs">
               <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 text-xs font-black text-emerald-300">
-                  <RefreshCw className="w-4 h-4 text-emerald-400" />
+                <div className="flex items-center gap-1.5 text-xs font-black text-emerald-300">
+                  <RefreshCw className="w-3.5 h-3.5 text-emerald-400" />
                   <span>Notifikasi Perubahan Jadwal Pengiriman ({scheduleChangeNotifs.length})</span>
                 </div>
                 <button
@@ -975,20 +976,20 @@ export const DriverReportsManagement: React.FC = () => {
                       localStorage.removeItem('akk_schedule_change_notifs_v1');
                     } catch {}
                   }}
-                  className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white text-[10px] font-bold border border-slate-700 cursor-pointer"
+                  className="px-2 py-0.5 rounded-md bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white text-[10px] font-bold border border-slate-700 cursor-pointer"
                 >
                   Bersihkan Notifikasi
                 </button>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-40 overflow-y-auto pr-1">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5 max-h-32 overflow-y-auto pr-1">
                 {scheduleChangeNotifs.slice(0, 6).map(notif => (
                   <div
                     key={notif.id}
-                    className="p-2.5 rounded-xl bg-slate-950/90 border border-emerald-500/30 text-xs flex items-start justify-between gap-2"
+                    className="p-2 rounded-lg bg-slate-950/90 border border-emerald-500/30 text-xs flex items-start justify-between gap-2"
                   >
                     <div className="min-w-0">
                       <div className="font-bold text-emerald-300 text-[11px] truncate">{notif.title}</div>
-                      <p className="text-[11px] text-slate-300 mt-0.5 leading-snug">{notif.message}</p>
+                      <p className="text-[10px] text-slate-300 mt-0.5 leading-snug">{notif.message}</p>
                     </div>
                     <span className="text-[10px] text-slate-400 font-mono shrink-0">
                       {new Date(notif.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
@@ -999,96 +1000,94 @@ export const DriverReportsManagement: React.FC = () => {
             </div>
           )}
 
-          {/* 📊 KPI STATS CARDS (DILETAKKAN DI ATAS TAMPILAN KALENDER) */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm relative overflow-hidden">
+          {/* 📊 KPI STATS CARDS (Angka Diperbesar & Padat) */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2.5 shadow-xs relative overflow-hidden">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-400">Total Laporan Masuk</span>
-                <div className="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
-                  <Layers className="w-4 h-4" />
+                <span className="text-[11px] font-bold text-slate-400">Total Laporan Masuk</span>
+                <div className="w-7 h-7 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+                  <Layers className="w-3.5 h-3.5" />
                 </div>
               </div>
-              <div className="text-2xl font-black text-white mt-2 font-mono flex items-baseline gap-2">
+              <div className="text-3xl sm:text-4xl font-black text-white mt-1 font-mono flex items-baseline gap-1.5 leading-none">
                 <span>{inScopeTotal}</span>
                 {dateFilterMode !== 'all' && (
-                  <span className="text-xs text-slate-500 font-medium font-sans">/ {totalCount} total</span>
+                  <span className="text-xs text-slate-500 font-semibold font-sans">/ {totalCount} total</span>
                 )}
               </div>
-              <div className="text-[10px] text-slate-400 mt-1">
+              <div className="text-[10px] text-slate-400 mt-1.5 font-medium">
                 Tanggal {selectedCalendarDate}
               </div>
             </div>
 
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm relative overflow-hidden">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2.5 shadow-xs relative overflow-hidden">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-rose-300">Kendala di Jalan</span>
-                <div className="w-8 h-8 rounded-lg bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
-                  <AlertTriangle className="w-4 h-4" />
+                <span className="text-[11px] font-bold text-rose-300">Kendala di Jalan</span>
+                <div className="w-7 h-7 rounded-lg bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
+                  <AlertTriangle className="w-3.5 h-3.5" />
                 </div>
               </div>
-              <div className="text-2xl font-black text-rose-400 mt-2 font-mono flex items-baseline gap-2">
+              <div className="text-3xl sm:text-4xl font-black text-rose-400 mt-1 font-mono flex items-baseline gap-1.5 leading-none">
                 <span>{inScopeKendala}</span>
                 {dateFilterMode !== 'all' && (
-                  <span className="text-xs text-slate-500 font-medium font-sans">/ {kendalaCount} total</span>
+                  <span className="text-xs text-slate-500 font-semibold font-sans">/ {kendalaCount} total</span>
                 )}
               </div>
-              <div className="text-[10px] text-slate-400 mt-1">Macet, antri customer &amp; rute</div>
+              <div className="text-[10px] text-slate-400 mt-1.5 font-medium">Macet, antri customer &amp; rute</div>
             </div>
 
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm relative overflow-hidden">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2.5 shadow-xs relative overflow-hidden">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-emerald-300">Akhir Kiriman (POD)</span>
-                <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
-                  <CheckCircle2 className="w-4 h-4" />
+                <span className="text-[11px] font-bold text-emerald-300">Tiba di Gudang (POD)</span>
+                <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
                 </div>
               </div>
-              <div className="text-2xl font-black text-emerald-400 mt-2 font-mono flex items-baseline gap-2">
+              <div className="text-3xl sm:text-4xl font-black text-emerald-400 mt-1 font-mono flex items-baseline gap-1.5 leading-none">
                 <span>{inScopeAkhir}</span>
                 {dateFilterMode !== 'all' && (
-                  <span className="text-xs text-slate-500 font-medium font-sans">/ {akhirCount} total</span>
+                  <span className="text-xs text-slate-500 font-semibold font-sans">/ {akhirCount} total</span>
                 )}
               </div>
-              <div className="text-[10px] text-slate-400 mt-1">Selesai serah terima outlet</div>
+              <div className="text-[10px] text-slate-300 mt-1.5 font-semibold">Tiba di gudang</div>
             </div>
 
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm relative overflow-hidden">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl px-3.5 py-2.5 shadow-xs relative overflow-hidden">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-amber-300">Menunggu Solusi / Cek</span>
-                <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
-                  <Clock className="w-4 h-4" />
+                <span className="text-[11px] font-bold text-amber-300">Menunggu Solusi / Cek</span>
+                <div className="w-7 h-7 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
+                  <Clock className="w-3.5 h-3.5" />
                 </div>
               </div>
-              <div className="text-2xl font-black text-amber-400 mt-2 font-mono flex items-baseline gap-2">
+              <div className="text-3xl sm:text-4xl font-black text-amber-400 mt-1 font-mono flex items-baseline gap-1.5 leading-none">
                 <span>{inScopePending}</span>
                 {dateFilterMode !== 'all' && (
-                  <span className="text-xs text-slate-500 font-medium font-sans">/ {pendingCount} total</span>
+                  <span className="text-xs text-slate-500 font-semibold font-sans">/ {pendingCount} total</span>
                 )}
               </div>
-              <div className="text-[10px] text-slate-400 mt-1">Khusus SPV Logistik DC</div>
+              <div className="text-[10px] text-slate-400 mt-1.5 font-medium">Khusus SPV Logistik DC</div>
             </div>
           </div>
 
-          {/* 📅 KALENDER LAPORAN & KENDALA KIRIMAN (Desain Kalender Bulanan 7-Kolom Seperti Pada Jadwal) */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs space-y-4">
-            {/* Calendar Header & Periode Selector (Tanpa 5 Laporan Ditampilkan, Semua, Hari Ini, Minggu Ini, Bulan Ini) */}
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold shadow-md shrink-0">
-                  <Calendar className="w-5 h-5" />
+          {/* 📅 KALENDER LAPORAN & KENDALA KIRIMAN (Rapat & Padat) */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 shadow-xs space-y-2.5">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2 border-b border-slate-200 dark:border-slate-800 pb-2.5">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-bold shadow-xs shrink-0">
+                  <Calendar className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="text-base font-black text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2 flex-wrap">
+                  <h3 className="text-xs sm:text-sm font-black text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2 flex-wrap">
                     <span>KALENDER LAPORAN &amp; KENDALA - {monthlyCalendarGrid.monthName.toUpperCase()} {monthlyCalendarGrid.year}</span>
                   </h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                    Klik pada salah satu tanggal untuk melihat keterangan rincian kendala jalan dan laporan pada tanggal tersebut.
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Klik pada salah satu tanggal untuk melihat rincian kendala jalan dan laporan pada tanggal tersebut.
                   </p>
                 </div>
               </div>
 
-              {/* Pilihan Bulan & Tahun Saja */}
               <div className="flex items-center gap-2 flex-wrap">
-                <div className="flex items-center gap-1.5 bg-slate-50 dark:bg-slate-950 p-1 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-semibold">
+                <div className="flex items-center gap-1 bg-slate-50 dark:bg-slate-950 p-1 rounded-lg border border-slate-200 dark:border-slate-800 text-xs font-semibold">
                   <select
                     value={calendarMonth}
                     onChange={(e) => {
@@ -1098,7 +1097,7 @@ export const DriverReportsManagement: React.FC = () => {
                       setSelectedCalendarDate(nextIso);
                       setDateFilterMode('single_date');
                     }}
-                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-lg px-2.5 py-1 text-xs font-bold focus:outline-none focus:border-emerald-500 cursor-pointer"
+                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-md px-2 py-1 text-xs font-bold focus:outline-none focus:border-emerald-500 cursor-pointer"
                   >
                     {CALENDAR_MONTH_NAMES.map((m, idx) => (
                       <option key={m} value={idx}>{m}</option>
@@ -1113,7 +1112,7 @@ export const DriverReportsManagement: React.FC = () => {
                       setSelectedCalendarDate(nextIso);
                       setDateFilterMode('single_date');
                     }}
-                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-lg px-2.5 py-1 text-xs font-bold focus:outline-none focus:border-emerald-500 cursor-pointer"
+                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white rounded-md px-2 py-1 text-xs font-bold focus:outline-none focus:border-emerald-500 cursor-pointer"
                   >
                     {[2024, 2025, 2026, 2027, 2028].map(yr => (
                       <option key={yr} value={yr}>{yr}</option>
@@ -1123,29 +1122,29 @@ export const DriverReportsManagement: React.FC = () => {
               </div>
             </div>
 
-            {/* Legend Badges (Indikator Kendala Masuk & Akhir Kiriman Langsung di Kalender) */}
+            {/* Legend Badges */}
             <div className="flex items-center justify-between gap-2 flex-wrap">
-              <span className="text-xs font-bold text-slate-600 dark:text-slate-300">
+              <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
                 Tanggal Terpilih: <strong className="text-emerald-600 dark:text-emerald-400 font-mono">{selectedCalendarDate}</strong>
               </span>
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-rose-100 dark:bg-rose-950/80 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-800 shadow-2xs">
-                  <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 dark:bg-rose-950/80 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-800">
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
                   <span>⚠️ Kendala Masuk</span>
                 </span>
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-blue-100 dark:bg-blue-950/80 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-800 shadow-2xs">
-                  <span className="w-2 h-2 rounded-full bg-blue-500" />
-                  <span>✅ Akhir Kiriman</span>
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 dark:bg-blue-950/80 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-800">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                  <span>✅ Tiba di Gudang</span>
                 </span>
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 shadow-2xs">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                   <span>Solusi Terkirim ke Portal Driver</span>
                 </span>
               </div>
             </div>
 
-            {/* 7-Column Calendar Grid Header (MINGGU s/d SABTU seperti pada Jadwal) */}
-            <div className="grid grid-cols-7 gap-1.5 sm:gap-2 text-center text-xs font-black uppercase text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800/90 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700">
+            {/* 7-Column Calendar Grid Header */}
+            <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-black uppercase text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800/90 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700">
               <div className="text-rose-600 dark:text-rose-400">MINGGU</div>
               <div>SENIN</div>
               <div>SELASA</div>
@@ -1155,14 +1154,14 @@ export const DriverReportsManagement: React.FC = () => {
               <div className="text-blue-600 dark:text-blue-400">SABTU</div>
             </div>
 
-            {/* Calendar Cells Grid (01 s/d 31) dengan Keterangan Langsung Kendala Masuk & Akhir Kiriman */}
-            <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
+            {/* Calendar Cells Grid (Compact) */}
+            <div className="grid grid-cols-7 gap-1">
               {monthlyCalendarGrid.cells.map((cell) => {
                 if (cell.type === 'padding') {
                   return (
                     <div
                       key={cell.key}
-                      className="min-h-[82px] sm:min-h-[96px] bg-slate-50/50 dark:bg-slate-950/20 rounded-xl border border-dashed border-slate-200 dark:border-slate-800/50"
+                      className="min-h-[64px] sm:min-h-[72px] bg-slate-50/50 dark:bg-slate-950/20 rounded-lg border border-dashed border-slate-200 dark:border-slate-800/50"
                     />
                   );
                 }
@@ -1180,22 +1179,21 @@ export const DriverReportsManagement: React.FC = () => {
                       setSelectedCalendarDate(cell.iso);
                       setDateFilterMode('single_date');
                     }}
-                    className={`min-h-[82px] sm:min-h-[96px] p-2 rounded-xl border transition cursor-pointer flex flex-col justify-between select-none relative gap-1.5 ${
+                    className={`min-h-[64px] sm:min-h-[72px] p-1.5 rounded-lg border transition cursor-pointer flex flex-col justify-between select-none relative gap-1 ${
                       isSelected
                         ? hasUnhandled
-                          ? 'bg-rose-100/90 dark:bg-rose-950/60 border-rose-500 ring-2 ring-rose-500 shadow-md z-10'
-                          : 'bg-emerald-100/90 dark:bg-emerald-950/60 border-emerald-500 ring-2 ring-emerald-500 shadow-md z-10'
+                          ? 'bg-rose-100/90 dark:bg-rose-950/60 border-rose-500 ring-1 ring-rose-500 shadow-sm z-10'
+                          : 'bg-emerald-100/90 dark:bg-emerald-950/60 border-emerald-500 ring-1 ring-emerald-500 shadow-sm z-10'
                         : hasUnhandled
-                        ? 'bg-rose-50/90 dark:bg-rose-950/40 hover:bg-rose-100/80 dark:hover:bg-rose-950/60 border-rose-400 dark:border-rose-500/70 shadow-2xs'
+                        ? 'bg-rose-50/90 dark:bg-rose-950/40 hover:bg-rose-100/80 dark:hover:bg-rose-950/60 border-rose-400 dark:border-rose-500/70'
                         : isAllResolvedGreen
-                        ? 'bg-emerald-50/80 dark:bg-emerald-950/35 hover:bg-emerald-100/70 dark:hover:bg-emerald-950/55 border-emerald-400 dark:border-emerald-500/60 shadow-2xs'
+                        ? 'bg-emerald-50/80 dark:bg-emerald-950/35 hover:bg-emerald-100/70 dark:hover:bg-emerald-950/55 border-emerald-400 dark:border-emerald-500/60'
                         : 'bg-slate-50/80 dark:bg-slate-950/40 hover:bg-slate-100 dark:hover:bg-slate-900 border-slate-200 dark:border-slate-800'
                     }`}
                   >
-                    {/* Day Number & Status Dot Indicator */}
                     <div className="flex items-center justify-between gap-1">
                       <span
-                        className={`text-xs font-black px-1.5 py-0.5 rounded-md ${
+                        className={`text-[11px] font-black px-1.5 py-0.2 rounded ${
                           hasUnhandled
                             ? 'bg-rose-600 text-white font-extrabold'
                             : isAllResolvedGreen || isSelected
@@ -1208,50 +1206,39 @@ export const DriverReportsManagement: React.FC = () => {
 
                       {hasUnhandled ? (
                         <span
-                          className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse ring-4 ring-rose-500/20"
+                          className="w-2 h-2 rounded-full bg-rose-500 animate-pulse ring-2 ring-rose-500/20"
                           title="Ada kendala masuk — segera perbarui status & solusi!"
                         />
                       ) : isAllResolvedGreen ? (
                         <span
-                          className="w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-2xs"
-                          title="Solusi terkirim / Akhir kiriman tercatat"
+                          className="w-3.5 h-3.5 rounded-full bg-emerald-500 text-white flex items-center justify-center"
+                          title="Solusi terkirim / Tiba di gudang tercatat"
                         >
-                          <Check className="w-2.5 h-2.5 stroke-[3]" />
+                          <Check className="w-2 h-2 stroke-[3]" />
                         </span>
                       ) : null}
                     </div>
 
-                    {/* Direct Keterangan inside Calendar Cell: Kendala Masuk & Akhir Kiriman */}
-                    <div className="space-y-1 mt-auto">
+                    <div className="space-y-0.5 mt-auto">
                       {hasKendala && (
-                        <div className="px-1.5 py-1 rounded-md bg-rose-600/15 dark:bg-rose-500/25 border border-rose-500/40 text-rose-800 dark:text-rose-200 text-[9px] leading-tight">
-                          <div className="font-black flex items-center justify-between gap-1">
-                            <span className="truncate">⚠️ Kendala Masuk</span>
+                        <div className="px-1 py-0.5 rounded bg-rose-600/15 dark:bg-rose-500/25 border border-rose-500/40 text-rose-800 dark:text-rose-200 text-[8px] leading-tight">
+                          <div className="font-black flex items-center justify-between gap-0.5">
+                            <span className="truncate">⚠️ Kendala</span>
                             <span className="px-1 rounded bg-rose-600 text-white font-mono text-[8px] shrink-0">
                               {cell.kendalaCount}
                             </span>
                           </div>
-                          {cell.kendalaItems.length > 0 && (
-                            <div className="text-[8px] opacity-90 truncate mt-0.5 font-semibold">
-                              {cell.kendalaItems.join(', ')}
-                            </div>
-                          )}
                         </div>
                       )}
 
                       {hasAkhirKiriman && (
-                        <div className="px-1.5 py-1 rounded-md bg-blue-600/15 dark:bg-blue-500/25 border border-blue-500/40 text-blue-800 dark:text-blue-200 text-[9px] leading-tight">
-                          <div className="font-black flex items-center justify-between gap-1">
-                            <span className="truncate">✅ Akhir Kiriman</span>
+                        <div className="px-1 py-0.5 rounded bg-blue-600/15 dark:bg-blue-500/25 border border-blue-500/40 text-blue-800 dark:text-blue-200 text-[8px] leading-tight">
+                          <div className="font-black flex items-center justify-between gap-0.5">
+                            <span className="truncate">✅ Tiba di Gudang</span>
                             <span className="px-1 rounded bg-blue-600 text-white font-mono text-[8px] shrink-0">
                               {cell.akhirKirimanCount}
                             </span>
                           </div>
-                          {cell.akhirItems.length > 0 && (
-                            <div className="text-[8px] opacity-90 truncate mt-0.5 font-semibold">
-                              {cell.akhirItems.join(', ')}
-                            </div>
-                          )}
                         </div>
                       )}
                     </div>
@@ -1261,50 +1248,47 @@ export const DriverReportsManagement: React.FC = () => {
             </div>
           </div>
 
-          {/* Filter and Search Bar */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm space-y-3">
-            <div className="flex flex-col sm:flex-row gap-3">
-              {/* Search Input */}
+          {/* Filter and Search Bar - Compact */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-2.5 shadow-xs">
+            <div className="flex flex-col sm:flex-row gap-2">
               <div className="flex-1 relative">
-                <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Cari supir, helper, plat mobil, area, atau arahan solusi SPV..."
-                  className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                  placeholder="Cari supir, helper, plat mobil, area, atau solusi SPV..."
+                  className="w-full pl-9 pr-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
                 />
                 {searchQuery && (
                   <button
                     onClick={() => setSearchQuery('')}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
                 )}
               </div>
 
-              {/* Category Filter */}
               <select
                 value={categoryFilter}
                 onChange={(e) => setCategoryFilter(e.target.value as any)}
-                className="bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-amber-500 cursor-pointer"
+                className="bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-amber-500 cursor-pointer"
               >
                 <option value="all">Semua Kategori Laporan</option>
                 <option value="mode_offline">📴 Peringatan Mode Offline Kru</option>
                 <option value="presensi_shift">🕒 Check-In &amp; Check-Out Shift (Gabungan)</option>
                 <option value="pin_keamanan">🔐 Data PIN Keamanan (2x Verifikasi)</option>
                 <option value="kendala_jalan">⚠️ Kendala di Jalan &amp; Antri Customer</option>
-                <option value="akhir_kiriman">📦 Akhir Kiriman (POD &amp; Argo)</option>
+                <option value="akhir_kiriman">📦 Tiba di Gudang (POD &amp; Argo)</option>
                 <option value="istirahat">☕ Istirahat Kru</option>
                 <option value="update_lokasi">📍 Update Titik GMaps</option>
               </select>
 
-              {/* Status Filter */}
               <select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value as any)}
-                className="bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-amber-500 cursor-pointer"
+                className="bg-slate-950 border border-slate-800 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-amber-500 cursor-pointer"
               >
                 <option value="all">Semua Status</option>
                 <option value="pending">⏳ Menunggu Solusi SPV</option>
@@ -1314,55 +1298,60 @@ export const DriverReportsManagement: React.FC = () => {
             </div>
           </div>
 
-          {/* Reports Table / Card List (Hanya Menampilkan Laporan Pada Tanggal yang Diklik) */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
+          {/* Reports Table - 10 Kolom: Waktu; Kru; Armada; Jenis Laporan; Nama Area Kirim; Foto Bukti; Keterangan Kendala; Solusi; Status; Tindakan */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xs">
             {filteredReports.length === 0 ? (
-              <div className="p-12 text-center space-y-3">
-                <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center text-slate-500 mx-auto">
-                  <Calendar className="w-6 h-6" />
+              <div className="p-8 text-center space-y-2">
+                <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-slate-500 mx-auto">
+                  <Calendar className="w-5 h-5" />
                 </div>
-                <div className="text-sm font-bold text-white">
+                <div className="text-xs font-bold text-white">
                   Tidak Ada Laporan Pada Tanggal {selectedCalendarDate}
                 </div>
-                <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                <p className="text-[11px] text-slate-400 max-w-sm mx-auto">
                   Tidak ada laporan atau kendala yang tercatat pada tanggal {selectedCalendarDate}. Silakan klik tanggal lain pada kalender yang memiliki tanda indikator laporan.
                 </p>
               </div>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
+                <table className="w-full text-left text-xs border-collapse">
                   <thead className="bg-slate-950 text-slate-400 uppercase tracking-wider text-[10px] font-bold border-b border-slate-800">
                     <tr>
-                      <th className="p-3.5 pl-4">Waktu &amp; ID</th>
-                      <th className="p-3.5">Kru Supir &amp; Armada</th>
-                      <th className="p-3.5">Jenis Laporan</th>
-                      <th className="p-3.5">Nama Area Kirim</th>
-                      <th className="p-3.5">Foto Bukti</th>
-                      <th className="p-3.5">Keterangan Kendala Kru</th>
-                      <th className="p-3.5 min-w-[240px]">Solusi SPV Logistik / Super Admin</th>
-                      <th className="p-3.5">Status</th>
-                      <th className="p-3.5 pr-4 text-center">Tindakan SPV</th>
+                      <th className="py-2.5 px-3 whitespace-nowrap">Waktu</th>
+                      <th className="py-2.5 px-3 whitespace-nowrap">Kru</th>
+                      <th className="py-2.5 px-3 whitespace-nowrap">Armada</th>
+                      <th className="py-2.5 px-3 whitespace-nowrap">Jenis Laporan</th>
+                      <th className="py-2.5 px-3 whitespace-nowrap">Nama Area Kirim</th>
+                      <th className="py-2.5 px-3 text-center whitespace-nowrap">Foto Bukti</th>
+                      <th className="py-2.5 px-3 whitespace-nowrap">Keterangan Kendala</th>
+                      <th className="py-2.5 px-3 min-w-[200px] whitespace-nowrap">Solusi</th>
+                      <th className="py-2.5 px-3 text-center whitespace-nowrap">Status</th>
+                      <th className="py-2.5 px-3 text-center whitespace-nowrap">Tindakan</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/70 text-slate-300">
                     {filteredReports.map((item) => {
+                      const isVerifiedOrResolved =
+                        Boolean(item.solution && item.solution.trim()) ||
+                        item.status === 'verified' ||
+                        item.status === 'resolved' ||
+                        item.offlineStatus === 'sudah_online';
+
                       return (
                         <tr key={item.id} className="hover:bg-slate-850/60 transition">
-                          
-                          {/* 1. Waktu & ID */}
-                          <td className="p-3.5 pl-4 align-top">
-                            <div className="font-mono font-bold text-amber-400 text-[11px]">{item.id}</div>
-                            <div className="text-[10px] text-slate-300 font-semibold mt-0.5">
+                          {/* 1. Waktu */}
+                          <td className="py-2.5 px-3 align-middle whitespace-nowrap">
+                            <div className="text-xs text-white font-bold font-mono">
                               {new Date(item.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
                             </div>
-                            <div className="text-[9px] text-slate-500">
-                              {item.date || new Date(item.timestamp).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}
+                            <div className="text-[10px] text-slate-400 mt-0.5">
+                              {item.date || new Date(item.timestamp).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
                             </div>
                           </td>
 
-                          {/* 2. Kru Supir & Armada */}
-                          <td className="p-3.5 align-top">
-                            <div className="font-bold text-white flex items-center gap-1.5 flex-wrap">
+                          {/* 2. Kru */}
+                          <td className="py-2.5 px-3 align-middle whitespace-nowrap">
+                            <div className="font-bold text-white flex items-center gap-1.5">
                               <User className="w-3.5 h-3.5 text-blue-400 shrink-0" />
                               <span>{item.driverName}</span>
                               <span className={`text-[9px] px-1.5 py-0.2 rounded font-mono font-bold border ${
@@ -1374,23 +1363,25 @@ export const DriverReportsManagement: React.FC = () => {
                               </span>
                             </div>
                             {item.helperName && (
-                              <div className="text-[10px] text-slate-400 mt-0.5">
-                                Helper: <strong>{item.helperName}</strong>
+                              <div className="text-[10px] text-slate-400 mt-0.5 pl-5">
+                                Helper: <strong className="text-slate-300">{item.helperName}</strong>
                               </div>
                             )}
-                            <div className="mt-1 flex items-center gap-1">
-                              <Truck className="w-3 h-3 text-amber-400 shrink-0" />
-                              <span className="font-mono font-bold text-amber-300 text-[11px] bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800">
-                                {item.plateNumber}
-                              </span>
-                            </div>
                           </td>
 
-                          {/* 3. Jenis Laporan */}
-                          <td className="p-3.5 align-top space-y-1">
+                          {/* 3. Armada */}
+                          <td className="py-2.5 px-3 align-middle whitespace-nowrap">
+                            <span className="inline-flex items-center gap-1.5 font-mono font-bold text-amber-300 text-[11px] bg-slate-950 px-2 py-1 rounded-md border border-slate-800">
+                              <Truck className="w-3 h-3 text-amber-400 shrink-0" />
+                              {item.plateNumber}
+                            </span>
+                          </td>
+
+                          {/* 4. Jenis Laporan */}
+                          <td className="py-2.5 px-3 align-middle space-y-1 whitespace-nowrap">
                             {item.category === 'mode_offline' && (
                               <div className="space-y-1">
-                                <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black border ${
+                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black border ${
                                   item.offlineStatus === 'masih_offline'
                                     ? 'bg-rose-500/20 text-rose-200 border-rose-500/50 animate-pulse'
                                     : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
@@ -1402,7 +1393,7 @@ export const DriverReportsManagement: React.FC = () => {
                                   )}
                                   <span>Peringatan Mode Offline</span>
                                 </span>
-                                <div className="text-[10px] font-mono bg-slate-950 p-1.5 rounded-lg border border-slate-800 space-y-0.5">
+                                <div className="text-[9px] font-mono bg-slate-950 px-1.5 py-1 rounded border border-slate-800 space-y-0.5">
                                   <div className="text-rose-400 font-bold">
                                     Off: {item.offlineActivatedAt || new Date(item.timestamp).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }) + ' WIB'}
                                   </div>
@@ -1416,7 +1407,7 @@ export const DriverReportsManagement: React.FC = () => {
                               <div className="space-y-1">
                                 {item.customerQueueStatus ? (
                                   <>
-                                    <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold border ${
+                                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold border ${
                                       item.customerQueueStatus === 'sedang_mengantri'
                                         ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse'
                                         : 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
@@ -1428,17 +1419,9 @@ export const DriverReportsManagement: React.FC = () => {
                                           : `Selesai Antri (${item.customerQueueDurationMinutes || 15} Menit)`}
                                       </span>
                                     </span>
-                                    <div className="text-[10px] font-mono bg-slate-950 p-1.5 rounded-lg border border-slate-800 space-y-0.5">
-                                      <div className="text-amber-400 font-bold">
-                                        Antri: {item.customerQueueStartFormatted || '-'}
-                                      </div>
-                                      <div className={item.customerQueueExitFormatted ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
-                                        Keluar: {item.customerQueueExitFormatted || 'Sedang Mengantri'}
-                                      </div>
-                                    </div>
                                   </>
                                 ) : (
-                                  <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold bg-rose-500/15 text-rose-300 border border-rose-500/30">
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-500/15 text-rose-300 border border-rose-500/30">
                                     <AlertTriangle className="w-3 h-3 text-rose-400" />
                                     <span>Kendala Jalan</span>
                                   </span>
@@ -1446,46 +1429,47 @@ export const DriverReportsManagement: React.FC = () => {
                               </div>
                             )}
                             {item.category === 'akhir_kiriman' && (
-                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
                                 <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                                <span>Akhir Kiriman</span>
+                                <span>Tiba di Gudang</span>
                               </span>
                             )}
                             {item.category === 'presensi_shift' && (
-                              <div className="space-y-1">
-                                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+                              <div className="space-y-0.5">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
                                   <Clock className="w-3 h-3 text-cyan-400" />
                                   <span>Check-In &amp; Check-Out</span>
                                 </span>
-                                <div className="text-[10px] font-mono space-y-0.5 bg-slate-950 p-1.5 rounded-lg border border-slate-800">
-                                  <div className="text-emerald-400 font-bold">In: {item.checkinTimeFormatted || '-'}</div>
-                                  <div className={item.checkoutTimeFormatted ? 'text-amber-400 font-bold' : 'text-slate-500'}>
-                                    Out: {item.checkoutTimeFormatted || 'Masih Dinas'}
-                                  </div>
+                                <div className="text-[9px] font-mono bg-slate-950 px-1.5 py-0.5 rounded border border-slate-800">
+                                  <span className="text-emerald-400 font-bold">In: {item.checkinTimeFormatted || '-'}</span>
+                                  {' | '}
+                                  <span className={item.checkoutTimeFormatted ? 'text-amber-400 font-bold' : 'text-slate-500'}>
+                                    Out: {item.checkoutTimeFormatted || 'Dinas'}
+                                  </span>
                                 </div>
                               </div>
                             )}
                             {item.category === 'pin_keamanan' && (
-                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
                                 <Lock className="w-3 h-3 text-amber-400" />
                                 <span>PIN Keamanan (2x)</span>
                               </span>
                             )}
                             {item.category === 'istirahat' && (
-                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
                                 <Clock className="w-3 h-3 text-amber-400" />
                                 <span>Istirahat Kru</span>
                               </span>
                             )}
                             {item.category === 'update_lokasi' && (
-                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold bg-blue-500/15 text-blue-300 border border-blue-500/30">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-500/15 text-blue-300 border border-blue-500/30">
                                 <Navigation className="w-3 h-3 text-blue-400" />
                                 <span>Update Lokasi</span>
                               </span>
                             )}
                             {item.securityPin && (
-                              <div className="flex items-center gap-1.5 pt-0.5">
-                                <span className="text-[10px] font-mono bg-slate-950 px-2 py-0.5 rounded border border-amber-500/30 text-amber-300 font-bold">
+                              <div className="flex items-center gap-1 pt-0.5">
+                                <span className="text-[9px] font-mono bg-slate-950 px-1.5 py-0.5 rounded border border-amber-500/30 text-amber-300 font-bold">
                                   PIN: {revealedPinIds[item.id] ? item.securityPin : '••••'}
                                 </span>
                                 <button
@@ -1499,18 +1483,17 @@ export const DriverReportsManagement: React.FC = () => {
                             )}
                           </td>
 
-                          {/* 4. Area Kirim */}
-                          <td className="p-3.5 align-top">
+                          {/* 5. Nama Area Kirim */}
+                          <td className="py-2.5 px-3 align-middle">
                             <div className="font-bold text-white text-xs max-w-[150px] truncate" title={item.areaName}>
                               {item.areaName}
                             </div>
-                            <span className="text-[9px] text-slate-500">Area Terjadwal</span>
                           </td>
 
-                          {/* 5. Foto Bukti */}
-                          <td className="p-3.5 align-top">
+                          {/* 6. Foto Bukti */}
+                          <td className="py-2.5 px-3 align-middle text-center">
                             {item.photoUrl ? (
-                              <div className="relative group w-14 h-14 rounded-xl overflow-hidden border border-slate-700 bg-slate-950 shrink-0">
+                              <div className="relative group w-11 h-11 rounded-lg overflow-hidden border border-slate-700 bg-slate-950 mx-auto">
                                 <img
                                   src={item.photoUrl}
                                   alt="Bukti Kiriman"
@@ -1522,209 +1505,105 @@ export const DriverReportsManagement: React.FC = () => {
                                   className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white"
                                   title="Perbesar foto"
                                 >
-                                  <Eye className="w-4 h-4" />
+                                  <Eye className="w-3.5 h-3.5" />
                                 </button>
                               </div>
                             ) : (
-                              <div className="w-14 h-14 rounded-xl border border-dashed border-slate-800 flex items-center justify-center text-slate-600 text-[10px]">
+                              <span className="inline-block px-2 py-1 rounded border border-dashed border-slate-800 text-slate-500 text-[10px]">
                                 Tanpa Foto
-                              </div>
+                              </span>
                             )}
                           </td>
 
-                          {/* 6. Keterangan Kendala Kru */}
-                          <td className="p-3.5 align-top max-w-[200px]">
-                            <p className="text-slate-300 text-xs leading-relaxed line-clamp-3" title={item.notes}>
-                              {item.notes}
+                          {/* 7. Keterangan Kendala */}
+                          <td className="py-2.5 px-3 align-middle max-w-[210px]">
+                            <p className="text-slate-300 text-[11px] leading-snug line-clamp-3" title={item.notes}>
+                              {item.notes || '-'}
                             </p>
                           </td>
 
-                          {/* 7. Solusi & Arahan SPV Logistik / Super Admin (Kontras Tinggi Terbaca Jelas) */}
-                          <td className="p-3.5 align-top max-w-[280px]">
+                          {/* 8. Solusi */}
+                          <td className="py-2.5 px-3 align-middle max-w-[230px]">
                             {item.solution && item.solution.trim() ? (
-                              <div className="bg-slate-950 p-2.5 rounded-xl border border-emerald-500/50 space-y-1.5 shadow-sm">
-                                <div className="flex items-center justify-between text-[10px]">
+                              <div className="bg-slate-950 p-2 rounded-lg border border-emerald-500/40 space-y-1">
+                                <div className="flex items-center justify-between text-[9px]">
                                   <span className="font-bold text-emerald-400 flex items-center gap-1">
-                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                                    <span>Arahan SPV:</span>
+                                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                                    <span>Solusi SPV:</span>
                                   </span>
-                                  <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
-                                    <Check className="w-2.5 h-2.5" />
-                                    <span>{item.driverAcknowledged ? 'Dijalankan Driver' : 'Terkirim ke Portal Driver'}</span>
+                                  <span className="text-emerald-300 font-semibold">
+                                    {item.driverAcknowledged ? 'Dijalankan' : 'Terkirim'}
                                   </span>
                                 </div>
-                                <p className="text-white text-xs leading-tight font-bold">
+                                <p className="text-white text-[11px] leading-snug font-semibold">
                                   "{item.solution}"
                                 </p>
-                                <div className="text-[9px] text-emerald-300 border-t border-slate-800 pt-1 flex items-center justify-between">
-                                  <span>Oleh: {item.solutionBy || 'SPV Logistik'}</span>
-                                  {item.solutionAt && (
-                                    <span>{new Date(item.solutionAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</span>
-                                  )}
-                                </div>
-                              </div>
-                            ) : item.category === 'mode_offline' && item.offlineStatus === 'masih_offline' ? (
-                              <div className="bg-rose-950/40 p-2.5 rounded-xl border border-rose-500/50 text-[11px] space-y-1.5">
-                                <div className="flex items-center gap-1.5 text-rose-200 font-black text-[10px]">
-                                  <WifiOff className="w-3.5 h-3.5 text-rose-400 shrink-0 animate-pulse" />
-                                  <span>Kru Mengaktifkan Mode Offline — Segera Onlinekan!</span>
-                                </div>
-                                <div className="flex items-center gap-1.5">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleSendOfflineWarningToPortal(item)}
-                                    className="flex-1 py-1 px-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[10px] flex items-center justify-center gap-1 cursor-pointer transition"
-                                  >
-                                    <Send className="w-3 h-3" />
-                                    <span>Kirim Peringatan</span>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleForceOnlineCrew(item)}
-                                    className="flex-1 py-1 px-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-[10px] flex items-center justify-center gap-1 cursor-pointer transition"
-                                  >
-                                    <Wifi className="w-3 h-3" />
-                                    <span>Onlinekan</span>
-                                  </button>
-                                </div>
                               </div>
                             ) : item.category === 'kendala_jalan' ? (
-                              <div className="bg-rose-950/30 p-2.5 rounded-xl border border-rose-500/40 text-[11px] space-y-1.5">
-                                <div className="flex items-center gap-1.5 text-rose-300 font-bold text-[10px]">
-                                  <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0 animate-pulse" />
-                                  <span>Segera Perbarui Status &amp; Tindakan Solusi!</span>
-                                </div>
-                                {isAuthorizedSpvOrAdmin && (
-                                  <button
-                                    onClick={() => handleOpenSolutionModal(item)}
-                                    className="w-full py-1 px-2 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-[10px] text-rose-200 font-bold flex items-center justify-center gap-1 cursor-pointer transition"
-                                  >
-                                    <span>Beri Solusi &amp; Kirim ke Portal</span>
-                                    <ArrowRight className="w-3 h-3" />
-                                  </button>
-                                )}
-                              </div>
+                              <span className="inline-flex items-center gap-1 text-[10px] text-rose-300 font-semibold bg-rose-950/40 px-2 py-1 rounded border border-rose-500/30">
+                                <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" />
+                                <span>Menunggu Solusi SPV</span>
+                              </span>
                             ) : (
-                              <div className="bg-slate-950/60 p-2 rounded-xl border border-dashed border-slate-800 text-[11px] text-slate-500 flex items-center justify-between">
-                                <span>Tidak memerlukan solusi khusus</span>
-                                {isAuthorizedSpvOrAdmin && (
-                                  <button
-                                    onClick={() => handleOpenSolutionModal(item)}
-                                    className="text-[10px] text-amber-400 hover:text-amber-300 font-bold underline cursor-pointer"
-                                  >
-                                    Tambah Arahan &rarr;
-                                  </button>
-                                )}
-                              </div>
+                              <span className="text-[11px] text-slate-500 italic">
+                                Tidak memerlukan solusi khusus
+                              </span>
                             )}
                           </td>
 
-                          {/* 8. Status (Otomatis Hijau jika solusi sudah terkirim ke Portal Driver) */}
-                          <td className="p-3.5 align-top">
-                            {(item.solution && item.solution.trim()) || item.status === 'verified' || item.status === 'resolved' || item.offlineStatus === 'sudah_online' ? (
-                              <div className="space-y-1">
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                                  <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
-                                  <span>
-                                    {item.category === 'mode_offline' && item.offlineStatus === 'sudah_online'
-                                      ? 'Sudah Online'
-                                      : item.solution && item.solution.trim()
-                                      ? 'Terkirim ke Portal'
-                                      : 'Terverifikasi'}
-                                  </span>
-                                </span>
-                                {(item.verifiedBy || item.solutionBy) && (
-                                  <div className="text-[9px] text-emerald-400/80 font-medium" title={item.solutionBy || item.verifiedBy}>
-                                    ✓ {item.solution && item.solution.trim() ? 'Solusi Aktif di HP' : `Oleh: ${item.verifiedBy}`}
-                                  </div>
-                                )}
-                              </div>
+                          {/* 9. Status */}
+                          <td className="py-2.5 px-3 align-middle text-center whitespace-nowrap">
+                            {isVerifiedOrResolved ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
+                                <span>Terverifikasi</span>
+                              </span>
                             ) : item.status === 'follow_up' ? (
                               <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40">
                                 <AlertTriangle className="w-3 h-3" />
                                 <span>Tindak Lanjut</span>
                               </span>
                             ) : (
-                              <div className="space-y-1">
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse">
-                                  <AlertTriangle className="w-3 h-3 text-rose-400 shrink-0" />
-                                  <span>
-                                    {item.category === 'mode_offline' ? 'Masih Offline!' : 'Perlu Update & Solusi'}
-                                  </span>
-                                </span>
-                                <div className="text-[9px] text-amber-400 font-semibold">
-                                  {item.category === 'mode_offline' ? 'Segera Onlinekan Kembali' : 'Menunggu Tindakan SPV'}
-                                </div>
-                              </div>
+                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                                <Clock className="w-3 h-3 text-rose-400 shrink-0" />
+                                <span>Pending</span>
+                              </span>
                             )}
                           </td>
 
-                          {/* 9. Tindakan SPV & Super Admin (Khusus Otorisasi) */}
-                          <td className="p-3.5 pr-4 align-top text-center">
+                          {/* 10. Tindakan (Edit dan Centang) */}
+                          <td className="py-2.5 px-3 align-middle text-center whitespace-nowrap">
                             {isAuthorizedSpvOrAdmin ? (
-                              <div className="flex flex-col gap-1.5 items-center justify-center">
-                                {item.category === 'mode_offline' && item.offlineStatus === 'masih_offline' && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleForceOnlineCrew(item)}
-                                    className="px-2.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-[10px] flex items-center gap-1 shadow-sm transition active:scale-95 cursor-pointer whitespace-nowrap"
-                                    title="Onlinekan kembali perangkat kru pengiriman sekarang"
-                                  >
-                                    <Wifi className="w-3 h-3" />
-                                    <span>Onlinekan Kembali</span>
-                                  </button>
-                                )}
-                                {item.customerQueueStatus === 'sedang_mengantri' && (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      driverReportService.completeCustomerQueueExit({
-                                        reportId: item.id,
-                                        driverId: item.driverId,
-                                        driverName: item.driverName,
-                                        simulatedExtraMinutes: 15
-                                      });
-                                      loadReports();
-                                      addNotification(
-                                        'schedule',
-                                        'Kru Selesai Antri & Keluar Customer',
-                                        `Status antrean ${item.driverName} di ${item.customerOutletName || item.areaName} telah diperbarui menjadi Keluar dari Customer.`
-                                      );
-                                    }}
-                                    className="px-2.5 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black text-[10px] flex items-center gap-1 shadow-sm transition active:scale-95 cursor-pointer whitespace-nowrap"
-                                  >
-                                    <Clock className="w-3 h-3" />
-                                    <span>Keluar Customer</span>
-                                  </button>
-                                )}
+                              <div className="inline-flex items-center justify-center gap-1.5">
                                 <button
+                                  type="button"
                                   onClick={() => handleOpenSolutionModal(item)}
-                                  className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[10px] flex items-center gap-1 shadow-sm transition active:scale-95 cursor-pointer whitespace-nowrap"
-                                  title="Berikan atau edit solusi yang tersambung ke HP supir"
+                                  className="p-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-slate-950 border border-amber-500/40 transition active:scale-95 cursor-pointer"
+                                  title="Edit Solusi & Arahan SPV"
                                 >
-                                  <Send className="w-3 h-3" />
-                                  <span>{item.solution ? 'Edit Solusi SPV' : 'Beri Solusi & Arahan'}</span>
+                                  <Edit className="w-3.5 h-3.5" />
                                 </button>
-
-                                {item.status !== 'verified' && (
-                                  <button
-                                    onClick={() => handleVerify(item.id)}
-                                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-emerald-600 text-slate-300 hover:text-white font-bold text-[10px] flex items-center gap-1 transition active:scale-95 cursor-pointer border border-slate-700 hover:border-emerald-500"
-                                    title="Tandai verifikasi sah"
-                                  >
-                                    <Check className="w-3 h-3" />
-                                    <span>Verifikasi Sah</span>
-                                  </button>
-                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => handleVerify(item.id)}
+                                  disabled={item.status === 'verified'}
+                                  className={`p-1.5 rounded-lg border transition active:scale-95 ${
+                                    item.status === 'verified'
+                                      ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 cursor-default'
+                                      : 'bg-slate-800 hover:bg-emerald-600 text-slate-300 hover:text-white border-slate-700 hover:border-emerald-500 cursor-pointer'
+                                  }`}
+                                  title={item.status === 'verified' ? 'Sudah Terverifikasi' : 'Centang Verifikasi Sah'}
+                                >
+                                  <Check className="w-3.5 h-3.5" />
+                                </button>
                               </div>
                             ) : (
-                              <div className="flex items-center justify-center gap-1 text-[10px] text-slate-500">
+                              <div className="inline-flex items-center justify-center gap-1 text-[10px] text-slate-500">
                                 <Lock className="w-3 h-3" />
-                                <span>Khusus SPV</span>
+                                <span>SPV</span>
                               </div>
                             )}
                           </td>
-
                         </tr>
                       );
                     })}

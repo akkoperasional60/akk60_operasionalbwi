@@ -20,6 +20,7 @@ export type AreaCategoryKey =
   | 'bondowoso' 
   | 'ssln_stb_bdws' 
   | 'jember' 
+  | 'kanvas_lkt'
   | 'lainnya';
 
 export interface AreaScheduleTiming {
@@ -136,6 +137,20 @@ export const AREA_TIMING_RULES: Record<AreaCategoryKey, AreaScheduleTiming> = {
     description: 'Berangkat hari ini 21.00 WIB & kepulangan besok 16.00 WIB',
     badgeLabel: '🌙 Berangkat Nanti Malam (21.00 WIB) · Pulang Besok 16.00 WIB'
   },
+  kanvas_lkt: {
+    key: 'kanvas_lkt',
+    areaGroupTitle: 'Kanvas LKT (Luar Kota)',
+    departureHour: 7,
+    departureMinute: 15,
+    returnHour: 17,
+    returnMinute: 30,
+    departureLabel: '07.15 WIB',
+    returnLabel: '17.30 WIB',
+    isNightDeparture: false,
+    isNextDayReturn: false,
+    description: 'Jadwal Kanvas LKT — Berangkat 07.15 WIB & kepulangan 17.30 WIB',
+    badgeLabel: '🚚 Kanvas LKT · Berangkat 07.15 WIB · Pulang 17.30 WIB'
+  },
   lainnya: {
     key: 'lainnya',
     areaGroupTitle: 'Area Lokal Banyuwangi (Jajag Retail, dsb.)',
@@ -201,6 +216,11 @@ export function getAreaScheduleTiming(
   // 7. Seluruh area Jember (Jember Selatan, Jember Barat, Jember Kota)
   if (combined.includes('JEMBER')) {
     return AREA_TIMING_RULES.jember;
+  }
+
+  // 7b. Kanvas LKT
+  if (combined.includes('KANVAS LKT') || combined.includes('KANVAS_LKT') || combined.includes('KANVAS')) {
+    return AREA_TIMING_RULES.kanvas_lkt;
   }
 
   // 8. Selain area di atas (Jajag Retail, Genteng, Rogojampi, Songgon, Srono, Sanggar, Muncar, Sempu, dsb.)

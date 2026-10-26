@@ -626,7 +626,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
             <p className="text-[11px] sm:text-xs text-slate-400 mt-1 leading-relaxed">
               {isSuperAdmin
                 ? 'Setiap pengguna dengan role Kru Supir / Driver atau Kru Helper / Kernet otomatis terintegrasi ke dalam daftar penugasan Jadwal Pengiriman & Status Operasional.'
-                : `Manajemen user dan perubahan hak akses dikunci khusus untuk Super Admin. Anda login sebagai: ${currentUser.role === 'super_admin' ? 'Super Admin' : currentUser.fullName} (${currentUser.role}).`}
+                : `Manajemen user dan perubahan hak akses dikunci khusus untuk Super Admin. Anda login sebagai: ${currentUser.fullName} (${currentUser.role}).`}
             </p>
           </div>
         </div>
@@ -788,12 +788,12 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                           ? 'bg-slate-800 text-slate-400 border-slate-700'
                           : 'bg-slate-800 text-white border-slate-700'
                       }`}>
-                        {user.role === 'super_admin' ? '👑' : user.fullName.substring(0, 2).toUpperCase()}
+                        {user.fullName === 'Super Admin' ? '👑' : user.fullName.substring(0, 2).toUpperCase()}
                       </div>
                       <div className="min-w-0">
                         <div className="font-bold text-xs truncate flex items-center gap-1.5">
                           <span className={isSelected ? 'text-amber-400 font-extrabold' : isInactive ? 'text-slate-400 line-through' : 'text-white'}>
-                            {user.role === 'super_admin' ? 'Super Admin' : user.fullName}
+                            {user.fullName}
                           </span>
                           {isCurrent && (
                             <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-blue-500/15 text-blue-400 border border-blue-500/30 shrink-0">
@@ -863,12 +863,12 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                         ? 'bg-slate-800 border-slate-700 text-slate-400'
                         : 'bg-amber-600 border-amber-500 text-white'
                     }`}>
-                      {selectedUser.role === 'super_admin' ? '👑' : selectedUser.fullName.substring(0, 2).toUpperCase()}
+                      {selectedUser.fullName === 'Super Admin' ? '👑' : selectedUser.fullName.substring(0, 2).toUpperCase()}
                     </div>
                     <div>
                       <div className="flex items-center gap-2 flex-wrap">
                         <h3 className="text-base font-extrabold text-white">
-                          {selectedUser.role === 'super_admin' ? 'Super Admin' : selectedUser.fullName}
+                          {selectedUser.fullName}
                         </h3>
                         <span className={`px-2.5 py-0.5 rounded-md text-[10px] font-extrabold border ${
                           selectedUser.role === 'unassigned'

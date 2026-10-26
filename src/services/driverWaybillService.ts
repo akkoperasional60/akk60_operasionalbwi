@@ -128,10 +128,10 @@ class DriverWaybillService {
       preparedByName: 'M. Syaiful B.',
       preparedBySigned: false,
       preparedBySignedAt: '',
-      acknowledgedByName: 'Hadi Purnomo',
+      acknowledgedByName: 'Bayu Novianto Dimas Permana',
       acknowledgedBySigned: false,
       acknowledgedBySignedAt: '',
-      securityOfficerName: 'Slamet Riyadi',
+      securityOfficerName: 'Hairul Rozikin',
       securitySigned: false,
       securitySignedAt: '',
       driverSigned: false,
@@ -176,6 +176,14 @@ class DriverWaybillService {
         };
         changed = true;
       }
+      if (schedule.crew?.name && existing.crew.driverName !== schedule.crew.name) {
+        existing.crew.driverName = schedule.crew.name;
+        changed = true;
+      }
+      if (schedule.crewHelper?.name && existing.crew.helperName !== schedule.crewHelper.name) {
+        existing.crew.helperName = schedule.crewHelper.name;
+        changed = true;
+      }
       if (schedule.status === 'delivered') {
         if (existing.status !== 'delivered' || existing.statusLabel !== 'Selesai (Tiba di Gudang)') {
           existing.status = 'delivered';
@@ -185,7 +193,9 @@ class DriverWaybillService {
       } else if (
         schedule.status === 'in_transit' ||
         schedule.status === 'picked_up' ||
-        schedule.status === 'delayed'
+        schedule.status === 'delayed' ||
+        existing.status === 'in_transit' ||
+        existing.status === 'gate_out'
       ) {
         if (existing.status !== 'in_transit' || existing.statusLabel !== 'Di Jalan (Keluar Gudang)') {
           existing.status = 'in_transit';
@@ -256,6 +266,9 @@ class DriverWaybillService {
         }
       }
       this.saveWaybill(stored[waybillId]);
+      try {
+        window.dispatchEvent(new CustomEvent('driver-waybill-updated', { detail: stored[waybillId] }));
+      } catch {}
       return true;
     } catch {
       return false;

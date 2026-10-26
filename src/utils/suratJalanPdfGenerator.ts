@@ -226,8 +226,8 @@ export async function downloadSuratJalanPdf(
 
     const allUsers = logisticsStore.getUsers();
     const spvName = formatConcisePdfName(waybill.preparedByName || allUsers.find(u => u.role === 'spv_logistik')?.fullName || 'M. Syaiful B.');
-    const operasionalName = formatConcisePdfName(waybill.acknowledgedByName || allUsers.find(u => u.role === 'operasional')?.fullName || 'Hadi Purnomo');
-    const secName = formatConcisePdfName(waybill.securityOfficerName || allUsers.find(u => u.role === 'security')?.fullName || 'Slamet Riyadi');
+    const operasionalName = formatConcisePdfName(waybill.acknowledgedByName || allUsers.find(u => u.role === 'operasional')?.fullName || 'Bayu Novianto Dimas Permana');
+    const secName = formatConcisePdfName(waybill.securityOfficerName || allUsers.find(u => u.role === 'security')?.fullName || 'Hairul Rozikin');
     const dFirst = (waybill.crew?.driverName || 'Driver').replace(/^Super\s+Admin$/i, 'Admin').replace(/^(MUHAMMAD|MOHAMAD|MOCHAMAD)\s+/i, '').trim().split(/\s+/)[0];
     const hFirst = (waybill.crew?.helperName || '').replace(/^(MUHAMMAD|MOHAMAD|MOCHAMAD)\s+/i, '').trim().split(/\s+/)[0];
     const crewName = hFirst && hFirst !== '-' ? `${dFirst} / ${hFirst}` : dFirst;

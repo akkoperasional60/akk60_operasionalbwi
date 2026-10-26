@@ -436,7 +436,7 @@ export default function App() {
 
           {currentTab === 'sales_dashboard' && (
             <SalesAdminHub
-              activeSubTab="dashboard"
+              activeSubTab="activities"
               onSelectSubTab={(sub) => setCurrentTab(('sales_' + sub) as NavTab)}
             />
           )}

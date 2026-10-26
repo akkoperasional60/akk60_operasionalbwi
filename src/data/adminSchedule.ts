@@ -70,7 +70,8 @@ export const ADMIN_SCHEDULE_WEEKS: AdminScheduleWeek[] = [
           { driver: 'ANDRE', helper: 'AAN', area: 'SUSULAN GENTENG - ROGOJAMPI', armada: 'DS4' },
           { driver: 'WIBI', helper: 'TEGUH', area: 'PURWO DAMBUNTUNG', armada: 'NS2' },
           { driver: 'BUDI', helper: 'RIZAL', area: 'PURWO PASAR', armada: 'NS1' },
-          { driver: 'HADI', helper: 'YUDI', area: 'JAJAG RETAIL', armada: 'N20' }
+          { driver: 'HADI', helper: 'YUDI', area: 'JAJAG RETAIL', armada: 'N20' },
+          { driver: 'WONGSO', helper: 'RIZAL', area: 'KANVAS LKT', armada: 'NP1' }
         ],
         gudang: [],
         pengirimanOff: [],
@@ -85,7 +86,8 @@ export const ADMIN_SCHEDULE_WEEKS: AdminScheduleWeek[] = [
           { driver: 'HADI', helper: 'YUSUF', area: 'SUMBERAYU RETAIL', armada: 'NL2' },
           { driver: 'ARIS', helper: 'RIFAL', area: 'GALEKAN', armada: 'NL1' },
           { driver: 'TIAR', helper: 'FARIS', area: 'GROSIR BWI - ROGOJAMPI', armada: 'DS4' },
-          { driver: 'BUDI', helper: 'ROHMAN', area: 'SUSULAN SANGGAR JAJAG', armada: 'NS1' }
+          { driver: 'BUDI', helper: 'ROHMAN', area: 'SUSULAN SANGGAR JAJAG', armada: 'NS1' },
+          { driver: 'WIBI', helper: 'TEGUH', area: 'KANVAS LKT', armada: 'NP1' }
         ],
         gudang: [],
         pengirimanOff: [],
@@ -101,7 +103,8 @@ export const ADMIN_SCHEDULE_WEEKS: AdminScheduleWeek[] = [
           { driver: 'ARIS', helper: 'ROHMAN', area: 'GENTENG RETAIL', armada: 'NL2' },
           { driver: 'TIAR', helper: 'YUSUF', area: 'ROGOJAMPI RETAIL', armada: 'DS4' },
           { driver: 'BUDI', helper: 'AAN', area: 'MUNCAR RETAIL', armada: 'NS2' },
-          { driver: 'ALDI', helper: 'WAHYU', area: 'KETAPANG WONGSOREJO', armada: 'NS3' }
+          { driver: 'ALDI', helper: 'WAHYU', area: 'KETAPANG WONGSOREJO', armada: 'NS3' },
+          { driver: 'WONGSO', helper: 'YUDI', area: 'KANVAS LKT', armada: 'NP1' }
         ],
         gudang: [],
         pengirimanOff: [],
@@ -118,7 +121,8 @@ export const ADMIN_SCHEDULE_WEEKS: AdminScheduleWeek[] = [
           { driver: 'HADI', helper: 'FARIS', area: 'GROSIR GENDOH - GENTENG', armada: 'NL2' },
           { driver: 'WIBI', helper: 'RIFAL', area: 'SONGGON RETAIL', armada: 'NS1' },
           { driver: 'ALDI', helper: 'ANDRE', area: 'BWI KOTA SELATAN', armada: 'NS3' },
-          { driver: 'WAHYU', helper: 'AAN', area: 'SUSULAN SITUBONDO', armada: 'NL1' }
+          { driver: 'WAHYU', helper: 'AAN', area: 'SUSULAN SITUBONDO', armada: 'NL1' },
+          { driver: 'WONGSO', helper: 'RIZAL', area: 'KANVAS LKT', armada: 'NP1' }
         ],
         gudang: [],
         pengirimanOff: [],
@@ -135,7 +139,8 @@ export const ADMIN_SCHEDULE_WEEKS: AdminScheduleWeek[] = [
           { driver: 'WAHYU', helper: 'AAN', area: 'KALIBARU RETAIL', armada: 'NL1' },
           { driver: 'TIAR', helper: 'ROHMAN, AHMAD', area: 'GROSIR SRONO SUMBERAYU MUNCAR', armada: 'DS3' },
           { driver: 'BUDI', helper: 'YUDI', area: 'SUSULAN ROGOJAMPI MUNCAR', armada: 'NS1' },
-          { driver: 'ANDRE', helper: 'RIZAL', area: 'SEMPU STAIL', armada: 'NL2' }
+          { driver: 'ANDRE', helper: 'RIZAL', area: 'SEMPU STAIL', armada: 'NL2' },
+          { driver: 'WIBI', helper: 'TEGUH', area: 'KANVAS LKT', armada: 'NP1' }
         ],
         gudang: [],
         pengirimanOff: [],
@@ -150,7 +155,8 @@ export const ADMIN_SCHEDULE_WEEKS: AdminScheduleWeek[] = [
           { driver: 'WIBI', helper: 'ALDI', area: 'JEMBER KOTA', armada: 'DS3' },
           { driver: 'WONGSO', helper: 'FARIS', area: 'PURWO DAMBUNTUNG', armada: 'NP1' },
           { driver: 'HADI', helper: 'ROHMAN', area: 'PURWO PASAR', armada: 'NS1' },
-          { driver: 'SUPRI', helper: 'YUSUF', area: 'JAJAG RETAIL', armada: 'NS2' }
+          { driver: 'SUPRI', helper: 'YUSUF', area: 'JAJAG RETAIL', armada: 'NS2' },
+          { driver: 'ANDRE', helper: 'AAN', area: 'KANVAS LKT', armada: 'N20' }
         ],
         gudang: [],
         pengirimanOff: [],
@@ -171,12 +177,14 @@ Tanggal,No,Driver,Helper,,Area Kirim,Armada
 ,6,WIBI,TEGUH,,PURWO DAMBUNTUNG,NS2
 ,7,BUDI,RIZAL,,PURWO PASAR,NS1
 ,8,HADI,YUDI,,JAJAG RETAIL,N20
+,9,WONGSO,RIZAL,,KANVAS LKT,NP1
 ------,BLACK_ROW_SEPARATOR,,,,,
 06/01/2026,1,ANDRE,AAN,HARDI,SINGARAJA,DS5
 ,2,HADI,YUSUF,,SUMBERAYU RETAIL,NL2
 ,3,ARIS,RIFAL,,GALEKAN,NL1
 ,4,TIAR,FARIS,,GROSIR BWI - ROGOJAMPI,DS4
 ,5,BUDI,ROHMAN,,SUSULAN SANGGAR JAJAG,NS1
+,6,WIBI,TEGUH,,KANVAS LKT,NP1
 ------,BLACK_ROW_SEPARATOR,,,,,
 07/01/2026,1,SUPRI,RIFAL,,DENPASAR 1,DS5
 ,2,HADI,FARIS,,DENPASAR 2,DS3
@@ -184,6 +192,7 @@ Tanggal,No,Driver,Helper,,Area Kirim,Armada
 ,4,TIAR,YUSUF,,ROGOJAMPI RETAIL,DS4
 ,5,BUDI,AAN,,MUNCAR RETAIL,NS2
 ,6,ALDI,WAHYU,,KETAPANG WONGSOREJO,NS3
+,7,WONGSO,YUDI,,KANVAS LKT,NP1
 ------,BLACK_ROW_SEPARATOR,,,,,
 08/01/2026,1,BUDI,YUSUF,,JEMBER BARAT,DS2
 ,2,ARIS,ROHMAN,,DENPASAR 1,DS3
@@ -192,6 +201,7 @@ Tanggal,No,Driver,Helper,,Area Kirim,Armada
 ,5,WIBI,RIFAL,,SONGGON RETAIL,NS1
 ,6,ALDI,ANDRE,,BWI KOTA SELATAN,NS3
 ,7,WAHYU,AAN,,SUSULAN SITUBONDO,NL1
+,8,WONGSO,RIZAL,,KANVAS LKT,NP1
 ------,BLACK_ROW_SEPARATOR,,,,,
 09/01/2026,1,SUPRI,RIFAL,,NEGARA,DS1
 ,2,HADI,YUSUF,,NEGARA,DS5
@@ -200,12 +210,14 @@ Tanggal,No,Driver,Helper,,Area Kirim,Armada
 ,5,TIAR,ROHMAN,AHMAD,GROSIR SRONO SUMBERAYU MUNCAR,DS3
 ,6,BUDI,YUDI,,SUSULAN ROGOJAMPI MUNCAR,NS1
 ,7,ANDRE,RIZAL,,SEMPU STAIL,NL2
+,8,WIBI,TEGUH,,KANVAS LKT,NP1
 ------,BLACK_ROW_SEPARATOR,,,,,
 10/01/2026,1,TIAR,AHMAD,,NEGARA,DS4
 ,2,WIBI,ALDI,,JEMBER KOTA,DS3
 ,3,WONGSO,FARIS,,PURWO DAMBUNTUNG,NP1
 ,4,HADI,ROHMAN,,PURWO PASAR,NS1
 ,5,SUPRI,YUSUF,,JAJAG RETAIL,NS2
+,6,ANDRE,AAN,,KANVAS LKT,N20
 `;
 
 export const rawAdminScheduleData = RAW_ADMIN_SCHEDULE_CSV;
@@ -218,7 +230,7 @@ const DAY_NAMES = ['MINGGU', 'SENIN', 'SELASA', 'RABU', 'KAMIS', 'JUMAT', 'SABTU
  * has its own independent total area count, ritase count, and daily trip distribution.
  */
 export function buildMonthSpecificSchedule(year: number, month: number): AdminScheduleWeek[] {
-  // If January 2026, return official real Google Sheet data (6 days, 38 Ritase)
+  // If January 2026, return official real Google Sheet data (6 days, 44 Ritase including Kanvas LKT)
   if (year === 2026 && month === 0) {
     return ADMIN_SCHEDULE_WEEKS;
   }
@@ -227,7 +239,7 @@ export function buildMonthSpecificSchedule(year: number, month: number): AdminSc
 
   // Month-distinct template pools of real delivery assignments
   const monthDeliveryTemplatesMap: Record<number, Array<{ driver: string; helper: string; area: string; armada: string }>> = {
-    // 0: Januari (13 Unique Areas)
+    // 0: Januari (14 Unique Areas including Kanvas LKT)
     0: [
       { driver: 'Supri', helper: 'Rifal, Aldi', area: 'DENPASAR 1', armada: 'DS3' },
       { driver: 'Wahyu', helper: 'Yusuf', area: 'DENPASAR 2', armada: 'DS1' },
@@ -238,12 +250,13 @@ export function buildMonthSpecificSchedule(year: number, month: number): AdminSc
       { driver: 'Budi', helper: 'Rizal', area: 'PURWO PASAR', armada: 'NS1' },
       { driver: 'Hadi', helper: 'Yudi', area: 'JAJAG RETAIL', armada: 'N20' },
       { driver: 'Joko', helper: 'Yono', area: 'SINGARAJA', armada: 'DS5' },
-      { driver: 'Supri', helper: 'Yusuf', area: 'SUMBERAYUY RETAIL', armada: 'NL2' },
+      { driver: 'Supri', helper: 'Yusuf', area: 'SUMBERAYU RETAIL', armada: 'NL2' },
       { driver: 'Wahyu', helper: 'Rifal', area: 'GALEKAN', armada: 'NL1' },
       { driver: 'Tiar', helper: 'Faris', area: 'GROSIR BWI - ROGOJAMPI', armada: 'DS4' },
-      { driver: 'Budi', helper: 'Rohman', area: 'SUSULAN SANGGAR JAJAG', armada: 'NS1' }
+      { driver: 'Budi', helper: 'Rohman', area: 'SUSULAN SANGGAR JAJAG', armada: 'NS1' },
+      { driver: 'Wongso', helper: 'Rizal', area: 'KANVAS LKT', armada: 'NP1' }
     ],
-    // 1: Februari (14 Unique Areas)
+    // 1: Februari
     1: [
       { driver: 'Supri', helper: 'Yusuf', area: 'DENPASAR 3', armada: 'DS3' },
       { driver: 'Wahyu', helper: 'Rifal', area: 'GIANYAR', armada: 'DS1' },
@@ -258,9 +271,10 @@ export function buildMonthSpecificSchedule(year: number, month: number): AdminSc
       { driver: 'Andre', helper: 'Yono', area: 'BALUNG RETAIL', armada: 'DS4' },
       { driver: 'Supri', helper: 'Rifal', area: 'PROBOLINGGO', armada: 'DS3' },
       { driver: 'Wahyu', helper: 'Faris', area: 'PASURUAN', armada: 'DS1' },
-      { driver: 'Aris', helper: 'Rohman', area: 'LUMAJANG', armada: 'DS2' }
+      { driver: 'Aris', helper: 'Rohman', area: 'LUMAJANG', armada: 'DS2' },
+      { driver: 'Wongso', helper: 'Rizal', area: 'KANVAS LKT', armada: 'NP1' }
     ],
-    // 2: Maret (12 Unique Areas)
+    // 2: Maret
     2: [
       { driver: 'Supri', helper: 'Rifal, Aldi', area: 'DENPASAR 1', armada: 'DS3' },
       { driver: 'Wahyu', helper: 'Yusuf', area: 'DENPASAR 2', armada: 'DS1' },
@@ -273,9 +287,10 @@ export function buildMonthSpecificSchedule(year: number, month: number): AdminSc
       { driver: 'Hadi', helper: 'Yudi', area: 'GLENMORE', armada: 'N20' },
       { driver: 'Rudi', helper: 'Teguh', area: 'KALIBARU', armada: 'DS2' },
       { driver: 'Slamet', helper: 'Yusuf', area: 'SEMPU', armada: 'NL1' },
-      { driver: 'Budi', helper: 'Rohman', area: 'SRONO', armada: 'NS1' }
+      { driver: 'Budi', helper: 'Rohman', area: 'SRONO', armada: 'NS1' },
+      { driver: 'Wongso', helper: 'Rizal', area: 'KANVAS LKT', armada: 'NP1' }
     ],
-    // 3: April (10 Unique Areas)
+    // 3: April
     3: [
       { driver: 'Supri', helper: 'Aldi', area: 'DENPASAR WEST', armada: 'DS3' },
       { driver: 'Wahyu', helper: 'Rifal', area: 'TABANAN SOUTH', armada: 'DS1' },
@@ -286,7 +301,8 @@ export function buildMonthSpecificSchedule(year: number, month: number): AdminSc
       { driver: 'Budi', helper: 'Yudi', area: 'SRONO CENTRAL', armada: 'NS1' },
       { driver: 'Hadi', helper: 'Rizal', area: 'ROGOMULYO', armada: 'N20' },
       { driver: 'Joko', helper: 'Yono', area: 'BANGOREJO NORTH', armada: 'DS5' },
-      { driver: 'Slamet', helper: 'Yusuf', area: 'CLURING RETAIL', armada: 'NL1' }
+      { driver: 'Slamet', helper: 'Yusuf', area: 'CLURING RETAIL', armada: 'NL1' },
+      { driver: 'Wongso', helper: 'Rizal', area: 'KANVAS LKT', armada: 'NP1' }
     ]
   };
 
