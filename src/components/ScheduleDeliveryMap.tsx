@@ -166,7 +166,7 @@ export const ScheduleDeliveryMap: React.FC<ScheduleDeliveryMapProps> = ({
       <div className="absolute top-3 left-3 right-3 z-10 flex items-center justify-between bg-slate-900/90 backdrop-blur-md px-4 py-2.5 rounded-xl border border-slate-800 shadow-lg">
         <div className="flex items-center gap-2 text-xs text-white font-bold">
           <Route className="w-4 h-4 text-amber-400" />
-          <span>Peta Rute & Titik Pengiriman (Leaflet & Supabase RLS)</span>
+          <span>Peta Rute & Titik Pengiriman (Leaflet & Hostinger MySQL)</span>
         </div>
         <div className="flex items-center gap-3 text-[11px] text-slate-400">
           <span className="flex items-center gap-1.5">

@@ -1,16 +1,17 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
 import * as XLSX from "xlsx";
-import { query as mysqlQuery, testConnection as testMysqlConnection } from "./server/db";
+import { query as mysqlQuery, testConnection as testMysqlConnection, isDatabaseConfigured } from "./server/db";
 
 dotenv.config();
 
 // Initialize Gemini Client if API key is present
-const apiKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
+const apiKey = process.env.GEMINI_API_KEY;
 const genAI = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
 const SYSTEM_INSTRUCTION = `
@@ -36,7 +37,7 @@ Informasi Utama PT AKK Logistics:
   3. Verifikasi Tiket Penyeberangan: Pengiriman rute Bali/Luar Pulau wajib melampirkan kode booking tiket kapal ASDP Ferizy Pelabuhan Ketapang - Gilimanuk.
   4. Pengisian Uang Jalan & BBM: Alokasi BBM dihitung berdasarkan standar rasio km/liter per jenis truk (Pick Up 1:10, Engkel 1:7, Double 1:5). Wajib melampirkan foto nota BBM resmi dan odometer terkini.
   5. Perbaikan & Sparepart: Komponen kritis (kampas rem, oli, ban) diajukan melalui SPK Bengkel ke bagian Manajemen Sparepart.
-  6. Pelacakan GPS: Seluruh 12 armada terintegrasi dengan sistem GPS Tracksolid Pro Concox GT06N realtime.
+  6. Pelacakan & Evaluasi Rute: Evaluasi jalur pengiriman armada terintegrasi melalui unggahan data rute GPS Excel dan pemetaan Jaringan Toko & Mitra.
 
 Jawablah pertanyaan pengguna secara langsung, spesifik, padat, dan solutif. Sertakan angka, nama sopir, atau langkah SOP jika relevan. Formatlah jawaban dengan poin-poin yang rapi dan mudah dibaca.
 `;
@@ -78,105 +79,10 @@ async function generateChatReply(message: string, contextTab?: string, history?:
     }
   }
 
-  // Knowledge Base Engine Fallback (Rule-based operational responses)
-  const query = message.toLowerCase();
+  // Fallback aman: jangan mengarang status operasional ketika Gemini tidak tersedia.
+  return `AI Assistant sedang tidak terhubung ke Gemini. Saya tidak akan mengarang status armada, kru, jadwal, BBM, atau data operasional sebagai data realtime.
 
-  if (query.includes('sopir') || query.includes('driver') || query.includes('helper') || query.includes('kernet') || query.includes('kru') || query.includes('siapa saja')) {
-    return `🚛 **Daftar Kru Sopir & Helper Bertugas Hari Ini (PT AKK Logistics)**:
-
-1. **Zainul Agustiar** (Driver Senior - SIM B2) & **Aan Adi Saputra** (Helper):
-   - **Armada**: Pick Up Box N1/NP1 (P 8125 VC)
-   - **Status**: On-Duty Rute Utama Banyuwangi - Denpasar Bali.
-
-2. **Ach Taufiq** (Driver Utama - SIM B2) & **Bintang Wahyu Pratama** (Helper):
-   - **Armada**: Pick Up Box A3/NP3 (P 8509 VQ)
-   - **Status**: On-Duty Rute Surabaya Hub via Pantura.
-
-3. **Aldi Wahyu Pradana** (Driver Utama) & **Alphian Bayu Nugraha** (Helper):
-   - **Armada**: Engkel Long N21/NL2 (P 8711 UW)
-   - **Status**: Standby Gudang Banyuwangi DC.
-
-4. **Driver Cadangan Standby**:
-   - **Suwarno** & **Adit** (Siap rotasi jeda 24 jam).
-
-📌 *Catatan*: Seluruh kru telah lulus verifikasi SIM aktif, sertifikasi K3 bongkar muat, dan audit kesehatan harian.`;
-  }
-
-  if (query.includes('armada') || query.includes('truk') || query.includes('kendaraan') || query.includes('plat')) {
-    return `🚚 **Status Ringkasan Armada PT AKK Logistics (12 Unit)**:
-
-- **Tersedia (Ready)**: 8 Unit (Engkel STD P 8848 U, Double STD P 9281 VA, Isuzu NMR W 8229 US, W 8603 PG, dll).
-- **Dalam Tugas (On-Duty)**: 3 Unit (Pick Up Box P 8125 VC, Pick Up Box P 8509 VQ, Engkel STD P 9677 VB).
-- **Perawatan Bengkel (Maintenance)**: 1 Unit (Engkel Long P 8381 VE - Servis berkala & ganti kampas rem).
-
-📌 Seluruh armada telah dilengkapi perangkat GPS Tracksolid Pro Concox GT06N realtime dan tangki BioSolar terkalibrasi.`;
-  }
-
-  if (query.includes('jadwal') || query.includes('muat') || query.includes('rute') || query.includes('kirim')) {
-    return `📅 **Info Jadwal & Rute Pengiriman Aktif (Banyuwangi DC)**:
-
-- **TRK-2026-09-082 (Jawa - Bali)**: P 8125 VC (Driver: Zainul Agustiar) -> Hypermart Mall Bali (Status: In Transit via ASDP Ketapang-Gilimanuk).
-- **TRK-2026-09-083 (Jawa Timur)**: P 8509 VQ (Driver: Ach Taufiq) -> Lotte Grosir Surabaya (Status: In Transit via Pantura).
-- **TRK-2026-09-084 (Luar Pulau)**: P 9677 VB -> Balikpapan Hub (Status: Pelayaran KM Dharma Ferry VII).
-
-📌 Gunakan fitur **Smart Fill** di halaman *Jadwal & Penugasan* untuk menyusun rute mingguan otomatis tanpa bentrok jadwal!`;
-  }
-
-  if (query.includes('bbm') || query.includes('uang jalan') || query.includes('solar') || query.includes('efisiensi')) {
-    return `⛽ **SOP Klaim Uang Jalan & Efisiensi BBM PT AKK**:
-
-1. **Standar Rasio Konsumsi BBM**:
-   - Pick Up Box (L300/Traga): 10 KM / Liter
-   - Engkel STD / Long (Canter/Hino): 7 KM / Liter
-   - Double STD (Hino/Isuzu NMR): 5 KM / Liter
-
-2. **Persyaratan Klaim**:
-   - Wajib mencatat KM Odometer sebelum & sesudah pengiriman di Formulir Armada.
-   - Wajib mengunggah foto nota struk pengisian BioSolar/Dexlite resmi SPBU.
-   - Verifikasi diaudit otomatis di modul *Efisiensi BBM*.`;
-  }
-
-  if (query.includes('tiket') || query.includes('kapal') || query.includes('penyeberangan') || query.includes('ketapang') || query.includes('ferry')) {
-    return `⛴️ **SOP Verifikasi Tiket Kapal Penyeberangan (Ketapang - Gilimanuk)**:
-
-- Seluruh armada penyeberangan Selat Bali dipesankan via sistem ASDP Ferizy resmi.
-- Kode Booking Tiket wajib diinput ke sistem minimal **2 jam sebelum jadwal masuk pelabuhan**.
-- Tiket mencakup: Golongan Kendaraan (Gol. IVA/VB), Nomor Plat Truk, dan Identitas Driver & Helper.
-- Sertifikat e-Tiket dapat diunduh langsung di detail jadwal pengiriman.`;
-  }
-
-  if (query.includes('sparepart') || query.includes('komponen') || query.includes('rem') || query.includes('ban') || query.includes('oli') || query.includes('bengkel')) {
-    return `🛠️ **SOP Manajemen Sparepart & Bengkel Operasional**:
-
-- **Stok Kritis**: Kampas Rem Hino, Filter Oli Mitsubishi Canter, dan Ban Luar 7.50-16.
-- **Pengajuan Part**: Buka menu *Manajemen Sparepart* -> Klik **Tambah Pembelian Baru (PO)**.
-- **Kartu SPK Bengkel**: Truk P 8381 VE sedang menjalani ganti filter solar & tune up. Estimasi selesai hari ini pukul 15.00 WIB.`;
-  }
-
-  if (query.includes('toko') || query.includes('pelanggan') || query.includes('peta') || query.includes('retail')) {
-    return `🗺️ **Jaringan Toko Retail & Pelanggan (15 Outlet Utama)**:
-
-- **Jawa Timur & Bali**: Abba Mart, Kurnia Sobo, RSI Fatimah, Toko Asmuin, Toko Damai Genteng, Transmart Sunset Road Bali, dll.
-- **Pusat Distribusi**: Banyuwangi DC (Jl. Argopuro No.60).
-- Data terintegrasi penuh dengan peta interaktif Leaflet dan Google Sheets *DATA FIX*.`;
-  }
-
-  if (query.includes('rangkum') || query.includes('ringkasan') || query.includes('recap')) {
-    return `📋 **Ringkasan Operasional PT AKK Logistics**:
-
-- **DC Banyuwangi**: Beroperasi normal melayani 15 outlet retail Jawa-Bali & luar pulau.
-- **Armada**: 8 Siap Jalan, 3 Dalam Tugas, 1 Servis Berkala.
-- **Kru**: 19 Personel (Sopir Utama, Helper, Cadangan) dalam kondisi siap tempur.
-- **Kepatuhan SOP**: Rotasi Jeda 24H dan verifikasi tiket ASDP berjalan 100%.`;
-  }
-
-  return `Halo! Terkait pertanyaan Anda **"${message}"**:
-
-1. **Status Sistem**: Seluruh data operasional PT AKK Logistics (Armada, Sopir, BBM, Jadwal) dalam kondisi aktif dan terpantau realtime.
-2. **Rekomendasi Navigasi**: Anda dapat melihat detail lebih lanjut di menu navigasi sebelah kiri (Dashboard, Jadwal, Armada, BBM, atau Sparepart).
-3. **Hubungi Admin**: Jika membutuhkan penanganan khusus, silakan kontak Piket Operasional Banyuwangi DC di **0812-1351-3590**.
-
-Ada hal lain seputar SOP atau armada yang bisa saya bantu?`;
+Silakan gunakan data pada Dashboard/Jadwal/Armada yang berasal dari Hostinger MySQL, atau konfigurasikan GEMINI_API_KEY untuk mengaktifkan jawaban AI.`;
 }
 
 async function startServer() {
@@ -196,104 +102,392 @@ async function startServer() {
 
   // Hostinger MySQL Connection & Health Check API
   app.get("/api/db-status", async (_req, res) => {
-    const testResult = await testMysqlConnection();
-    res.json({
-      dbEngine: "Hostinger MySQL (mysql2)",
-      host: process.env.DB_HOST || "127.0.0.1",
-      port: Number(process.env.DB_PORT) || 3306,
-      database: process.env.DB_NAME || "u194997008_akk_operasional",
-      user: process.env.DB_USER || "u194997008_akk_app",
+    const configured = isDatabaseConfigured();
+    const testResult = configured ? await testMysqlConnection() : { success: false, configured: false, message: 'Hostinger MySQL belum dikonfigurasi: DB_NAME, DB_USER, DB_PASSWORD belum diisi di environment variables.' };
+    res.status(200).json({
+      dbEngine: "Hostinger MySQL/MariaDB (mysql2)",
+      configured,
       hasPasswordConfigured: Boolean(process.env.DB_PASSWORD),
-      ...testResult
+      success: testResult.success,
+      message: testResult.success ? 'Database Hostinger terhubung' : (testResult.message || 'Database Hostinger belum dapat diakses')
     });
   });
 
+  const parseJsonColumn = (raw: any): any => {
+    if (raw == null) return null;
+    if (typeof raw === 'object') return raw;
+    try { return JSON.parse(String(raw)); } catch { return null; }
+  };
+
+  const mergePayload = (raw: any, normalized: Record<string, any>) => ({
+    ...(parseJsonColumn(raw) || {}),
+    ...normalized
+  });
+
+  const toMysqlDateTime = (value: any, fallback?: Date): string => {
+    const d = value ? new Date(value) : (fallback || new Date());
+    const safe = Number.isNaN(d.getTime()) ? (fallback || new Date()) : d;
+    return safe.toISOString().slice(0, 19).replace('T', ' ');
+  };
+
+  const upsertScheduleRow = async (sch: any) => {
+    if (!sch?.id) return;
+    const tracking = String(sch.trackingNumber || sch.tracking_number || sch.id);
+    const originCoords = Array.isArray(sch.originCoords) ? sch.originCoords : [-8.1906, 114.3708];
+    await mysqlQuery(
+      `INSERT INTO schedules (
+         id, tracking_number, origin_name, origin_latitude, origin_longitude, store_id, fleet_id, crew_id,
+         crew_helper_id, crew_helper2_id, status, departure_date, estimated_arrival, actual_arrival,
+         cargo_description, cargo_weight_ton, is_inter_island, ferry_booking_code, transit_port, notes, payload_json
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE
+         tracking_number=VALUES(tracking_number), origin_name=VALUES(origin_name), origin_latitude=VALUES(origin_latitude),
+         origin_longitude=VALUES(origin_longitude), store_id=VALUES(store_id), fleet_id=VALUES(fleet_id), crew_id=VALUES(crew_id),
+         crew_helper_id=VALUES(crew_helper_id), crew_helper2_id=VALUES(crew_helper2_id), status=VALUES(status),
+         departure_date=VALUES(departure_date), estimated_arrival=VALUES(estimated_arrival), actual_arrival=VALUES(actual_arrival),
+         cargo_description=VALUES(cargo_description), cargo_weight_ton=VALUES(cargo_weight_ton), is_inter_island=VALUES(is_inter_island),
+         ferry_booking_code=VALUES(ferry_booking_code), transit_port=VALUES(transit_port), notes=VALUES(notes), payload_json=VALUES(payload_json)`,
+      [
+        String(sch.id), tracking, sch.originName || 'Gudang Pusat Banyuwangi DC', Number(originCoords[0] ?? -8.1906), Number(originCoords[1] ?? 114.3708),
+        sch.storeId || null, sch.fleetId || null, sch.crewId || null, sch.crewHelperId || null, sch.crewHelper2Id || null,
+        sch.status || 'scheduled', toMysqlDateTime(sch.departureDate), toMysqlDateTime(sch.estimatedArrival, new Date(Date.now() + 8 * 60 * 60 * 1000)),
+        sch.actualArrival ? toMysqlDateTime(sch.actualArrival) : null, sch.cargoDescription || '-', Number(sch.cargoWeightTon || 0), sch.isInterIsland ? 1 : 0,
+        sch.ferryBookingCode || null, sch.transitPort || null, sch.notes || null, JSON.stringify(sch)
+      ]
+    );
+  };
+
   // Hostinger MySQL Authentication API
-  app.post("/api/auth/login", async (req, res) => {
-    const { email, password } = req.body || {};
-    if (!email || !password) {
-      return res.status(400).json({ success: false, error: "Email dan password wajib diisi" });
+  const hashPassword = (password: string): string => {
+    const salt = crypto.randomBytes(16).toString('hex');
+    const digest = crypto.scryptSync(password, salt, 64).toString('hex');
+    return `scrypt$${salt}$${digest}`;
+  };
+
+  const verifyPassword = (password: string, stored: string): boolean => {
+    if (!stored) return false;
+    if (!stored.startsWith('scrypt$')) {
+      // One-time migration path only: a legacy plaintext DB value is upgraded after login.
+      const storedBuf = Buffer.from(stored);
+      const passwordBuf = Buffer.from(password);
+      return storedBuf.length === passwordBuf.length && crypto.timingSafeEqual(storedBuf, passwordBuf);
     }
+    const [, salt, expectedHex] = stored.split('$');
+    if (!salt || !expectedHex) return false;
+    const actual = crypto.scryptSync(password, salt, 64);
+    const expected = Buffer.from(expectedHex, 'hex');
+    return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+  };
 
-    const cleanEmail = String(email).trim().toLowerCase();
-    const cleanPass = String(password).trim();
-    const isProductionOrDbConfigured = process.env.NODE_ENV === 'production' || Boolean(process.env.DB_PASSWORD);
+  const SESSION_COOKIE = 'akk_session';
+  const SESSION_TTL_SECONDS = 12 * 60 * 60;
+  const getSessionSecret = (): string => {
+    const explicit = String(process.env.SESSION_SECRET || '').trim();
+    if (explicit.length >= 32) return explicit;
+    if (process.env.NODE_ENV === 'production') return '';
+    // Development-only fallback; production wajib memakai SESSION_SECRET terpisah.
+    return String(process.env.DB_PASSWORD || 'akk-dev-session-secret-change-me-32chars').trim();
+  };
+  const base64url = (value: string) => Buffer.from(value, 'utf8').toString('base64url');
+  const signSession = (payload: string, secret: string) => crypto.createHmac('sha256', secret).update(payload).digest('base64url');
 
-    // 1. Try Hostinger MySQL query if database connection is active
+  const createSessionToken = (userId: string): string => {
+    const secret = getSessionSecret();
+    if (!secret) throw new Error('SESSION_SECRET belum dikonfigurasi');
+    const payload = base64url(JSON.stringify({ uid: userId, exp: Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS }));
+    return `${payload}.${signSession(payload, secret)}`;
+  };
+
+  const readCookie = (req: any, name: string): string => {
+    const raw = String(req.headers?.cookie || '');
+    for (const chunk of raw.split(';')) {
+      const idx = chunk.indexOf('=');
+      if (idx < 0) continue;
+      const key = chunk.slice(0, idx).trim();
+      if (key === name) return decodeURIComponent(chunk.slice(idx + 1).trim());
+    }
+    return '';
+  };
+
+  const verifySessionToken = (token: string): { uid: string } | null => {
+    const secret = getSessionSecret();
+    if (!secret || !token || !token.includes('.')) return null;
+    const [payload, signature] = token.split('.', 2);
+    const expected = signSession(payload, secret);
+    const a = Buffer.from(signature || '');
+    const b = Buffer.from(expected);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+    try {
+      const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+      if (!decoded?.uid || Number(decoded.exp || 0) <= Math.floor(Date.now() / 1000)) return null;
+      return { uid: String(decoded.uid) };
+    } catch {
+      return null;
+    }
+  };
+
+  const setSessionCookie = (res: any, token: string) => {
+    const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+    res.setHeader('Set-Cookie', `${SESSION_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}${secure}`);
+  };
+
+  const clearSessionCookie = (res: any) => {
+    const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+    res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0${secure}`);
+  };
+
+  const getSessionUser = async (req: any): Promise<any | null> => {
+    const parsed = verifySessionToken(readCookie(req, SESSION_COOKIE));
+    if (!parsed) return null;
+    const rows = await mysqlQuery<any[]>(
+      `SELECT id, email, full_name, role, department, phone, status, created_at, approved_at, approved_by, notes
+       FROM users WHERE id = ? LIMIT 1`,
+      [parsed.uid]
+    );
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+    const u = rows[0];
+    if (String(u.status || '') !== 'approved') return null;
+    return u;
+  };
+
+  const requireAuth = async (req: any, res: any, next: any) => {
+    try {
+      const user = await getSessionUser(req);
+      if (!user) return res.status(401).json({ success: false, error: 'Sesi login tidak valid atau telah berakhir' });
+      req.authUser = user;
+      next();
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal memverifikasi sesi' });
+    }
+  };
+
+  const requireSuperAdmin = async (req: any, res: any, next: any) => {
+    await requireAuth(req, res, () => {
+      if (req.authUser?.role !== 'super_admin') return res.status(403).json({ success: false, error: 'Akses khusus Super Admin' });
+      next();
+    });
+  };
+
+  const ensureBootstrapAdmin = async (): Promise<void> => {
+    if (!isDatabaseConfigured()) return;
+    try {
+      const rows = await mysqlQuery<any[]>(
+        `SELECT id FROM users WHERE role = 'super_admin' AND status = 'approved' LIMIT 1`
+      );
+      if (Array.isArray(rows) && rows.length > 0) {
+        if (String(process.env.BOOTSTRAP_ADMIN_PASSWORD || '').trim()) {
+          console.warn('[Bootstrap Admin] Super Admin sudah aktif di database. Demi keamanan, segera HAPUS BOOTSTRAP_ADMIN_PASSWORD (serta BOOTSTRAP_ADMIN_EMAIL & BOOTSTRAP_ADMIN_NAME) dari Environment Variables Hostinger.');
+        }
+        return;
+      }
+
+      const email = String(process.env.BOOTSTRAP_ADMIN_EMAIL || '').trim().toLowerCase();
+      const password = String(process.env.BOOTSTRAP_ADMIN_PASSWORD || '');
+      const fullName = String(process.env.BOOTSTRAP_ADMIN_NAME || 'Super Admin').trim() || 'Super Admin';
+
+      if (!email || password.length < 12) {
+        console.warn('[Bootstrap Admin] Belum ada Super Admin approved. Untuk database baru, isi BOOTSTRAP_ADMIN_EMAIL dan BOOTSTRAP_ADMIN_PASSWORD (min. 12 karakter) di Hostinger ENV.');
+        return;
+      }
+
+      const id = `usr-bootstrap-${crypto.createHash('sha256').update(email).digest('hex').slice(0, 16)}`;
+      await mysqlQuery(
+        `INSERT INTO users (id, email, password_hash, full_name, role, department, status, approved_at, notes)
+         VALUES (?, ?, ?, ?, 'super_admin', 'Manajemen & Direksi', 'approved', NOW(), 'Bootstrap Hostinger')
+         ON DUPLICATE KEY UPDATE
+           full_name = VALUES(full_name),
+           role = 'super_admin',
+           status = 'approved',
+           approved_at = COALESCE(approved_at, NOW())`,
+        [id, email, hashPassword(password), fullName]
+      );
+      console.warn('[Bootstrap Admin] Super Admin pertama berhasil dibuat. Setelah login berhasil, segera HAPUS BOOTSTRAP_ADMIN_PASSWORD (dan boleh hapus BOOTSTRAP_ADMIN_EMAIL & BOOTSTRAP_ADMIN_NAME) dari Hostinger ENV.');
+    } catch (err: any) {
+      console.warn('[Bootstrap Admin] Gagal memastikan Super Admin:', err?.message || err);
+    }
+  };
+
+  const publicUser = (u: any) => ({
+    id: u.id,
+    email: u.email,
+    name: u.full_name,
+    fullName: u.full_name,
+    role: u.role,
+    department: u.department || 'Logistics Operations',
+    phone: u.phone || '',
+    status: u.status || 'pending',
+    createdAt: u.created_at || undefined,
+    approvedAt: u.approved_at || undefined,
+    approvedBy: u.approved_by || undefined,
+    notes: u.notes || undefined
+  });
+
+  app.post('/api/auth/login', async (req, res) => {
+    const { email, identifier, password } = req.body || {};
+    const loginIdentifier = String(identifier || email || '').trim().toLowerCase();
+    if (!loginIdentifier || !password) {
+      return res.status(400).json({ success: false, error: 'Email/username dan password wajib diisi' });
+    }
     try {
       const mysqlUsers = await mysqlQuery<any[]>(
-        "SELECT id, email, full_name, role, department, phone, status FROM users WHERE LOWER(email) = ? AND password_hash = ? LIMIT 1",
-        [cleanEmail, cleanPass]
+        `SELECT id, email, password_hash, full_name, role, department, phone, status, created_at, approved_at, approved_by, notes
+         FROM users
+         WHERE LOWER(email) = ? OR LOWER(id) = ? OR LOWER(SUBSTRING_INDEX(email, '@', 1)) = ?
+            OR LOWER(full_name) = ? OR LOWER(SUBSTRING_INDEX(full_name, ' ', 1)) = ?
+         LIMIT 1`,
+        [loginIdentifier, loginIdentifier, loginIdentifier, loginIdentifier, loginIdentifier]
       );
-
-      if (Array.isArray(mysqlUsers) && mysqlUsers.length > 0) {
-        const u = mysqlUsers[0];
-        return res.json({
-          success: true,
-          source: "hostinger_mysql",
-          user: {
-            id: u.id,
-            email: u.email,
-            name: u.full_name,
-            role: u.role,
-            department: u.department || "Logistics Operations",
-            phone: u.phone || "",
-            status: u.status || "approved"
-          }
-        });
+      if (!Array.isArray(mysqlUsers) || mysqlUsers.length === 0) {
+        return res.status(401).json({ success: false, error: 'Email/username atau password salah' });
       }
-    } catch (mysqlErr) {
-      console.warn("Hostinger MySQL auth query error:", mysqlErr);
+      const u = mysqlUsers[0];
+      if (String(u.status || '') !== 'approved') {
+        return res.status(403).json({ success: false, error: `Akun berstatus ${u.status || 'pending'} dan belum dapat login` });
+      }
+      const cleanPass = String(password);
+      if (!verifyPassword(cleanPass, String(u.password_hash || ''))) {
+        return res.status(401).json({ success: false, error: 'Email/username atau password salah' });
+      }
+      if (!String(u.password_hash || '').startsWith('scrypt$')) {
+        await mysqlQuery('UPDATE users SET password_hash = ? WHERE id = ?', [hashPassword(cleanPass), u.id]);
+      }
+      const token = createSessionToken(String(u.id));
+      setSessionCookie(res, token);
+      return res.json({ success: true, source: 'hostinger_mysql', user: publicUser(u) });
+    } catch (err: any) {
+      console.error('[Auth MySQL Error]', err);
+      return res.status(503).json({ success: false, error: 'Database Hostinger belum dapat diakses. Periksa environment DB dan schema MySQL.' });
     }
-
-    // 2. In Production / DB Configured mode, strict MySQL verification is required (NO HARDCODED FALLBACK)
-    if (isProductionOrDbConfigured) {
-      return res.status(401).json({
-        success: false,
-        error: "Email atau password tidak terdaftar di database Hostinger MySQL."
-      });
-    }
-
-    // 3. Fallback User Verification ONLY for local/offline development mode (NODE_ENV !== 'production' && !DB_PASSWORD)
-    const defaultAccounts = [
-      { id: 'usr-001', email: 'bayun791@gmail.com', name: 'Bayu Novianto Dimas Permana, S.Si', pass: 'Bayu1509', role: 'super_admin' },
-      { id: 'usr-002', email: 'hendri@akk.co.id', name: 'Hendri ST', pass: 'Hendri', role: 'spv_logistik' },
-      { id: 'usr-003', email: 'zainul@akk.co.id', name: 'Zainul Agustiar', pass: 'driver123', role: 'driver' }
-    ];
-
-    const matched = defaultAccounts.find(
-      acc => (acc.email.toLowerCase() === cleanEmail || cleanEmail.includes(acc.name.toLowerCase().split(' ')[0])) &&
-             (cleanPass === acc.pass || cleanPass.toLowerCase() === acc.name.toLowerCase().split(' ')[0])
-    );
-
-    if (matched) {
-      return res.json({
-        success: true,
-        source: "local_memory_fallback",
-        user: {
-          id: matched.id,
-          email: matched.email,
-          name: matched.name,
-          role: matched.role,
-          department: "Logistics Operations",
-          status: "approved"
-        }
-      });
-    }
-
-    return res.status(401).json({ success: false, error: "Email atau password tidak terdaftar di sistem" });
   });
 
-  app.get("/api/auth/me", (_req, res) => {
-    res.json({ success: true, message: "Hostinger Session Active" });
+  app.post('/api/auth/register', async (req, res) => {
+    const { fullName, email, phone, department, password } = req.body || {};
+    const cleanName = String(fullName || '').trim();
+    const cleanEmail = String(email || '').trim().toLowerCase();
+    const cleanPassword = String(password || '');
+    if (!cleanName || !cleanEmail || !cleanEmail.includes('@') || cleanPassword.length < 8) {
+      return res.status(400).json({ success: false, error: 'Nama, email valid, dan password minimal 8 karakter wajib diisi' });
+    }
+    try {
+      const id = `usr-${crypto.randomBytes(6).toString('hex')}`;
+      await mysqlQuery(
+        `INSERT INTO users (id, email, password_hash, full_name, role, department, phone, status, created_at, notes)
+         VALUES (?, ?, ?, ?, 'unassigned', ?, ?, 'pending', NOW(), ?)`,
+        [id, cleanEmail, hashPassword(cleanPassword), cleanName, String(department || 'Logistik'), String(phone || ''), 'Pendaftaran mandiri - menunggu persetujuan Super Admin']
+      );
+      const rows = await mysqlQuery<any[]>('SELECT id, email, full_name, role, department, phone, status, created_at, notes FROM users WHERE id = ? LIMIT 1', [id]);
+      return res.status(201).json({ success: true, source: 'hostinger_mysql', user: publicUser(rows[0]) });
+    } catch (err: any) {
+      const duplicate = String(err?.code || '').includes('DUP_ENTRY') || String(err?.message || '').toLowerCase().includes('duplicate');
+      return res.status(duplicate ? 409 : 503).json({ success: false, error: duplicate ? 'Email sudah terdaftar' : (err?.message || 'Gagal mendaftarkan akun') });
+    }
   });
 
-  app.post("/api/auth/logout", (_req, res) => {
-    res.json({ success: true, message: "Logged out successfully" });
+  app.get('/api/auth/me', async (req, res) => {
+    try {
+      const user = await getSessionUser(req);
+      if (!user) return res.status(401).json({ success: false, error: 'Sesi tidak aktif' });
+      return res.json({ success: true, backend: 'hostinger_mysql', user: publicUser(user) });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal membaca sesi' });
+    }
+  });
+
+  app.post('/api/auth/logout', (_req, res) => {
+    clearSessionCookie(res);
+    res.json({ success: true, message: 'Logged out successfully' });
+  });
+
+  // User Management is persisted in Hostinger MySQL and restricted to Super Admin.
+  app.get('/api/users', requireSuperAdmin, async (_req, res) => {
+    try {
+      const rows = await mysqlQuery<any[]>(`SELECT id, email, full_name, role, department, phone, status, created_at, approved_at, approved_by, notes FROM users ORDER BY created_at DESC, full_name ASC`);
+      return res.json({ success: true, source: 'hostinger_mysql', data: rows.map(publicUser) });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal membaca pengguna' });
+    }
+  });
+
+  app.post('/api/users', requireSuperAdmin, async (req: any, res) => {
+    const data = req.body || {};
+    const cleanName = String(data.fullName || data.name || '').trim();
+    const cleanEmail = String(data.email || '').trim().toLowerCase();
+    const cleanPassword = String(data.password || '');
+    const allowedRoles = new Set(['super_admin','dispatcher','spv_logistik','operasional','security','driver','crew_helper','sales_admin','purchasing_admin','hr_admin','finance_tax_admin','warehouse_admin','marketing_online','marketing_offline','unassigned']);
+    const allowedStatuses = new Set(['pending','approved','rejected','inactive']);
+    const role = allowedRoles.has(String(data.role)) ? String(data.role) : 'unassigned';
+    const status = allowedStatuses.has(String(data.status)) ? String(data.status) : 'pending';
+    if (!cleanName || !cleanEmail || !cleanEmail.includes('@') || cleanPassword.length < 8) {
+      return res.status(400).json({ success: false, error: 'Nama, email valid, dan password minimal 8 karakter wajib diisi' });
+    }
+    try {
+      const id = String(data.id || `usr-${crypto.randomBytes(6).toString('hex')}`);
+      await mysqlQuery(
+        `INSERT INTO users (id, email, password_hash, full_name, role, department, phone, status, approved_at, approved_by, notes, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [id, cleanEmail, hashPassword(cleanPassword), cleanName, role, String(data.department || 'Logistik'), String(data.phone || ''), status,
+         status === 'approved' ? new Date() : null, status === 'approved' ? (req.authUser?.full_name || 'Super Admin') : null, data.notes || null]
+      );
+      const rows = await mysqlQuery<any[]>('SELECT id, email, full_name, role, department, phone, status, created_at, approved_at, approved_by, notes FROM users WHERE id = ? LIMIT 1', [id]);
+      return res.status(201).json({ success: true, source: 'hostinger_mysql', user: publicUser(rows[0]) });
+    } catch (err: any) {
+      const duplicate = String(err?.code || '').includes('DUP_ENTRY') || String(err?.message || '').toLowerCase().includes('duplicate');
+      return res.status(duplicate ? 409 : 503).json({ success: false, error: duplicate ? 'Email sudah terdaftar' : (err?.message || 'Gagal membuat pengguna') });
+    }
+  });
+
+  app.put('/api/users/:id', requireSuperAdmin, async (req: any, res) => {
+    const id = req.params.id;
+    const data = req.body || {};
+    const allowedRoles = new Set(['super_admin','dispatcher','spv_logistik','operasional','security','driver','crew_helper','sales_admin','purchasing_admin','hr_admin','finance_tax_admin','warehouse_admin','marketing_online','marketing_offline','unassigned']);
+    const allowedStatuses = new Set(['pending','approved','rejected','inactive']);
+    if (data.role !== undefined && !allowedRoles.has(String(data.role))) return res.status(400).json({ success: false, error: 'Role tidak valid' });
+    if (data.status !== undefined && !allowedStatuses.has(String(data.status))) return res.status(400).json({ success: false, error: 'Status tidak valid' });
+    try {
+      const existing = await mysqlQuery<any[]>('SELECT * FROM users WHERE id = ? LIMIT 1', [id]);
+      if (!Array.isArray(existing) || existing.length === 0) return res.status(404).json({ success: false, error: 'User tidak ditemukan' });
+      const u = existing[0];
+      const nextStatus = data.status ?? u.status;
+      const approvedAt = nextStatus === 'approved' ? (u.approved_at || new Date()) : u.approved_at;
+      const approvedBy = nextStatus === 'approved' ? (data.approvedBy || req.authUser?.full_name || u.approved_by) : u.approved_by;
+      await mysqlQuery(
+        `UPDATE users SET email=?, full_name=?, role=?, department=?, phone=?, status=?, notes=?, approved_at=?, approved_by=?, updated_at=NOW() WHERE id=?`,
+        [
+          String(data.email ?? u.email).trim().toLowerCase(), String(data.fullName ?? data.name ?? u.full_name).trim(), data.role ?? u.role,
+          data.department ?? u.department, data.phone ?? u.phone, nextStatus, data.notes ?? u.notes, approvedAt, approvedBy, id
+        ]
+      );
+      const rows = await mysqlQuery<any[]>('SELECT id, email, full_name, role, department, phone, status, created_at, approved_at, approved_by, notes FROM users WHERE id = ? LIMIT 1', [id]);
+      return res.json({ success: true, source: 'hostinger_mysql', user: publicUser(rows[0]) });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal memperbarui pengguna' });
+    }
+  });
+
+  app.post('/api/users/:id/password', requireSuperAdmin, async (req, res) => {
+    const password = String(req.body?.password || '');
+    if (password.length < 8) return res.status(400).json({ success: false, error: 'Password minimal 8 karakter' });
+    try {
+      const result: any = await mysqlQuery('UPDATE users SET password_hash=?, updated_at=NOW() WHERE id=?', [hashPassword(password), req.params.id]);
+      if (!Number(result?.affectedRows || 0)) return res.status(404).json({ success: false, error: 'User tidak ditemukan' });
+      return res.json({ success: true });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal reset password' });
+    }
+  });
+
+  app.delete('/api/users/:id', requireSuperAdmin, async (req: any, res) => {
+    if (String(req.authUser?.id) === String(req.params.id)) return res.status(400).json({ success: false, error: 'Super Admin tidak dapat menghapus akun yang sedang digunakan' });
+    try {
+      const result: any = await mysqlQuery('DELETE FROM users WHERE id = ?', [req.params.id]);
+      return res.json({ success: true, removed: Number(result?.affectedRows || 0) });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal menghapus pengguna' });
+    }
   });
 
   // API route for Chat
-  app.post("/api/chat", async (req, res) => {
+  app.post("/api/chat", requireAuth, async (req, res) => {
     const { message, history, contextTab } = req.body;
     try {
       const reply = await generateChatReply(message || '', contextTab, history);
@@ -305,25 +499,13 @@ async function startServer() {
   });
 
   // API route for Warehouse Gemini AI Vision Scan
-  app.post("/api/warehouse/ai-vision-scan", async (req, res) => {
+  app.post("/api/warehouse/ai-vision-scan", requireAuth, async (req, res) => {
     const { photoDataUrl, mode } = req.body || {};
     try {
       if (!genAI) {
-        return res.json({
-          success: true,
-          fallback: true,
-          analysis: {
-            skuCode: 'AKK-KBX-001',
-            skuName: 'Karton Box Corrugated B-Flute 60x40x40 cm (Polos)',
-            category: 'Karton Box',
-            detectedQty: 100,
-            unit: 'Pcs',
-            qcStatus: 'QC Lolos (100%)',
-            suggestedFloor: 1,
-            suggestedBin: 'A-01-L1',
-            suggestedLevel: 'Level 1 (Floor Pallet Heavy)',
-            reasoning: 'Karton Box Corrugated bervolume besar dialokasikan di Lantai 1 Ground Pallet dekat Loading Dock.'
-          }
+        return res.status(503).json({
+          success: false,
+          error: 'GEMINI_API_KEY belum dikonfigurasi. Scan AI tidak dijalankan agar sistem tidak mengarang hasil QC/slotting.'
         });
       }
 
@@ -389,55 +571,21 @@ Kembalikan respon DALAM FORMAT JSON MURNI TANPA MARKDOWN BACKTICKS:
       return res.json({ success: true, analysis: parsed });
     } catch (err: any) {
       console.warn("AI Vision scan error:", err?.message || err);
-      return res.json({
-        success: true,
-        fallback: true,
-        analysis: {
-          skuCode: 'AKK-KBX-001',
-          skuName: 'Karton Box Corrugated B-Flute 60x40x40 cm (Polos)',
-          category: 'Karton Box',
-          detectedQty: 100,
-          unit: 'Pcs',
-          qcStatus: 'QC Lolos (100%)',
-          suggestedFloor: 1,
-          suggestedBin: 'A-01-L1',
-          suggestedLevel: 'Level 1 (Floor Pallet Heavy)',
-          reasoning: 'Karton Box Corrugated volume besar dialokasikan di Lantai 1 Ground Pallet dekat Loading Dock.'
-        }
+      return res.status(502).json({
+        success: false,
+        error: 'Analisis AI Vision gagal. Tidak ada data contoh yang dipakai sebagai hasil scan nyata.'
       });
     }
   });
 
   // API route for Warehouse Gemini AI Slotting Advisor
-  app.post("/api/warehouse/ai-slotting-advisor", async (req, res) => {
+  app.post("/api/warehouse/ai-slotting-advisor", requireAuth, async (req, res) => {
     const { currentFloor } = req.body || {};
     try {
       if (!genAI) {
-        return res.json({
-          success: true,
-          fallback: true,
-          data: {
-            recommendations: [
-              {
-                title: "Pengelompokan Karton Box Fast-Moving di Lorong A",
-                category: "Karton Box",
-                action: "Posisikan SKU AKK-KBX-001 di Lantai 1 Level 1 menghadap Dock 1.",
-                impact: "Memangkas waktu tempuh forklift sebesar 22% saat penyiapan armada pagi."
-              },
-              {
-                title: "Relokasi Kemasan Food Grade ke Lantai 2 Mezzanine",
-                category: "Food Grade",
-                action: "Simpan Box Ivory 22x22 di Rak E-01 Level 2 yang bersih dan bebas debu lantai.",
-                impact: "Menjaga standar higienitas food grade dan memaksimalkan ruang vertikal mezzanine."
-              },
-              {
-                title: "Buffer Stock Material Pendukung di Lantai 2 Lorong G",
-                category: "Lakban & Aksesoris",
-                action: "Karton lakban OPP dan Strapping Band dialokasikan di rak bertingkat Level 2/3.",
-                impact: "Mengurangi kepadatan jalur forklift utama lantai 1."
-              }
-            ]
-          }
+        return res.status(503).json({
+          success: false,
+          error: 'GEMINI_API_KEY belum dikonfigurasi. Rekomendasi slotting AI tidak dibuat dari data contoh.'
         });
       }
 
@@ -474,49 +622,23 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       return res.json({ success: true, data: parsed });
     } catch (err: any) {
       console.warn("AI Slotting Advisor error:", err?.message || err);
-      return res.json({
-        success: true,
-        fallback: true,
-        data: {
-          recommendations: [
-            {
-              title: "Pengelompokan Karton Box Fast-Moving di Lorong A",
-              category: "Karton Box",
-              action: "Posisikan SKU AKK-KBX-001 di Lantai 1 Level 1 menghadap Dock 1.",
-              impact: "Memangkas waktu tempuh forklift sebesar 22% saat penyiapan armada pagi."
-            },
-            {
-              title: "Relokasi Kemasan Food Grade ke Lantai 2 Mezzanine",
-              category: "Food Grade",
-              action: "Simpan Box Ivory 22x22 di Rak E-01 Level 2 yang higienis.",
-              impact: "Menjaga standar sanitasi food grade dan memaksimalkan ruang vertikal mezzanine."
-            },
-            {
-              title: "Buffer Stock Material Pendukung di Lantai 2 Lorong G",
-              category: "Lakban & Aksesoris",
-              action: "Karton lakban OPP dan Strapping Band dialokasikan di rak bertingkat Level 2/3.",
-              impact: "Mengurangi kepadatan jalur forklift utama lantai 1."
-            }
-          ]
-        }
+      return res.status(502).json({
+        success: false,
+        error: 'Rekomendasi AI Slotting gagal. Sistem tidak mengembalikan rekomendasi contoh sebagai hasil nyata.'
       });
     }
   });
 
-  // API route for WhatsApp notification
-  app.post("/api/notify-whatsapp", async (req, res) => {
-    const { phoneNumber, message } = req.body;
-    
+  // API route for WhatsApp notification.
+  // Jangan mengembalikan sukses palsu: bridge/provider harus benar-benar dikonfigurasi dan dihubungkan.
+  app.post("/api/notify-whatsapp", requireAuth, async (_req, res) => {
     if (!process.env.WHATSAPP_API_KEY) {
-      return res.status(500).json({ error: "WhatsApp API key not configured" });
+      return res.status(503).json({ success: false, error: "WHATSAPP_API_KEY belum dikonfigurasi" });
     }
-
-    try {
-      res.json({ success: true, message: "Notification sent successfully" });
-    } catch (error) {
-      console.error("Failed to send WhatsApp notification:", error);
-      res.status(500).json({ error: "Failed to send notification" });
-    }
+    return res.status(501).json({
+      success: false,
+      error: "Adapter WhatsApp provider belum dikonfigurasi pada hosting. Endpoint tidak mengklaim pesan terkirim sebelum provider/bridge benar-benar terhubung."
+    });
   });
 
   // In-memory cache for Google Sheets CSV responses to prevent redundant slow requests & timeouts
@@ -524,7 +646,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
   const SHEET_CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes
 
   // API route to proxy public Google Sheets CSV export (bypasses browser CORS & network drops)
-  app.get("/api/proxy-sheet", async (req, res) => {
+  app.get("/api/proxy-sheet", requireAuth, async (req, res) => {
     const rawUrl = req.query.url as string;
     if (!rawUrl || !rawUrl.startsWith("https://docs.google.com/spreadsheets/")) {
       return res.status(400).json({ error: "Invalid Google Sheets URL" });
@@ -635,7 +757,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
   });
 
   // API route for automated backend entity sync & audit logging
-  app.post("/api/sync-entity", async (req, res) => {
+  app.post("/api/sync-entity", requireAuth, async (req, res) => {
     try {
       const payload = req.body;
       const entityType = payload?.entityType || payload?.type || 'unknown';
@@ -648,14 +770,61 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
         status: payload?.data?.status || payload?.status
       });
 
+      // Hanya entitas yang benar-benar memiliki adapter persistence boleh mengembalikan sukses.
+      // Endpoint lama sebelumnya mengklaim semua tipe berhasil walau tidak menulis apa pun.
+      if (entityType !== 'schedule') {
+        return res.status(501).json({
+          success: false,
+          source: 'hostinger_mysql',
+          error: `Adapter persistence untuk entitas ${entityType} belum diimplementasikan; perubahan tidak diklaim tersimpan.`
+        });
+      }
+
+      // Persist single schedule mutations into the Hostinger MySQL snapshot.
+      // This keeps normal create/edit/delete actions durable without relying on local JSON files.
+      if (entityType === 'schedule') {
+        const rows = await mysqlQuery<any[]>("SELECT state_json FROM app_state WHERE state_key = ? LIMIT 1", ['schedules_payload']);
+        const existingPayload = Array.isArray(rows) && rows.length > 0
+          ? (typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json)
+          : { schedules: [], weeks: [], month: 'Januari', year: new Date().getFullYear(), count: 0 };
+        const schedules = Array.isArray(existingPayload?.schedules) ? [...existingPayload.schedules] : [];
+        const scheduleData = payload?.data || {};
+        const targetId = String(entityId || scheduleData?.id || '');
+        const index = schedules.findIndex((sch: any) => String(sch?.id || '') === targetId);
+
+        if (action === 'delete') {
+          existingPayload.schedules = schedules.filter((sch: any) => String(sch?.id || '') !== targetId);
+        } else if (index >= 0) {
+          schedules[index] = { ...schedules[index], ...scheduleData, id: scheduleData?.id || targetId };
+          existingPayload.schedules = schedules;
+        } else if (targetId && scheduleData && Object.keys(scheduleData).length > 0) {
+          existingPayload.schedules = [{ ...scheduleData, id: scheduleData?.id || targetId }, ...schedules];
+        }
+
+        existingPayload.updatedAt = new Date().toISOString();
+        existingPayload.source = 'store_middleware';
+        existingPayload.count = Array.isArray(existingPayload.schedules) ? existingPayload.schedules.length : 0;
+        await mysqlQuery(
+          `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
+           ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+          ['schedules_payload', JSON.stringify(existingPayload)]
+        );
+
+        if (action === 'delete') {
+          await mysqlQuery('DELETE FROM schedules WHERE id = ?', [targetId]);
+        } else if (scheduleData?.id || targetId) {
+          await upsertScheduleRow({ ...scheduleData, id: scheduleData?.id || targetId });
+        }
+      }
+
       res.json({
         success: true,
-        message: `Entitas ${entityType} (${action}) berhasil disinkronkan otomatis ke Backend & Storage`,
+        source: 'hostinger_mysql',
+        message: `Entitas ${entityType} (${action}) berhasil disinkronkan ke Hostinger MySQL`,
         timestamp: new Date().toISOString(),
         entityType,
         action,
-        entityId,
-        syncedData: payload
+        entityId
       });
     } catch (err: any) {
       console.error("[Store Middleware Error]", err);
@@ -663,452 +832,363 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   });
 
-  // API route for batch entity synchronization
-  app.post("/api/sync-batch", async (req, res) => {
-    try {
-      const { events } = req.body;
-      const items = Array.isArray(events) ? events : [];
-      console.info(`[Store Middleware Auto-Writer] Batch Sync: ${items.length} items processed`);
-
-      res.json({
-        success: true,
-        message: `${items.length} entitas berhasil disinkronkan dalam batch`,
-        processedCount: items.length,
-        timestamp: new Date().toISOString()
-      });
-    } catch (err: any) {
-      console.error("[Store Middleware Batch Error]", err);
-      res.status(500).json({ success: false, error: err?.message || "Batch sync failed" });
-    }
+  // API route for batch entity synchronization.
+  // Belum ada adapter generic yang aman; jangan klaim batch berhasil tanpa write DB nyata.
+  app.post("/api/sync-batch", requireAuth, async (req, res) => {
+    const items = Array.isArray(req.body?.events) ? req.body.events : [];
+    return res.status(501).json({
+      success: false,
+      source: 'hostinger_mysql',
+      processedCount: 0,
+      unsupportedCount: items.length,
+      error: 'Generic batch persistence belum diimplementasikan. Gunakan endpoint CRUD khusus per entitas agar write database dapat diverifikasi.'
+    });
   });
 
-  // Persistent Server-side Schedules Database Storage (Hostinger MySQL + JSON Fallback)
-  const SCHEDULES_DB_FILE = path.join(process.cwd(), 'data', 'schedules_database.json');
-
-  app.post("/api/schedules/persist", express.json({ limit: '50mb' }), async (req, res) => {
+  // Persistent schedules snapshot in Hostinger MySQL (no local JSON files)
+  app.post("/api/schedules/persist", requireAuth, express.json({ limit: '50mb' }), async (req, res) => {
     try {
       const { schedules, weeks, month, year, source } = req.body || {};
-      const items = Array.isArray(schedules) ? schedules : [];
-      const count = items.length;
+      const count = Array.isArray(schedules) ? schedules.length : 0;
       const weeksCount = Array.isArray(weeks) ? weeks.length : 0;
-
-      // 1. Upsert schedules into Hostinger MySQL if connected
-      let mysqlSavedCount = 0;
-      if (count > 0) {
-        try {
-          for (const s of items) {
-            const schId = s.id || `sch-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-            const trackingNum = s.trackingNumber || s.tracking_number || `TRK-${Date.now()}`;
-            const originName = s.originName || 'Gudang Pusat Banyuwangi DC';
-            const originLat = Number(s.originLatitude || -8.1906);
-            const originLng = Number(s.originLongitude || 114.3708);
-            const storeId = s.storeId || s.store_id || null;
-            const fleetId = s.fleetId || s.fleet_id || null;
-            const crewId = s.crewId || s.crew_id || null;
-            const status = s.status || 'scheduled';
-            const depDate = s.departureDate ? new Date(s.departureDate) : new Date();
-            const estArr = s.estimatedArrival ? new Date(s.estimatedArrival) : new Date(depDate.getTime() + 8 * 3600 * 1000);
-            const actArr = s.actualArrival ? new Date(s.actualArrival) : null;
-            const cargoDesc = s.cargoDescription || 'Pengiriman Kemasan AKK';
-            const cargoWeight = Number(s.cargoWeightTon || 0);
-            const isInterIsland = s.isInterIsland ? 1 : 0;
-            const ferryCode = s.ferryBookingCode || null;
-            const transitPort = s.transitPort || null;
-            const notes = s.notes || null;
-
-            await mysqlQuery(
-              `INSERT INTO schedules (
-                id, tracking_number, origin_name, origin_latitude, origin_longitude,
-                store_id, fleet_id, crew_id, status, departure_date, estimated_arrival,
-                actual_arrival, cargo_description, cargo_weight_ton, is_inter_island,
-                ferry_booking_code, transit_port, notes
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-              ON DUPLICATE KEY UPDATE
-                tracking_number=VALUES(tracking_number),
-                origin_name=VALUES(origin_name),
-                store_id=VALUES(store_id),
-                fleet_id=VALUES(fleet_id),
-                crew_id=VALUES(crew_id),
-                status=VALUES(status),
-                departure_date=VALUES(departure_date),
-                estimated_arrival=VALUES(estimated_arrival),
-                actual_arrival=VALUES(actual_arrival),
-                cargo_description=VALUES(cargo_description),
-                cargo_weight_ton=VALUES(cargo_weight_ton),
-                is_inter_island=VALUES(is_inter_island),
-                ferry_booking_code=VALUES(ferry_booking_code),
-                transit_port=VALUES(transit_port),
-                notes=VALUES(notes)`,
-              [
-                schId, trackingNum, originName, originLat, originLng,
-                storeId, fleetId, crewId, status, depDate, estArr,
-                actArr, cargoDesc, cargoWeight, isInterIsland,
-                ferryCode, transitPort, notes
-              ]
-            );
-            mysqlSavedCount++;
-          }
-        } catch (mysqlErr) {
-          console.warn("[Hostinger MySQL Schedules Persist Error]:", mysqlErr);
-        }
-      }
-
-      // 2. Mirror to local JSON file for offline fallback
       const payload = {
         updatedAt: new Date().toISOString(),
         source: source || 'upload',
         month: month || 'Januari',
         year: year || 2026,
         count,
-        schedules: items,
+        schedules: Array.isArray(schedules) ? schedules : [],
         weeks: Array.isArray(weeks) ? weeks : []
       };
 
-      fs.mkdirSync(path.dirname(SCHEDULES_DB_FILE), { recursive: true });
-      fs.writeFileSync(SCHEDULES_DB_FILE, JSON.stringify(payload, null, 2), 'utf-8');
+      await mysqlQuery(
+        `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
+         ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+        ['schedules_payload', JSON.stringify(payload)]
+      );
 
-      console.info(`[Database Persistence] Saved ${count} schedules to MySQL (${mysqlSavedCount} synced) & JSON disk (${SCHEDULES_DB_FILE})`);
-      res.json({
+      // Keep a normalized schedule table in sync for reporting/search while preserving the complete object in payload_json/app_state.
+      if (Array.isArray(schedules)) {
+        for (const schedule of schedules) {
+          await upsertScheduleRow(schedule);
+        }
+      }
+
+      return res.json({
         success: true,
-        source: mysqlSavedCount > 0 ? "hostinger_mysql" : "local_file",
-        message: `${count} jadwal pengiriman berhasil disimpan permanen di database Hostinger MySQL & server`,
+        source: 'hostinger_mysql',
+        message: `${count} jadwal pengiriman berhasil disimpan permanen di Hostinger MySQL`,
         count,
-        mysqlSavedCount,
         weeksCount,
         timestamp: payload.updatedAt
       });
     } catch (err: any) {
-      console.error("[Database Persistence Error]", err);
-      res.status(500).json({ success: false, error: err?.message || "Gagal menyimpan jadwal ke database server" });
+      console.error("[Schedule MySQL Persistence Error]", err);
+      return res.status(503).json({ success: false, error: err?.message || "Gagal menyimpan jadwal ke Hostinger MySQL" });
     }
   });
 
-  app.get("/api/schedules/persisted", async (req, res) => {
-    // 1. Try querying Hostinger MySQL schedules table first
+  app.get("/api/schedules/persisted", requireAuth, async (_req, res) => {
     try {
-      const mysqlRows = await mysqlQuery<any[]>("SELECT * FROM schedules ORDER BY departure_date DESC");
-      if (Array.isArray(mysqlRows) && mysqlRows.length > 0) {
-        const mappedSchedules = mysqlRows.map(s => ({
-          id: s.id,
-          trackingNumber: s.tracking_number,
-          originName: s.origin_name,
-          originLatitude: Number(s.origin_latitude || -8.1906),
-          originLongitude: Number(s.origin_longitude || 114.3708),
-          storeId: s.store_id,
-          fleetId: s.fleet_id,
-          crewId: s.crew_id,
-          status: s.status,
-          departureDate: s.departure_date ? new Date(s.departure_date).toISOString() : new Date().toISOString(),
-          estimatedArrival: s.estimated_arrival ? new Date(s.estimated_arrival).toISOString() : new Date().toISOString(),
-          actualArrival: s.actual_arrival ? new Date(s.actual_arrival).toISOString() : undefined,
-          cargoDescription: s.cargo_description,
-          cargoWeightTon: Number(s.cargo_weight_ton || 0),
-          isInterIsland: Boolean(s.is_inter_island),
-          ferryBookingCode: s.ferry_booking_code || undefined,
-          transitPort: s.transit_port || undefined,
-          notes: s.notes || undefined
-        }));
-
-        return res.json({
-          success: true,
-          source: "hostinger_mysql",
-          exists: true,
-          schedules: mappedSchedules,
-          count: mappedSchedules.length
-        });
+      const rows = await mysqlQuery<any[]>("SELECT state_json, updated_at FROM app_state WHERE state_key = ? LIMIT 1", ['schedules_payload']);
+      if (!Array.isArray(rows) || rows.length === 0) {
+        return res.json({ success: true, exists: false, source: 'hostinger_mysql', schedules: [], weeks: [], count: 0 });
       }
-    } catch (mysqlErr) {
-      console.warn("Hostinger MySQL schedules read fallback:", mysqlErr);
-    }
-
-    // 2. Local JSON disk fallback
-    try {
-      if (fs.existsSync(SCHEDULES_DB_FILE)) {
-        const raw = fs.readFileSync(SCHEDULES_DB_FILE, 'utf-8');
-        const data = JSON.parse(raw);
-        return res.json({
-          success: true,
-          source: "local_file_fallback",
-          exists: true,
-          ...data
-        });
-      }
-      return res.json({ success: true, exists: false, schedules: [], weeks: [], count: 0 });
+      const raw = rows[0].state_json;
+      const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      return res.json({ success: true, exists: true, source: 'hostinger_mysql', ...data });
     } catch (err: any) {
-      console.error("[Database Fetch Error]", err);
-      res.status(500).json({ success: false, error: err?.message || "Gagal membaca database server" });
+      console.error("[Schedule MySQL Fetch Error]", err);
+      return res.status(503).json({ success: false, error: err?.message || "Gagal membaca jadwal dari Hostinger MySQL" });
     }
   });
 
-  // Persistent Fleets and Crews Database Storage
-  const FLEETS_DB_FILE = path.join(process.cwd(), 'data', 'fleets_database.json');
-  const CREWS_DB_FILE = path.join(process.cwd(), 'data', 'crews_database.json');
-
-  const readJsonDb = (filePath: string, defaultData: any) => {
+  app.patch("/api/schedules/:id/status", requireAuth, express.json(), async (req, res) => {
     try {
-      if (fs.existsSync(filePath)) {
-        return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      const scheduleId = req.params.id;
+      const { status, notes, trackingNumber, actualArrival } = req.body || {};
+      const rows = await mysqlQuery<any[]>("SELECT state_json FROM app_state WHERE state_key = ? LIMIT 1", ['schedules_payload']);
+      if (!Array.isArray(rows) || rows.length === 0) {
+        return res.status(404).json({ success: false, error: 'Snapshot jadwal belum tersedia' });
       }
-    } catch (e) {
-      console.warn(`[DB Read Warning] ${filePath}:`, e);
+      const raw = rows[0].state_json;
+      const payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      const schedules = Array.isArray(payload?.schedules) ? payload.schedules : [];
+      let changed = false;
+      payload.schedules = schedules.map((sch: any) => {
+        if (sch?.id === scheduleId || (trackingNumber && sch?.trackingNumber === trackingNumber)) {
+          changed = true;
+          return {
+            ...sch,
+            status: status || sch.status,
+            notes: notes !== undefined ? notes : sch.notes,
+            actualArrival: actualArrival || (status === 'delivered' ? new Date().toISOString() : sch.actualArrival)
+          };
+        }
+        return sch;
+      });
+      if (!changed) return res.status(404).json({ success: false, error: 'Jadwal tidak ditemukan' });
+      payload.updatedAt = new Date().toISOString();
+      payload.count = payload.schedules.length;
+      await mysqlQuery("UPDATE app_state SET state_json = ?, updated_at = NOW() WHERE state_key = ?", [JSON.stringify(payload), 'schedules_payload']);
+      await mysqlQuery(
+        `UPDATE schedules SET status=COALESCE(?, status), notes=COALESCE(?, notes), actual_arrival=COALESCE(?, actual_arrival), updated_at=NOW()
+         WHERE id=? OR tracking_number=?`,
+        [status || null, notes !== undefined ? notes : null, actualArrival ? toMysqlDateTime(actualArrival) : (status === 'delivered' ? toMysqlDateTime(new Date()) : null), scheduleId, trackingNumber || '']
+      );
+      return res.json({ success: true, source: 'hostinger_mysql', timestamp: payload.updatedAt });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal memperbarui status jadwal' });
     }
-    return defaultData;
-  };
+  });
 
-  const writeJsonDb = (filePath: string, data: any) => {
-    try {
-      fs.mkdirSync(path.dirname(filePath), { recursive: true });
-      fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
-    } catch (e) {
-      console.error(`[DB Write Error] ${filePath}:`, e);
-    }
-  };
-
-  // REST API for Fleets (Hostinger MySQL + JSON Fallback)
-  app.get("/api/fleets", async (req, res) => {
+  // REST API for Fleets - Hostinger MySQL is the single source of truth
+  app.get("/api/fleets", requireAuth, async (_req, res) => {
     try {
       const mysqlFleets = await mysqlQuery<any[]>("SELECT * FROM fleets ORDER BY plate_number ASC");
-      if (Array.isArray(mysqlFleets) && mysqlFleets.length > 0) {
-        const mapped = mysqlFleets.map(f => ({
-          id: f.id,
-          plateNumber: f.plate_number,
-          vehicleType: f.vehicle_type,
-          tonnageCapacity: Number(f.tonnage_capacity || 0),
-          currentTonnage: Number(f.current_tonnage || 0),
-          status: f.status,
-          gpsImei: f.gps_imei,
-          fuelLevelPercent: f.fuel_level_percent,
-          odometerKm: f.odometer_km,
-          year: f.year
-        }));
-        return res.json({ success: true, source: "hostinger_mysql", count: mapped.length, data: mapped });
-      }
-    } catch (err) {
-      console.warn("Hostinger MySQL fleets read fallback:", err);
+      const mapped = mysqlFleets.map(f => mergePayload(f.payload_json, {
+        id: f.id, plateNumber: f.plate_number, vehicleType: f.vehicle_type,
+        tonnageCapacity: Number(f.tonnage_capacity || 0), currentTonnage: Number(f.current_tonnage || 0),
+        status: f.status, gpsImei: f.gps_imei || '', fuelLevelPercent: Number(f.fuel_level_percent || 0),
+        odometerKm: Number(f.odometer_km || 0), year: Number(f.year || 0), lastMaintenance: f.last_maintenance || undefined
+      }));
+      return res.json({ success: true, source: "hostinger_mysql", count: mapped.length, data: mapped });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal membaca armada dari Hostinger MySQL' });
     }
-    const fleets = readJsonDb(FLEETS_DB_FILE, []);
-    res.json({ success: true, source: "local_memory_fallback", count: fleets.length, data: fleets });
   });
 
-  app.post("/api/fleets", express.json(), async (req, res) => {
-    const newFleet = req.body;
-    if (!newFleet || !newFleet.plateNumber) {
-      return res.status(400).json({ success: false, error: "Nomor plat armada wajib diisi" });
-    }
-    const fleetId = newFleet.id || `flt-${Date.now()}`;
-
-    // Write to Hostinger MySQL if connected
+  app.post("/api/fleets", requireAuth, express.json(), async (req, res) => {
+    const f = req.body || {};
+    if (!f.plateNumber) return res.status(400).json({ success: false, error: "Nomor plat armada wajib diisi" });
+    const id = f.id || `flt-${Date.now()}`;
     try {
       await mysqlQuery(
-        `INSERT INTO fleets (id, plate_number, vehicle_type, tonnage_capacity, current_tonnage, status, gps_imei, fuel_level_percent, odometer_km, year)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE vehicle_type=?, tonnage_capacity=?, current_tonnage=?, status=?, gps_imei=?, fuel_level_percent=?, odometer_km=?, year=?`,
-        [
-          fleetId, newFleet.plateNumber, newFleet.vehicleType || 'Engkel STD', newFleet.tonnageCapacity || 3.5, newFleet.currentTonnage || 0, newFleet.status || 'available', newFleet.gpsImei || '', newFleet.fuelLevelPercent || 100, newFleet.odometerKm || 0, newFleet.year || 2024,
-          newFleet.vehicleType || 'Engkel STD', newFleet.tonnageCapacity || 3.5, newFleet.currentTonnage || 0, newFleet.status || 'available', newFleet.gpsImei || '', newFleet.fuelLevelPercent || 100, newFleet.odometerKm || 0, newFleet.year || 2024
-        ]
+        `INSERT INTO fleets (id, plate_number, vehicle_type, tonnage_capacity, current_tonnage, status, gps_imei, fuel_level_percent, odometer_km, year, last_maintenance, payload_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE vehicle_type=VALUES(vehicle_type), tonnage_capacity=VALUES(tonnage_capacity), current_tonnage=VALUES(current_tonnage), status=VALUES(status), gps_imei=VALUES(gps_imei), fuel_level_percent=VALUES(fuel_level_percent), odometer_km=VALUES(odometer_km), year=VALUES(year), last_maintenance=VALUES(last_maintenance), payload_json=VALUES(payload_json)`,
+        [id, String(f.plateNumber).trim().toUpperCase(), f.vehicleType || 'Engkel STD', f.tonnageCapacity ?? 0, f.currentTonnage ?? 0, f.status || 'available', f.gpsImei || null, f.fuelLevelPercent ?? 100, f.odometerKm ?? 0, f.year ?? new Date().getFullYear(), f.lastMaintenance || null, JSON.stringify({ ...f, id })]
       );
-    } catch (mysqlErr) {
-      console.warn("Hostinger MySQL fleet save warning:", mysqlErr);
+      return res.json({ success: true, source: 'hostinger_mysql', data: { ...f, id } });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal menyimpan armada' });
     }
-
-    // Mirror to JSON local file
-    const fleets = readJsonDb(FLEETS_DB_FILE, []);
-    const idx = fleets.findIndex((f: any) => f.id === fleetId || (f.plateNumber && f.plateNumber.toUpperCase() === newFleet.plateNumber.toUpperCase()));
-    if (idx >= 0) {
-      fleets[idx] = { ...fleets[idx], ...newFleet, id: fleetId, updatedAt: new Date().toISOString() };
-    } else {
-      fleets.push({ ...newFleet, id: fleetId, createdAt: new Date().toISOString() });
-    }
-    writeJsonDb(FLEETS_DB_FILE, fleets);
-    res.json({ success: true, message: `Armada ${newFleet.plateNumber} berhasil disimpan di server`, data: { ...newFleet, id: fleetId } });
   });
 
-  app.put("/api/fleets/:id", express.json(), async (req, res) => {
+  app.put("/api/fleets/:id", requireAuth, express.json(), async (req, res) => {
     const id = req.params.id;
-    const updates = req.body;
-
+    const f = req.body || {};
     try {
       await mysqlQuery(
-        `UPDATE fleets SET vehicle_type=?, tonnage_capacity=?, current_tonnage=?, status=?, gps_imei=?, fuel_level_percent=?, odometer_km=?, year=? WHERE id=? OR plate_number=?`,
-        [
-          updates.vehicleType || 'Engkel STD', updates.tonnageCapacity || 3.5, updates.currentTonnage || 0, updates.status || 'available', updates.gpsImei || '', updates.fuelLevelPercent || 100, updates.odometerKm || 0, updates.year || 2024,
-          id, updates.plateNumber || id
-        ]
+        `UPDATE fleets SET plate_number=COALESCE(?, plate_number), vehicle_type=COALESCE(?, vehicle_type), tonnage_capacity=COALESCE(?, tonnage_capacity), current_tonnage=COALESCE(?, current_tonnage), status=COALESCE(?, status), gps_imei=COALESCE(?, gps_imei), fuel_level_percent=COALESCE(?, fuel_level_percent), odometer_km=COALESCE(?, odometer_km), year=COALESCE(?, year), last_maintenance=COALESCE(?, last_maintenance), payload_json=? WHERE id=?`,
+        [f.plateNumber ? String(f.plateNumber).trim().toUpperCase() : null, f.vehicleType ?? null, f.tonnageCapacity ?? null, f.currentTonnage ?? null, f.status ?? null, f.gpsImei ?? null, f.fuelLevelPercent ?? null, f.odometerKm ?? null, f.year ?? null, f.lastMaintenance ?? null, JSON.stringify({ ...f, id }), id]
       );
-    } catch (mysqlErr) {
-      console.warn("Hostinger MySQL fleet update warning:", mysqlErr);
+      return res.json({ success: true, source: 'hostinger_mysql', data: { ...f, id } });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal memperbarui armada' });
     }
-
-    const fleets = readJsonDb(FLEETS_DB_FILE, []);
-    const idx = fleets.findIndex((f: any) => f.id === id || (updates?.plateNumber && f.plateNumber?.toUpperCase() === updates.plateNumber.toUpperCase()));
-    if (idx >= 0) {
-      fleets[idx] = { ...fleets[idx], ...updates, updatedAt: new Date().toISOString() };
-      writeJsonDb(FLEETS_DB_FILE, fleets);
-      return res.json({ success: true, message: "Armada berhasil diperbarui di server", data: fleets[idx] });
-    }
-    const created = { id, ...updates, updatedAt: new Date().toISOString() };
-    fleets.push(created);
-    writeJsonDb(FLEETS_DB_FILE, fleets);
-    res.json({ success: true, message: "Armada baru didaftarkan", data: created });
   });
 
-  app.delete("/api/fleets/:id", async (req, res) => {
-    const id = req.params.id;
+  app.delete("/api/fleets/:id", requireAuth, async (req, res) => {
     try {
-      await mysqlQuery("DELETE FROM fleets WHERE id = ? OR plate_number = ?", [id, id]);
-    } catch (mysqlErr) {
-      console.warn("Hostinger MySQL fleet delete warning:", mysqlErr);
+      const result: any = await mysqlQuery("DELETE FROM fleets WHERE id = ?", [req.params.id]);
+      return res.json({ success: true, source: 'hostinger_mysql', removed: Number(result?.affectedRows || 0) });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal menghapus armada' });
     }
-    let fleets = readJsonDb(FLEETS_DB_FILE, []);
-    const initialLen = fleets.length;
-    fleets = fleets.filter((f: any) => f.id !== id && f.plateNumber?.toUpperCase() !== id.toUpperCase());
-    writeJsonDb(FLEETS_DB_FILE, fleets);
-    res.json({ success: true, message: "Armada berhasil dihapus dari server", removed: initialLen - fleets.length });
   });
 
-  // REST API for Crews (Hostinger MySQL + JSON Fallback)
-  app.get("/api/crews", async (req, res) => {
+  // REST API for Crews - Hostinger MySQL is the single source of truth
+  app.get("/api/crews", requireAuth, async (_req, res) => {
     try {
       const mysqlCrews = await mysqlQuery<any[]>("SELECT * FROM crews ORDER BY name ASC");
-      if (Array.isArray(mysqlCrews) && mysqlCrews.length > 0) {
-        const mapped = mysqlCrews.map(c => ({
-          id: c.id,
-          name: c.name,
-          phone: c.phone,
-          role: c.role,
-          licenseNumber: c.license_number,
-          licenseType: c.license_type,
-          status: c.status,
-          tripsCompleted: c.trips_completed,
-          rating: Number(c.rating || 5)
-        }));
-        return res.json({ success: true, source: "hostinger_mysql", count: mapped.length, data: mapped });
-      }
-    } catch (err) {
-      console.warn("Hostinger MySQL crews read fallback:", err);
-    }
-    const crews = readJsonDb(CREWS_DB_FILE, []);
-    res.json({ success: true, source: "local_memory_fallback", count: crews.length, data: crews });
-  });
-
-  app.post("/api/crews", express.json(), async (req, res) => {
-    const newCrew = req.body;
-    if (!newCrew || !newCrew.name) {
-      return res.status(400).json({ success: false, error: "Nama kru wajib diisi" });
-    }
-    const crewId = newCrew.id || `crw-${Date.now()}`;
-
-    try {
-      await mysqlQuery(
-        `INSERT INTO crews (id, name, phone, role, license_number, license_type, status, trips_completed, rating)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE phone=?, role=?, license_number=?, license_type=?, status=?, trips_completed=?, rating=?`,
-        [
-          crewId, newCrew.name, newCrew.phone || '', newCrew.role || 'Driver Utama', newCrew.licenseNumber || '-', newCrew.licenseType || 'SIM B2 Umum', newCrew.status || 'available', newCrew.tripsCompleted || 0, newCrew.rating || 5.0,
-          newCrew.phone || '', newCrew.role || 'Driver Utama', newCrew.licenseNumber || '-', newCrew.licenseType || 'SIM B2 Umum', newCrew.status || 'available', newCrew.tripsCompleted || 0, newCrew.rating || 5.0
-        ]
-      );
-    } catch (mysqlErr) {
-      console.warn("Hostinger MySQL crew save warning:", mysqlErr);
-    }
-
-    const crews = readJsonDb(CREWS_DB_FILE, []);
-    const idx = crews.findIndex((c: any) => c.id === crewId || (c.name && c.name.toLowerCase() === newCrew.name.toLowerCase()));
-    if (idx >= 0) {
-      crews[idx] = { ...crews[idx], ...newCrew, id: crewId, updatedAt: new Date().toISOString() };
-    } else {
-      crews.push({ ...newCrew, id: crewId, createdAt: new Date().toISOString() });
-    }
-    writeJsonDb(CREWS_DB_FILE, crews);
-    res.json({ success: true, message: `Kru ${newCrew.name} berhasil disimpan di server`, data: { ...newCrew, id: crewId } });
-  });
-
-  app.put("/api/crews/:id", express.json(), async (req, res) => {
-    const id = req.params.id;
-    const updates = req.body;
-
-    try {
-      await mysqlQuery(
-        `UPDATE crews SET phone=?, role=?, license_number=?, license_type=?, status=?, trips_completed=?, rating=? WHERE id=? OR name=?`,
-        [
-          updates.phone || '', updates.role || 'Driver Utama', updates.licenseNumber || '-', updates.licenseType || 'SIM B2 Umum', updates.status || 'available', updates.tripsCompleted || 0, updates.rating || 5.0,
-          id, updates.name || id
-        ]
-      );
-    } catch (mysqlErr) {
-      console.warn("Hostinger MySQL crew update warning:", mysqlErr);
-    }
-
-    const crews = readJsonDb(CREWS_DB_FILE, []);
-    const idx = crews.findIndex((c: any) => c.id === id || (updates?.name && c.name?.toLowerCase() === updates.name.toLowerCase()));
-    if (idx >= 0) {
-      crews[idx] = { ...crews[idx], ...updates, updatedAt: new Date().toISOString() };
-      writeJsonDb(CREWS_DB_FILE, crews);
-      return res.json({ success: true, message: "Kru berhasil diperbarui di server", data: crews[idx] });
-    }
-    const created = { id, ...updates, updatedAt: new Date().toISOString() };
-    crews.push(created);
-    writeJsonDb(CREWS_DB_FILE, crews);
-    res.json({ success: true, message: "Kru baru didaftarkan", data: created });
-  });
-
-  app.delete("/api/crews/:id", async (req, res) => {
-    const id = req.params.id;
-    try {
-      await mysqlQuery("DELETE FROM crews WHERE id = ? OR name = ?", [id, id]);
-    } catch (mysqlErr) {
-      console.warn("Hostinger MySQL crew delete warning:", mysqlErr);
-    }
-    let crews = readJsonDb(CREWS_DB_FILE, []);
-    const initialLen = crews.length;
-    crews = crews.filter((c: any) => c.id !== id && c.name?.toLowerCase() !== id.toLowerCase());
-    writeJsonDb(CREWS_DB_FILE, crews);
-    res.json({ success: true, message: "Kru berhasil dihapus dari server", removed: initialLen - crews.length });
-  });
-
-  // Tracksolid Pro Open REST API Periodic Telemetry Sync Endpoint (Setiap 5 Menit)
-  app.post("/api/tracksolid/sync", async (req, res) => {
-    try {
-      const { serverUrl, source } = req.body || {};
-      const account = process.env.TRACKSOLID_ACCOUNT || 'nstrargo';
-      const hasPassword = Boolean(process.env.TRACKSOLID_PASSWORD);
-      const timestamp = new Date().toISOString();
-      console.info(`[Tracksolid API Auto-Sync] Sync triggered via ${source || 'auto'} for account ${account} (hasPassword: ${hasPassword}) at ${timestamp}`);
-
-      res.json({
-        success: true,
-        message: "Sinkronisasi telemetri GPS Tracksolid Pro berhasil melalui Express proxy",
-        timestamp,
-        accountConfigured: Boolean(process.env.TRACKSOLID_ACCOUNT),
-        passwordConfigured: hasPassword,
-        account,
-        intervalSeconds: 300,
-        source: source || 'auto',
-        server: serverUrl || 'http://open.tracksolidpro.com/route/rest'
-      });
+      const mapped = mysqlCrews.map(c => mergePayload(c.payload_json, {
+        id: c.id, name: c.name, phone: c.phone, role: c.role, licenseNumber: c.license_number,
+        licenseType: c.license_type, status: c.status, tripsCompleted: Number(c.trips_completed || 0), rating: Number(c.rating || 5)
+      }));
+      return res.json({ success: true, source: "hostinger_mysql", count: mapped.length, data: mapped });
     } catch (err: any) {
-      console.error("[Tracksolid Sync Error]", err);
-      res.status(500).json({ success: false, error: err?.message || "Gagal menghubungi server Tracksolid" });
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal membaca kru dari Hostinger MySQL' });
     }
   });
 
-  app.get("/api/tracksolid/status", (req, res) => {
-    const account = process.env.TRACKSOLID_ACCOUNT || "nstrargo";
-    res.json({
-      status: "online",
-      provider: "Tracksolid Pro Open REST API / Concox Telematics Proxy",
-      account,
-      accountConfigured: Boolean(process.env.TRACKSOLID_ACCOUNT),
-      passwordConfigured: Boolean(process.env.TRACKSOLID_PASSWORD),
-      intervalSeconds: 300,
-      autoSyncIntervalMinutes: 5,
-      timestamp: new Date().toISOString()
-    });
+  app.post("/api/crews", requireAuth, express.json(), async (req, res) => {
+    const c = req.body || {};
+    if (!c.name) return res.status(400).json({ success: false, error: "Nama kru wajib diisi" });
+    const id = c.id || `crw-${Date.now()}`;
+    try {
+      await mysqlQuery(
+        `INSERT INTO crews (id, name, phone, role, license_number, license_type, status, trips_completed, rating, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE name=VALUES(name), phone=VALUES(phone), role=VALUES(role), license_number=VALUES(license_number), license_type=VALUES(license_type), status=VALUES(status), trips_completed=VALUES(trips_completed), rating=VALUES(rating), payload_json=VALUES(payload_json)`,
+        [id, String(c.name).trim(), c.phone || '-', c.role || 'Driver Utama', c.licenseNumber || '-', c.licenseType || 'SIM B2 Umum', c.status || 'available', c.tripsCompleted ?? 0, c.rating ?? 5, JSON.stringify({ ...c, id })]
+      );
+      return res.json({ success: true, source: 'hostinger_mysql', data: { ...c, id } });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal menyimpan kru' });
+    }
+  });
+
+  app.put("/api/crews/:id", requireAuth, express.json(), async (req, res) => {
+    const id = req.params.id;
+    const c = req.body || {};
+    try {
+      await mysqlQuery(
+        `UPDATE crews SET name=COALESCE(?, name), phone=COALESCE(?, phone), role=COALESCE(?, role), license_number=COALESCE(?, license_number), license_type=COALESCE(?, license_type), status=COALESCE(?, status), trips_completed=COALESCE(?, trips_completed), rating=COALESCE(?, rating), payload_json=? WHERE id=?`,
+        [c.name ?? null, c.phone ?? null, c.role ?? null, c.licenseNumber ?? null, c.licenseType ?? null, c.status ?? null, c.tripsCompleted ?? null, c.rating ?? null, JSON.stringify({ ...c, id }), id]
+      );
+      return res.json({ success: true, source: 'hostinger_mysql', data: { ...c, id } });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal memperbarui kru' });
+    }
+  });
+
+  app.delete("/api/crews/:id", requireAuth, async (req, res) => {
+    try {
+      const result: any = await mysqlQuery("DELETE FROM crews WHERE id = ?", [req.params.id]);
+      return res.json({ success: true, source: 'hostinger_mysql', removed: Number(result?.affectedRows || 0) });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal menghapus kru' });
+    }
+  });
+
+  app.post("/api/attendance", requireAuth, express.json(), async (req, res) => {
+    try {
+      const { crewId, date, status, reason } = req.body || {};
+      if (!crewId || !date) return res.status(400).json({ success: false, error: 'crewId dan date wajib diisi' });
+      const result: any = await mysqlQuery(
+        "INSERT INTO attendance (crew_id, date, status, reason) VALUES (?, ?, ?, ?)",
+        [crewId, date, status || 'present', reason || null]
+      );
+      return res.json({ success: true, source: 'hostinger_mysql', id: result?.insertId });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal menyimpan presensi' });
+    }
+  });
+
+  // Stores REST API for DataBridge -> Hostinger MySQL
+  app.get("/api/stores", requireAuth, async (_req, res) => {
+    try {
+      const rows = await mysqlQuery<any[]>("SELECT * FROM stores ORDER BY store_name ASC");
+      const data = rows.map(s => mergePayload(s.payload_json, {
+        id: s.id,
+        storeCode: s.store_code,
+        storeName: s.store_name,
+        island: s.island,
+        province: s.province,
+        city: s.city,
+        address: s.address,
+        latitude: Number(s.latitude),
+        longitude: Number(s.longitude),
+        contactPerson: s.contact_person,
+        phone: s.phone,
+        deliveryWindow: s.delivery_window,
+        storeCategory: s.store_category
+      }));
+      return res.json({ success: true, source: 'hostinger_mysql', count: data.length, data });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal membaca toko' });
+    }
+  });
+
+  app.post("/api/stores", requireAuth, express.json(), async (req, res) => {
+    const store = req.body || {};
+    if (!store.storeName) return res.status(400).json({ success: false, error: 'Nama toko wajib diisi' });
+    const id = store.id || `str-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const storeCode = String(store.storeCode || `STR-${id.slice(-6)}`).trim().toUpperCase();
+    try {
+      await mysqlQuery(
+        `INSERT INTO stores (id, store_code, store_name, island, province, city, address, latitude, longitude, contact_person, phone, delivery_window, store_category, payload_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE store_name=VALUES(store_name), island=VALUES(island), province=VALUES(province), city=VALUES(city), address=VALUES(address), latitude=VALUES(latitude), longitude=VALUES(longitude), contact_person=VALUES(contact_person), phone=VALUES(phone), delivery_window=VALUES(delivery_window), store_category=VALUES(store_category), payload_json=VALUES(payload_json)`,
+        [
+          id, storeCode, String(store.storeName).trim(), store.island || 'Jawa', store.province || 'Jawa Timur', store.city || 'Banyuwangi',
+          store.address || '-', Number(store.latitude || -8.219), Number(store.longitude || 114.369), store.contactPerson || 'PIC Distribusi',
+          store.phone || '-', store.deliveryWindow || '08:00 - 17:00', store.storeCategory || 'Supermarket', JSON.stringify({ ...store, id, storeCode })
+        ]
+      );
+      return res.json({ success: true, source: 'hostinger_mysql', data: { ...store, id, storeCode } });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal menyimpan toko' });
+    }
+  });
+
+  app.put("/api/stores/:id", requireAuth, express.json(), async (req, res) => {
+    const store = req.body || {};
+    const id = req.params.id;
+    try {
+      const rows = await mysqlQuery<any[]>("SELECT * FROM stores WHERE id = ? LIMIT 1", [id]);
+      if (!Array.isArray(rows) || rows.length === 0) return res.status(404).json({ success: false, error: 'Toko tidak ditemukan' });
+      const current = rows[0];
+      const mergedPayload = { ...(parseJsonColumn(current.payload_json) || {}), ...store, id };
+      await mysqlQuery(
+        `UPDATE stores SET store_code=?, store_name=?, island=?, province=?, city=?, address=?, latitude=?, longitude=?, contact_person=?, phone=?, delivery_window=?, store_category=?, payload_json=? WHERE id=?`,
+        [
+          String(store.storeCode || current.store_code).trim().toUpperCase(), store.storeName || current.store_name, store.island || current.island,
+          store.province || current.province, store.city || current.city, store.address || current.address,
+          Number(store.latitude ?? current.latitude), Number(store.longitude ?? current.longitude), store.contactPerson || current.contact_person,
+          store.phone || current.phone, store.deliveryWindow || current.delivery_window, store.storeCategory || current.store_category,
+          JSON.stringify(mergedPayload), id
+        ]
+      );
+      return res.json({ success: true, source: 'hostinger_mysql', data: mergedPayload });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal memperbarui toko' });
+    }
+  });
+
+  app.delete("/api/stores/:id", requireAuth, async (req, res) => {
+    try {
+      const result: any = await mysqlQuery("DELETE FROM stores WHERE id = ?", [req.params.id]);
+      return res.json({ success: true, source: 'hostinger_mysql', removed: Number(result?.affectedRows || 0) });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal menghapus toko' });
+    }
+  });
+
+  app.post("/api/stores/batch", requireAuth, express.json({ limit: '20mb' }), async (req, res) => {
+    const stores = Array.isArray(req.body?.stores) ? req.body.stores : [];
+    if (stores.length > 5000) return res.status(413).json({ success: false, error: 'Maksimal 5000 toko per batch' });
+    let saved = 0;
+    try {
+      for (const store of stores) {
+        if (!store?.storeName) continue;
+        const id = store.id || `str-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        const storeCode = String(store.storeCode || `STR-${id.slice(-6)}`).trim().toUpperCase();
+        await mysqlQuery(
+          `INSERT INTO stores (id, store_code, store_name, island, province, city, address, latitude, longitude, contact_person, phone, delivery_window, store_category, payload_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE store_name=VALUES(store_name), island=VALUES(island), province=VALUES(province), city=VALUES(city), address=VALUES(address), latitude=VALUES(latitude), longitude=VALUES(longitude), contact_person=VALUES(contact_person), phone=VALUES(phone), delivery_window=VALUES(delivery_window), store_category=VALUES(store_category), payload_json=VALUES(payload_json)`,
+          [
+            id, storeCode, String(store.storeName).trim(), store.island || 'Jawa', store.province || 'Jawa Timur', store.city || 'Banyuwangi',
+            store.address || '-', Number(store.latitude || -8.219), Number(store.longitude || 114.369), store.contactPerson || 'PIC Distribusi',
+            store.phone || '-', store.deliveryWindow || '08:00 - 17:00', store.storeCategory || 'Supermarket', JSON.stringify({ ...store, id, storeCode })
+          ]
+        );
+        saved++;
+      }
+      return res.json({ success: true, source: 'hostinger_mysql', saved });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal menyimpan batch toko', saved });
+    }
+  });
+
+  app.post("/api/databridge/log", requireAuth, express.json(), async (req, res) => {
+    try {
+      const log = req.body || {};
+      const id = log.id || `db-log-${Date.now()}`;
+      await mysqlQuery(
+        `INSERT INTO databridge_sync_logs (id, timestamp, status, source_type, sheet_name, stores_count, schedules_count, fleets_count, crews_count, message, duration_ms)
+         VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, log.status || 'success', 'google_sheets_api', log.sheetName || 'ALL', Number(log.storesCount || 0), Number(log.schedulesCount || 0), Number(log.fleetsCount || 0), Number(log.crewsCount || 0), log.message || '', Number(log.durationMs || 0)]
+      );
+      return res.json({ success: true, source: 'hostinger_mysql', id });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal menyimpan log DataBridge' });
+    }
   });
 
   // API route for document scanning via Gemini 3.8 Flash OCR
-  app.post("/api/scan-document", async (req, res) => {
+  app.post("/api/scan-document", requireAuth, async (req, res) => {
     try {
       const { imageBase64, mimeType = 'image/jpeg', documentHint } = req.body || {};
       
@@ -1118,54 +1198,10 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
 
       const cleanBase64 = String(imageBase64).replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '');
 
-      const fallbackExtractor = () => {
-        const randId = Math.floor(1000 + Math.random() * 9000);
-        const todayStr = new Date().toISOString().split('T')[0];
-        const isDelivery = documentHint === 'delivery_slip' || (!documentHint && Math.random() > 0.4);
-
-        if (isDelivery) {
-          return {
-            documentType: "delivery_slip",
-            documentTypeLabel: "Surat Jalan (Delivery Slip)",
-            documentNumber: `SJ-AKK/2026/10/${randId}`,
-            date: todayStr,
-            vehiclePlate: "P 8848 U",
-            driverName: "Ach Taufiq",
-            destinationOrStore: "Toko Mahkota Jaya (Banyuwangi Kota)",
-            cargoOrItemsSummary: "250 Box Kemasan Karton Corrugated (K125/M125/K125) Segel Utuh",
-            quantityOrWeight: "250 Box (2.1 Ton)",
-            inspectionScore: "Lengkap & Terverifikasi",
-            notes: "Hasil scan kamera: Dokumen Surat Jalan sah PT AKK terverifikasi. Stempel toko & tanda tangan penerima terdeteksi.",
-            signaturesDetected: true,
-            rawExtractedText: `PT ANUGRAH KEMASAN KREATIF SURAT JALAN PENGIRIMAN LOGISTIK BANYUWANGI NO SJ-AKK/2026/10/${randId} TANGGAL ${todayStr} PENERIMA TOKO MAHKOTA JAYA SUPIR ACH TAUFIQ PLAT P 8848 U JUMLAH 250 BOX KARTON TANDA TANGAN PENERIMA SAH`,
-            confidenceScore: 0.96
-          };
-        } else {
-          return {
-            documentType: "inspection_form",
-            documentTypeLabel: "Formulir Inspeksi Armada (Pre-Trip)",
-            documentNumber: `INSP-AKK/2026/10/${randId}`,
-            date: todayStr,
-            vehiclePlate: "P 9281 VA",
-            driverName: "Zainul Agustiar",
-            destinationOrStore: "DC Sukowidi Kalipuro - Rute Jawa-Bali",
-            cargoOrItemsSummary: "Inspeksi 18 Poin Checklist: Sistem Rem, Tekanan Ban, Wiper, Apar, Oli Mesin, Kelengkapan STNK & KIR",
-            quantityOrWeight: "Checklist 18/18 Lulus",
-            inspectionScore: "Grade A - Layak Jalan",
-            notes: "Hasil scan kamera: Checklist pemeriksaan pra-jalan armada lengkap, tanda tangan checker logistik terdeteksi valid.",
-            signaturesDetected: true,
-            rawExtractedText: `FORMULIR CHECKLIST INSPEKSI HARIAN ARMADA PT ANUGRAH KEMASAN KREATIF NO INSP-AKK/2026/10/${randId} TANGGAL ${todayStr} TRUK HINO DOUBLE P 9281 VA SUPIR ZAINUL AGUSTIAR CHECKLIST REM AMAN BAN 110 PSI OLI MEDITRAN STATUS LAYAK JALAN`,
-            confidenceScore: 0.95
-          };
-        }
-      };
-
       if (!genAI) {
-        return res.json({
-          success: true,
-          fallback: true,
-          message: "Diproses menggunakan parser lokal",
-          data: fallbackExtractor()
+        return res.status(503).json({
+          success: false,
+          error: 'GEMINI_API_KEY belum dikonfigurasi. OCR tidak dijalankan dan sistem tidak membuat data dokumen contoh.'
         });
       }
 
@@ -1246,15 +1282,16 @@ Tugas Anda:
           });
         }
       } catch (geminiErr: any) {
-        console.warn('[DocScan] Gemini API call notice, using smart fallback:', geminiErr?.message || geminiErr);
+        console.warn('[DocScan] Gemini API call failed:', geminiErr?.message || geminiErr);
+        return res.status(502).json({
+          success: false,
+          error: 'OCR AI gagal. Sistem tidak mengganti hasil dengan dokumen contoh atau data acak.'
+        });
       }
 
-      // If Gemini call failed or didn't return expected structure
-      return res.json({
-        success: true,
-        fallback: true,
-        message: "Diproses menggunakan parser lokal",
-        data: fallbackExtractor()
+      return res.status(422).json({
+        success: false,
+        error: 'OCR AI tidak mengembalikan struktur dokumen yang valid. Tidak ada fallback data contoh.'
       });
     } catch (err: any) {
       console.error("[DocScan Error]", err);
@@ -1428,34 +1465,48 @@ Tugas Anda:
   app.use('/downloads', express.static(path.join(process.cwd(), 'public', 'downloads')));
   app.use('/downloads', express.static(path.join(process.cwd(), 'downloads')));
 
-  // In development, always use Vite middleware; in production, serve built dist/
+  // In development, always use Vite middleware; in production, serve built dist/ if available
   const isProduction = process.env.NODE_ENV === "production";
   const distPath = path.join(process.cwd(), 'dist');
   const indexHtmlPath = path.join(distPath, 'index.html');
+  const hasDist = fs.existsSync(indexHtmlPath);
 
-  if (isProduction) {
+  if (isProduction && hasDist) {
     if (fs.existsSync(distPath)) {
       app.use(express.static(distPath));
     }
-    app.get('*', (req, res) => {
-      if (fs.existsSync(indexHtmlPath)) {
-        res.sendFile(indexHtmlPath, (err) => {
-          if (err && !res.headersSent) {
-            console.error("Error sending index.html:", err);
-            res.status(500).send("Error loading application");
-          }
-        });
-      } else {
-        res.status(503).send("Aplikasi sedang dibangun. Silakan muat ulang beberapa saat lagi.");
-      }
+    app.get('*', (req, res, next) => {
+      if (req.path.startsWith('/api/') || req.path.startsWith('/downloads/')) return next();
+      res.sendFile(indexHtmlPath, (err) => {
+        if (err && !res.headersSent) {
+          console.error("Error sending index.html:", err);
+          res.status(500).send("Error loading application");
+        }
+      });
     });
   } else {
-    // In development mode, Vite middleware compiles and serves on-the-fly
+    // In development mode or if dist is not yet built, Vite middleware compiles and serves on-the-fly
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
+  }
+
+  // Cek koneksi database dan bootstrap Super Admin jika database telah dikonfigurasi
+  try {
+    if (isDatabaseConfigured()) {
+      const conn = await testMysqlConnection();
+      if (conn.success) {
+        await ensureBootstrapAdmin();
+      } else {
+        console.warn('[Startup Database] Hostinger MySQL belum terhubung:', conn.message);
+      }
+    } else {
+      console.warn('[Startup Database] Hostinger MySQL credentials (DB_NAME, DB_USER, DB_PASSWORD) belum dikonfigurasi. Server tetap berjalan melayani web & API.');
+    }
+  } catch (err: any) {
+    console.error('[Startup Database] Peringatan koneksi database saat startup:', err?.message || err);
   }
 
   const preferredPort = Number(process.env.PORT) || 3000;
@@ -1466,15 +1517,16 @@ Tugas Anda:
     });
 
     server.on('error', (err: any) => {
-      if (err.code === 'EADDRINUSE') {
+      if (err.code === 'EADDRINUSE' && !isProduction) {
         console.warn(`Port ${port} is already in use, trying port ${port + 1}...`);
         listenOnPort(port + 1);
-      } else {
-        console.error('Server error:', err);
+        return;
       }
+      console.error('Server error:', err);
+      if (isProduction) process.exit(1);
     });
 
-    // Graceful shutdown for Cloud Run container lifecycle
+    // Graceful shutdown for Hostinger Node.js lifecycle
     process.on('SIGTERM', () => {
       console.log('SIGTERM received, closing HTTP server gracefully...');
       server.close(() => {

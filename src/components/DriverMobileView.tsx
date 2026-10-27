@@ -80,7 +80,6 @@ import { driverOfflineSyncService, OfflineTaskAction, DriverSyncState } from '..
 import { driverChecklistService } from '../services/driverChecklistService';
 import { driverWaybillService } from '../services/driverWaybillService';
 import { driverShiftService } from '../services/driverShiftService';
-import { getSupabaseClient } from '../services/supabaseService';
 import { supabaseRealtimeSync } from '../services/supabaseRealtimeSync';
 import { useToast } from '../context/ToastContext';
 import { getDriverPortalDepartureLabel, getAreaScheduleTiming } from '../utils/areaScheduleRules';
@@ -212,58 +211,71 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     confirmPassword: ''
   });
 
-  const handleDriverLoginSubmit = (e: React.FormEvent) => {
+  const handleDriverLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
-    const user = logisticsStore.loginUser(loginEmail, loginPassword);
-    if (!user) {
-      const foundCrew = crews.find(c => c.name.toLowerCase().includes(loginEmail.toLowerCase()) || c.phone.includes(loginEmail));
-      if (foundCrew) {
-        setLoggedInDriver(foundCrew);
-        setSelectedDriverId(foundCrew.id);
-        setIsDriverLoggedIn(true);
-        try {
-          localStorage.setItem('akk_driver_auth_session', JSON.stringify(foundCrew));
-        } catch {}
-        setSuccessMsg(`Berhasil masuk sebagai ${foundCrew.name}`);
-        setTimeout(() => {
-          addNotification('delivery', 'Login Berhasil', `Selamat datang di Portal Driver Mobile, ${foundCrew.name}!`);
-        }, 300);
-        return;
-      }
-      setErrorMsg('Username/Email atau Password salah. Silakan periksa kembali.');
+    setSuccessMsg('');
+
+    if (!loginEmail.trim() || !loginPassword) {
+      setErrorMsg('Email/username dan password wajib diisi.');
       return;
     }
 
-    const crewMatch = crews.find(c => c.name.toLowerCase() === user.fullName.toLowerCase()) || crews[0];
+    const user = await logisticsStore.loginUserRemote(loginEmail.trim(), loginPassword);
+    if (!user) {
+      setErrorMsg('Email/username atau password salah, akun belum disetujui, atau server database belum tersedia.');
+      return;
+    }
+
+    const allowedDriverRoles: UserRole[] = ['driver', 'crew_helper', 'spv_logistik', 'operasional', 'super_admin'];
+    if (!allowedDriverRoles.includes(user.role)) {
+      logisticsStore.logoutUser();
+      setErrorMsg('Akun ini tidak memiliki akses ke Portal Driver.');
+      return;
+    }
+
+    const crewMatch = crews.find(c => c.name.toLowerCase() === user.fullName.toLowerCase())
+      || logisticsStore.getActiveDriverCrew()
+      || null;
     setLoggedInDriver(crewMatch);
-    setSelectedDriverId(crewMatch ? crewMatch.id : (crews[0]?.id || ''));
+    setSelectedDriverId(crewMatch?.id || '');
     setIsDriverLoggedIn(true);
-    try {
-      localStorage.setItem('akk_driver_auth_session', JSON.stringify(crewMatch || crews[0]));
-    } catch {}
     setSuccessMsg(`Berhasil masuk sebagai ${user.fullName}`);
     setTimeout(() => {
       addNotification('delivery', 'Login Berhasil', `Selamat datang di Portal AKK, ${user.fullName}!`);
     }, 300);
   };
 
-  const handleRegister = (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
-    if (registerData.password && registerData.password !== registerData.confirmPassword) {
+    setSuccessMsg('');
+    if (!registerData.fullName.trim() || !registerData.email.trim()) {
+      setErrorMsg('Nama lengkap dan email wajib diisi.');
+      return;
+    }
+    if (registerData.password.length < 8) {
+      setErrorMsg('Password minimal 8 karakter.');
+      return;
+    }
+    if (registerData.password !== registerData.confirmPassword) {
       setErrorMsg('Konfirmasi password tidak cocok.');
       return;
     }
-    const newUser = logisticsStore.registerUser({
-      fullName: registerData.fullName,
-      email: registerData.email,
-      phone: registerData.phone,
-      role: registerData.role,
+
+    const newUser = await logisticsStore.registerUserRemote({
+      fullName: registerData.fullName.trim(),
+      email: registerData.email.trim(),
+      phone: registerData.phone.trim(),
       department: registerData.department,
-      notes: 'Pendaftaran mandiri melalui portal AKK - Menunggu verifikasi'
+      password: registerData.password
     });
-    setSuccessMsg(`Pendaftaran berhasil! Akun "${newUser.fullName}" terdaftar dan menunggu persetujuan Super Admin.`);
+    if (!newUser) {
+      setErrorMsg('Pendaftaran gagal. Email mungkin sudah terdaftar atau database belum tersedia.');
+      return;
+    }
+
+    setSuccessMsg(`Pendaftaran berhasil! Akun "${newUser.fullName}" menunggu persetujuan Super Admin.`);
     setTimeout(() => {
       setAuthTab('login');
       setSuccessMsg('Pendaftaran berhasil! Silakan masuk setelah akun disetujui.');
@@ -271,11 +283,10 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   };
 
   const handleDriverLogout = () => {
+    logisticsStore.logoutUser();
     setIsDriverLoggedIn(false);
     setLoggedInDriver(null);
-    try {
-      localStorage.removeItem('akk_driver_auth_session');
-    } catch {}
+    setSelectedDriverId('');
     addNotification('delivery', 'Keluar Akun', 'Anda telah keluar dari Portal Driver.');
   };
 

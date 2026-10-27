@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '../supabaseClient';
 import { useToast } from '../context/ToastContext';
 import { Schedule } from '../types';
 import { logisticsStore } from '../services/store';
@@ -73,41 +72,8 @@ export const RealtimeShipmentListener: React.FC = () => {
       }
     };
 
-    // 1. Subscribe to Supabase Realtime postgres_changes (INSERT & UPDATE on schedules)
-    const channelConfig =
-      isDriverOrHelperRole && driverId
-        ? {
-            event: '*' as const,
-            schema: 'public',
-            table: 'schedules',
-            filter: `crew_id=eq.${driverId}`
-          }
-        : {
-            event: '*' as const,
-            schema: 'public',
-            table: 'schedules'
-          };
-
-    const channel = (supabase.channel(`realtime-schedules-${driverId || 'global'}`) as any)
-      .on(
-        'postgres_changes',
-        { ...channelConfig, event: 'INSERT' },
-        (payload: { new: Schedule }) => {
-          if (payload?.new) {
-            handleRealtimeSchedulePayload('INSERT', payload.new, null);
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        { ...channelConfig, event: 'UPDATE' },
-        (payload: { new: Schedule; old: Schedule }) => {
-          if (payload?.new) {
-            handleRealtimeSchedulePayload('UPDATE', payload.new, payload.old);
-          }
-        }
-      )
-      .subscribe();
+    // Hostinger mode: cross-component realtime is handled through same-device custom events.
+    // Multi-device refresh reads the persisted schedule snapshot from Hostinger MySQL.
 
     // 2. Listen for immediate in-app / cross-tab Supabase Realtime schedule events
     const handleCustomRealtimeEvent = (e: Event) => {
@@ -142,7 +108,6 @@ export const RealtimeShipmentListener: React.FC = () => {
     return () => {
       window.removeEventListener('akk-driver-schedule-realtime', handleCustomRealtimeEvent);
       window.removeEventListener('akk-admin-status-notification', handleAdminStatusNotification);
-      supabase.removeChannel(channel);
     };
   }, [addNotification, currentUser, activeCrew]);
 

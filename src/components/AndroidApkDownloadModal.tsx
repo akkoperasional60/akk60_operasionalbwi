@@ -370,7 +370,7 @@ export const AndroidApkDownloadModal: React.FC<AndroidApkDownloadModalProps> = (
                   Instal &amp; Sinkronisasi Realtime
                 </h5>
                 <p className="text-slate-400 pl-7">
-                  Pilih <strong className="text-white">Instal (Install)</strong>. Aplikasi akan terpasang dengan ikon resmi PT AKK dan otomatis menyinkronkan data secara *real-time* via Supabase dengan portal administrasi utama!
+                  Pilih <strong className="text-white">Instal (Install)</strong>. Aplikasi akan terpasang dengan ikon resmi PT AKK dan otomatis menyinkronkan data secara *real-time* via Hostinger MySQL dengan portal administrasi utama!
                 </p>
               </div>
             </div>
@@ -448,7 +448,7 @@ class MainActivity : AppCompatActivity() {
             Manifest.permission.CAMERA
         ), REQ_CODE)
 
-        webView.loadUrl("https://ais-pre-mfybdfggflmtyxul5kqfzl-66929656488.asia-southeast1.run.app")
+        webView.loadUrl("https://akkoperasional.com/?tab=driver_portal")
     }
 }`}
                 </div>

@@ -1,5 +1,4 @@
 import { DriverShiftCheckin, ShiftVerificationMethod } from '../types';
-import { getSupabaseClient } from './supabaseService';
 import { driverReportService } from './driverReportService';
 import { logisticsStore } from './store';
 import { getUserRoleDisplayTitle } from '../utils/rbac';
@@ -210,25 +209,24 @@ class DriverShiftService {
       securityPin: cleanPin
     });
 
-    // Attempt Supabase Remote Sync
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      try {
-        const { error } = await supabase.from('attendance').insert([
-          {
-            crew_id: params.driverId,
-            date: dateStr,
-            status: 'present',
-            reason: `Shift Check-in (PIN 2x) ${timeFormatted}`
-          }
-        ]);
-        if (!error) {
-          newShift.synced = true;
-          localStorage.setItem(SHIFTS_STORAGE_KEY, JSON.stringify(shifts));
-        }
-      } catch (err) {
-        console.warn('Supabase attendance sync error (saved locally):', err);
+    // Persist attendance to Hostinger MySQL
+    try {
+      const response = await fetch('/api/attendance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          crewId: params.driverId,
+          date: dateStr,
+          status: 'present',
+          reason: `Shift Check-in (PIN 2x) ${timeFormatted}`
+        })
+      });
+      if (response.ok) {
+        newShift.synced = true;
+        localStorage.setItem(SHIFTS_STORAGE_KEY, JSON.stringify(shifts));
       }
+    } catch (err) {
+      console.warn('Hostinger attendance sync error (saved locally):', err);
     }
 
     if (typeof window !== 'undefined') {

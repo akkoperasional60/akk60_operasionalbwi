@@ -365,7 +365,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     } catch (err: any) {
       setSyncFeedback({
         type: 'error',
-        message: err?.message || 'Gagal sinkronisasi dengan Supabase.'
+        message: err?.message || 'Gagal sinkronisasi dengan Hostinger MySQL.'
       });
     } finally {
       setIsSyncingSupabase(false);
@@ -410,7 +410,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     setCrews(logisticsStore.getCrews());
     setSyncFeedback({
       type: 'success',
-      message: `✅ Armada ${created.plateNumber} (${created.initialCode || created.vehicleType}) berhasil ditambahkan dan disinkronkan ke Supabase!`
+      message: `✅ Armada ${created.plateNumber} (${created.initialCode || created.vehicleType}) berhasil ditambahkan dan disinkronkan ke Hostinger MySQL!`
     });
     setTimeout(() => setSyncFeedback(null), 5000);
   };
@@ -442,7 +442,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     setCrews(logisticsStore.getCrews());
     setSyncFeedback({
       type: 'success',
-      message: `✅ Kru ${created.name} (${created.role}) berhasil ditambahkan dan disinkronkan ke Supabase!`
+      message: `✅ Kru ${created.name} (${created.role}) berhasil ditambahkan dan disinkronkan ke Hostinger MySQL!`
     });
     setTimeout(() => setSyncFeedback(null), 5000);
   };
@@ -510,7 +510,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     setEditingAssignedCrewId('');
     setSyncFeedback({
       type: 'success',
-      message: `✅ Perubahan data armada ${updatedFleetData.plateNumber} tersimpan di Supabase!`
+      message: `✅ Perubahan data armada ${updatedFleetData.plateNumber} tersimpan di Hostinger MySQL!`
     });
     setTimeout(() => setSyncFeedback(null), 5000);
   };
@@ -548,7 +548,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     setCrews(logisticsStore.getCrews());
     setSyncFeedback({
       type: 'success',
-      message: `✅ Perubahan data kru ${editingCrew.name} tersimpan di Supabase!`
+      message: `✅ Perubahan data kru ${editingCrew.name} tersimpan di Hostinger MySQL!`
     });
     setTimeout(() => setSyncFeedback(null), 5000);
   };
@@ -565,7 +565,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     setCrewToDelete(null);
     setSyncFeedback({
       type: 'success',
-      message: `🗑️ Kru ${name} berhasil dihapus dari sistem dan Supabase!`
+      message: `🗑️ Kru ${name} berhasil dihapus dari sistem dan Hostinger MySQL!`
     });
     setTimeout(() => setSyncFeedback(null), 5000);
   };
@@ -578,7 +578,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     setFleetToDelete(null);
     setSyncFeedback({
       type: 'success',
-      message: `🗑️ Armada ${plate} berhasil dihapus dari sistem dan Supabase!`
+      message: `🗑️ Armada ${plate} berhasil dihapus dari sistem dan Hostinger MySQL!`
     });
     setTimeout(() => setSyncFeedback(null), 5000);
   };
@@ -965,10 +965,10 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                 disabled={isSyncingSupabase}
                 onClick={handleManualSupabaseSync}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 text-xs font-semibold transition cursor-pointer disabled:opacity-50"
-                title="Sinkronkan data armada dan kru dengan Supabase Cloud Database"
+                title="Sinkronkan data armada dan kru dengan Hostinger MySQL"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isSyncingSupabase ? 'animate-spin text-emerald-400' : 'text-emerald-400'}`} />
-                <span className="hidden sm:inline">{isSyncingSupabase ? 'Sinkron...' : 'Sync Supabase'}</span>
+                <span className="hidden sm:inline">{isSyncingSupabase ? 'Sinkron...' : 'Sync MySQL'}</span>
               </button>
             </div>
           </div>
@@ -1740,7 +1740,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   <th className="py-3 px-4 text-center">Status Operasional (User)</th>
                   <th className="py-3 px-4">Armada Ditugaskan</th>
                   <th className="py-3 px-4 text-center">Performa Rit &amp; Rating (Kiriman &amp; Waktu Gudang)</th>
-                  <th className="py-3 px-4 text-center">Supabase Cloud</th>
+                  <th className="py-3 px-4 text-center">Hostinger MySQL</th>
                   <th className="py-3 px-4 text-center w-28">Aksi</th>
                 </tr>
               </thead>

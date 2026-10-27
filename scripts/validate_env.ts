@@ -1,47 +1,73 @@
 import fs from 'fs';
 import path from 'path';
 
-console.log('🔍 [Pre-Build] Memeriksa variabel lingkungan (Environment Variables)...');
+console.log('🔍 [Pre-Build] Memeriksa konfigurasi Environment Website Hostinger...');
 
-const requiredKeys = ['VITE_SUPABASE_URL'];
-const optionalKeys = ['VITE_SUPABASE_ANON_KEY', 'GEMINI_API_KEY', 'APP_URL'];
-
-let missingRequired: string[] = [];
-
-// Load .env if present
 const envPath = path.resolve(process.cwd(), '.env');
 if (fs.existsSync(envPath)) {
   const envContent = fs.readFileSync(envPath, 'utf-8');
   envContent.split('\n').forEach(line => {
     const trimmed = line.trim();
-    if (trimmed && !trimmed.startsWith('#')) {
-      const eqIdx = trimmed.indexOf('=');
-      if (eqIdx > 0) {
-        const key = trimmed.substring(0, eqIdx).trim();
-        const val = trimmed.substring(eqIdx + 1).trim().replace(/^["']|["']$/g, '');
-        if (!process.env[key]) {
-          process.env[key] = val;
-        }
-      }
-    }
+    if (!trimmed || trimmed.startsWith('#')) return;
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx <= 0) return;
+    const key = trimmed.substring(0, eqIdx).trim();
+    const val = trimmed.substring(eqIdx + 1).trim().replace(/^["']|["']$/g, '');
+    if (!process.env[key]) process.env[key] = val;
   });
 }
 
-for (const key of requiredKeys) {
-  const val = process.env[key] || (import.meta as any).env?.[key];
-  if (!val || val === '') {
-    missingRequired.push(key);
-  }
-}
+// 1. Cek variabel wajib untuk runtime Hostinger MySQL
+const requiredAtRuntime = ['DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USER', 'DB_PASSWORD'];
+const missing = requiredAtRuntime.filter(key => !String(process.env[key] || '').trim());
 
-if (missingRequired.length > 0) {
-  console.warn('⚠️ [Pre-Build Warning] Variabel lingkungan berikut belum diatur:');
-  missingRequired.forEach(k => console.warn(`   - ${k}`));
-  console.warn('   Pastikan telah mengonfigurasinya di Hostinger Dashboard (Website -> Environment Variables) atau berkas .env lokal.');
-  console.warn('   Aplikasi akan menggunakan fallback default bawaan, namun disarankan untuk mengatur variabel ini untuk produksi.');
+if (missing.length > 0) {
+  console.warn('⚠️ [Pre-Build] Environment database belum lengkap pada proses build:');
+  missing.forEach(k => console.warn(`   - ${k}`));
+  console.warn('   Build frontend tetap dilanjutkan. Pastikan semua variabel tersebut diatur di Hostinger sebelum aplikasi dijalankan.');
 } else {
-  console.log('✅ [Pre-Build] Semua variabel lingkungan esensial terpenuhi.');
+  console.log('✅ [Pre-Build] Environment Hostinger MySQL terdeteksi lengkap.');
 }
 
-console.log('🚀 [Pre-Build] Validasi lingkungan selesai. Melanjutkan proses build...');
+// 2. Cek SESSION_SECRET
+const sessionSecret = String(process.env.SESSION_SECRET || '').trim();
+if (sessionSecret.length < 32) {
+  console.warn('⚠️ [Pre-Build] SESSION_SECRET belum diisi / kurang dari 32 karakter. Runtime production membutuhkan SESSION_SECRET minimal 32 karakter.');
+}
+
+// 3. Cek larangan penggunaan VITE_ untuk password / secret
+const dangerousViteVars = Object.keys(process.env).filter(key =>
+  key.startsWith('VITE_') &&
+  /(PASSWORD|SECRET|KEYSTORE|DB_|SESSION_SECRET|BOOTSTRAP_ADMIN|WHATSAPP_API_KEY)/i.test(key)
+);
+if (dangerousViteVars.length > 0) {
+  console.warn('🚨 [Keamanan] Terdeteksi variabel VITE_ yang berpotensi membocorkan secret/password ke frontend browser:');
+  dangerousViteVars.forEach(k => console.warn(`   - ${k} (SEGERA HAPUS! Jangan pernah pakai prefix VITE_ untuk password/secret)`));
+}
+
+// 4. Cek variabel APK_* yang seharusnya DIHAPUS dari Environment Variables web Hostinger
+const apkVarsInWebEnv = [
+  'APK_KEYSTORE_PASSWORD',
+  'APK_KEY_PASSWORD',
+  'APK_KEY_ALIAS',
+  'APK_PORTAL_URL',
+  'APK_FALLBACK_PORTAL_URL'
+].filter(key => Boolean(String(process.env[key] || '').trim()));
+
+if (apkVarsInWebEnv.length > 0) {
+  console.warn('⚠️ [Keamanan Hostinger] Variabel khusus build APK berikut terdeteksi di environment web dan sebaiknya DIHAPUS dari Hostinger:');
+  apkVarsInWebEnv.forEach(k => console.warn(`   - ${k}`));
+  console.warn('   Kelima variabel APK_* tersebut khusus untuk build APK Android, bukan kebutuhan runtime website Node.js.');
+}
+
+// 5. Cek konfigurasi BOOTSTRAP_ADMIN_*
+const bootstrapEmail = String(process.env.BOOTSTRAP_ADMIN_EMAIL || '').trim();
+const bootstrapPassword = String(process.env.BOOTSTRAP_ADMIN_PASSWORD || '');
+if ((bootstrapEmail || bootstrapPassword) && (!bootstrapEmail || bootstrapPassword.length < 12)) {
+  console.warn('⚠️ [Bootstrap Admin] Konfigurasi belum lengkap: isi BOOTSTRAP_ADMIN_EMAIL dan BOOTSTRAP_ADMIN_PASSWORD minimal 12 karakter, atau hapus setelah Super Admin pertama berhasil dibuat dan login.');
+} else if (bootstrapPassword) {
+  console.log('ℹ️ [Bootstrap Admin] BOOTSTRAP_ADMIN_PASSWORD aktif. Ingat: segera hapus BOOTSTRAP_ADMIN_PASSWORD (serta BOOTSTRAP_ADMIN_EMAIL & BOOTSTRAP_ADMIN_NAME) dari Hostinger setelah Super Admin berhasil dibuat dan login.');
+}
+
+console.log('🚀 [Pre-Build] Validasi selesai.');
 process.exit(0);

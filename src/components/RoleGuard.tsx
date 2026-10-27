@@ -54,7 +54,7 @@ export const RoleGuard: React.FC<RoleGuardProps> = ({
       <div className="space-y-1.5">
         <div className="text-xs font-bold uppercase tracking-wider text-rose-400 flex items-center justify-center gap-1.5">
           <Lock className="w-3.5 h-3.5" />
-          <span>Pembatasan Akses Berbasis Peran (RBAC &amp; Supabase RLS)</span>
+          <span>Pembatasan Akses Berbasis Peran (RBAC &amp; Hostinger MySQL)</span>
         </div>
         <h3 className="text-base font-black text-white">
           Akses Modul Dibatasi untuk Peran Anda

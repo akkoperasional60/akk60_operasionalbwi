@@ -219,7 +219,7 @@ export const RBAC_ROLE_MATRIX: RolePolicySummary[] = [
       'Executive & Operational Dashboards',
       'User Management & RBAC Approval',
       'Fleet, Crew, Store & Schedule Management',
-      'Finance, Tax, Sales KPI & Supabase SQL Architecture'
+      'Finance, Tax, Sales KPI & Hostinger MySQL Architecture'
     ],
     databaseRlsSummary: [
       'FOR ALL ON public.profiles, fleets, crews, stores, schedules, tracking_logs USING (public.get_my_role() = \'super_admin\')',
@@ -271,7 +271,6 @@ const TAB_TO_MODULE_MAP: Record<string, { moduleId: string; subMenuId?: string }
   fuel_efficiency: { moduleId: 'logistics', subMenuId: 'armada_ceklis' },
   crew_history: { moduleId: 'logistics', subMenuId: 'monitoring_sla' },
   tracking_eval: { moduleId: 'logistics', subMenuId: 'monitoring_sla' },
-  tracksolid: { moduleId: 'logistics', subMenuId: 'live_map' },
   fleet_forms: { moduleId: 'logistics', subMenuId: 'armada_ceklis' },
   sales_dashboard: { moduleId: 'sales_admin', subMenuId: 'dashboard_penjualan' },
   sales_activities: { moduleId: 'sales_admin', subMenuId: 'aktivitas_harian' },

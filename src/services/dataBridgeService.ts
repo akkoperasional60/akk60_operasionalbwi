@@ -1,4 +1,3 @@
-import { getSupabaseClient, sanitizeSupabaseUrl } from './supabaseService';
 import { googleSheetsApiService, ParsedSheetTrip } from './googleSheetsApiService';
 import { logisticsStore } from './store';
 import { RetailStore, Schedule, Fleet, Crew } from '../types';
@@ -242,41 +241,37 @@ class DataBridgeService {
     this.isSyncing = true;
     const startTime = performance.now();
     this.config.lastSyncStatus = 'syncing';
-    this.config.lastSyncMessage = `Sedang menarik data Google Sheets & memperbarui Supabase (${triggerSource})...`;
+    this.config.lastSyncMessage = `Sedang menyinkronkan Google Sheets & Hostinger MySQL (${triggerSource})...`;
     this.saveConfigToStorage();
     this.notifyListeners();
 
-    try {
-      // 1. Validate Supabase Client
-      const supabase = getSupabaseClient();
-      if (!supabase) {
-        throw new Error('Klien Supabase belum terkonfigurasi. Periksa kredensial URL dan Anon Key di menu Arsitektur DB.');
-      }
+    const requestJson = async (url: string, init?: RequestInit): Promise<any> => {
+      const response = await fetch(url, init);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || `HTTP ${response.status}`);
+      return data;
+    };
 
-      // 2. Extract Data from Google Sheets API / Local Mirror
-      let sheetSchedules: ParsedSheetTrip[] = [];
+    try {
+      // Optional Google Sheets pull is retained to refresh the local operational cache.
       const gsheetsConf = googleSheetsApiService.getConfig();
       let sheetId = this.config.spreadsheetId || gsheetsConf.spreadsheetId;
-
       if (!sheetId && gsheetsConf.spreadsheetUrl) {
         sheetId = googleSheetsApiService.extractSpreadsheetId(gsheetsConf.spreadsheetUrl);
       }
-
-      // Try live pull from Google Sheets if configured
       if (sheetId) {
         try {
           const sheetTitle = this.config.sheetTitle || gsheetsConf.selectedSheetTitle || 'ALL';
           const rawRows = await googleSheetsApiService.getSheetValues(sheetId, `${sheetTitle}!A:Z`);
-          if (rawRows && rawRows.length > 0) {
-            sheetSchedules = googleSheetsApiService.parseScheduleRows(rawRows);
-            console.log(`[DataBridge] Pulled ${sheetSchedules.length} parsed trips from Google Sheet "${sheetTitle}".`);
+          if (rawRows?.length) {
+            const parsed: ParsedSheetTrip[] = googleSheetsApiService.parseScheduleRows(rawRows);
+            console.log(`[DataBridge] Pulled ${parsed.length} parsed trips from Google Sheet "${sheetTitle}".`);
           }
         } catch (fetchErr: any) {
-          console.warn('[DataBridge] Live Google Sheets API pull notice (using local active cache):', fetchErr?.message || fetchErr);
+          console.warn('[DataBridge] Google Sheets pull notice:', fetchErr?.message || fetchErr);
         }
       }
 
-      // Fallback: If live pull is empty or unauthenticated, use operational schedules from store
       const localSchedules = logisticsStore.getSchedules();
       const localStores = logisticsStore.getStores();
       const localFleets = logisticsStore.getFleets();
@@ -286,278 +281,66 @@ class DataBridgeService {
       let fleetsUpserted = 0;
       let crewsUpserted = 0;
       let schedulesUpserted = 0;
-      let rlsWarning = false;
-      let tableMissingWarning = false;
 
-      // -------------------------------------------------------------
-      // STEP A: UPSERT FLEETS (Armada) - HANYA PLAT RESMI NON-AKK
-      // -------------------------------------------------------------
-      const fleetIdMap = new Map<string, string>(); // plate_number / initialCode -> uuid
-
-      if (this.config.syncFleets && localFleets.length > 0) {
-        // Hapus semua armada dengan akhiran plat AKK dari Supabase jika ada
-        try {
-          await supabase.from('fleets').delete().ilike('plate_number', '%AKK');
-        } catch (delErr) {
-          console.warn('[DataBridge] Note deleting AKK plates:', delErr);
-        }
-
-        const validFleets = localFleets.filter(f => !f.plateNumber.trim().toUpperCase().endsWith('AKK'));
-        const fleetPayload = validFleets.map(f => ({
-          plate_number: f.plateNumber.trim().toUpperCase(),
-          vehicle_type: f.vehicleType || 'Engkel STD',
-          tonnage_capacity: f.tonnageCapacity || 5.0,
-          current_tonnage: f.currentTonnage || 0,
-          status: f.status === 'on-duty' ? 'on-duty' : (f.status === 'maintenance' ? 'maintenance' : 'available'),
-          fuel_level_percent: f.fuelLevelPercent || 100,
-          odometer_km: f.odometerKm || 0,
-          year: f.year || 2024
-        }));
-
-        const { data: fleetRes, error: fleetErr } = await supabase
-          .from('fleets')
-          .upsert(fleetPayload, { onConflict: 'plate_number' })
-          .select('id, plate_number');
-
-        if (fleetErr) {
-          if (fleetErr.code === '42501') rlsWarning = true;
-          if (fleetErr.code === 'PGRST205') tableMissingWarning = true;
-          console.warn('[DataBridge] Fleets upsert note:', fleetErr.message);
-        } else if (fleetRes) {
-          fleetsUpserted = fleetRes.length;
-          fleetRes.forEach((f: any) => {
-            fleetIdMap.set(f.plate_number.toUpperCase(), f.id);
+      if (this.config.syncFleets) {
+        for (const fleet of localFleets.filter(f => !(f.plateNumber || '').trim().toUpperCase().endsWith('AKK'))) {
+          await requestJson('/api/fleets', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(fleet)
           });
+          fleetsUpserted++;
         }
       }
 
-      // -------------------------------------------------------------
-      // STEP B: UPSERT CREWS (Supir & Helper)
-      // -------------------------------------------------------------
-      const crewIdMap = new Map<string, string>(); // crew name -> uuid
-
-      if (this.config.syncCrews && localCrews.length > 0) {
-        // Query existing crews first to match by name
-        const { data: existingCrews, error: fetchCrewsErr } = await supabase
-          .from('crews')
-          .select('id, name');
-
-        if (fetchCrewsErr) {
-          if (fetchCrewsErr.code === '42501') rlsWarning = true;
-          if (fetchCrewsErr.code === 'PGRST205') tableMissingWarning = true;
-          console.warn('[DataBridge] Fetch existing crews note:', fetchCrewsErr.message);
-        } else if (existingCrews) {
-          existingCrews.forEach((c: any) => {
-            crewIdMap.set(c.name.trim().toUpperCase(), c.id);
+      if (this.config.syncCrews) {
+        for (const crew of localCrews) {
+          await requestJson('/api/crews', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(crew)
           });
-        }
-
-        for (const c of localCrews) {
-          let role = 'Driver Utama';
-          if (c.role.includes('Helper') || c.role.includes('Kernet')) {
-            role = 'Kernet / Helper';
-          } else if (c.role.includes('Cadangan')) {
-            role = 'Driver Cadangan';
-          }
-
-          let licenseType = 'SIM B1 Umum';
-          if (c.licenseType?.includes('B2')) licenseType = 'SIM B2 Umum';
-          else if (c.licenseType?.includes('A')) licenseType = 'SIM A';
-
-          const crewData = {
-            name: c.name.trim(),
-            phone: c.phone || '081234567890',
-            role,
-            license_number: c.licenseNumber || `SIM-${c.name.substring(0, 3).toUpperCase()}-2026`,
-            license_type: licenseType,
-            status: c.status === 'on-duty' ? 'on-duty' : (c.status === 'off' ? 'off' : 'available'),
-            trips_completed: c.tripsCompleted || 0,
-            rating: c.rating || 5.0
-          };
-
-          const existingId = crewIdMap.get(c.name.trim().toUpperCase());
-          if (existingId) {
-            const { error: updErr } = await supabase
-              .from('crews')
-              .update(crewData)
-              .eq('id', existingId);
-
-            if (updErr) {
-              if (updErr.code === '42501') rlsWarning = true;
-            } else {
-              crewsUpserted++;
-            }
-          } else {
-            const { data: insData, error: insErr } = await supabase
-              .from('crews')
-              .insert([crewData])
-              .select('id, name');
-
-            if (insErr) {
-              if (insErr.code === '42501') rlsWarning = true;
-              if (insErr.code === 'PGRST205') tableMissingWarning = true;
-            } else if (insData && insData.length > 0) {
-              crewsUpserted++;
-              crewIdMap.set(insData[0].name.trim().toUpperCase(), insData[0].id);
-            }
-          }
+          crewsUpserted++;
         }
       }
 
-      // -------------------------------------------------------------
-      // STEP C: UPSERT STORES (Toko Retail & Destinasi Distribusi)
-      // -------------------------------------------------------------
-      const storeIdMap = new Map<string, string>(); // store_code / store_name -> uuid
+      if (this.config.syncStores) {
+        for (const store of localStores) {
+          await requestJson('/api/stores', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(store)
+          });
+          storesUpserted++;
+        }
+      }
 
-      if (this.config.syncStores && localStores.length > 0) {
-        const storePayload = localStores.map(s => {
-          let category = 'Supermarket';
-          if (['Hypermarket', 'Supermarket', 'Distribution Hub', 'Minimarket Cluster'].includes(s.storeCategory || '')) {
-            category = s.storeCategory!;
-          }
-
-          return {
-            store_code: s.storeCode.trim().toUpperCase(),
-            store_name: s.storeName.trim(),
-            island: s.island || 'Jawa',
-            province: s.province || 'Jawa Timur',
-            city: s.city || 'Banyuwangi',
-            address: s.address || `Area Pengiriman ${s.storeName}`,
-            latitude: Number(s.latitude) || -8.219,
-            longitude: Number(s.longitude) || 114.369,
-            contact_person: s.contactPerson || 'PIC Distribusi Area',
-            phone: s.phone || '-',
-            delivery_window: s.deliveryWindow || '08:00 - 17:00',
-            store_category: category
-          };
+      if (this.config.syncSchedules) {
+        await requestJson('/api/schedules/persist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            schedules: localSchedules,
+            weeks: [],
+            source: `databridge:${triggerSource}`
+          })
         });
-
-        const { data: storeRes, error: storeErr } = await supabase
-          .from('stores')
-          .upsert(storePayload, { onConflict: 'store_code' })
-          .select('id, store_code, store_name');
-
-        if (storeErr) {
-          if (storeErr.code === '42501') rlsWarning = true;
-          if (storeErr.code === 'PGRST205') tableMissingWarning = true;
-          console.warn('[DataBridge] Stores upsert note:', storeErr.message);
-        } else if (storeRes) {
-          storesUpserted = storeRes.length;
-          storeRes.forEach((s: any) => {
-            storeIdMap.set(s.store_code.toUpperCase(), s.id);
-            storeIdMap.set(s.store_name.toUpperCase(), s.id);
-          });
-        }
-      }
-
-      // If store table was queried or populated, ensure we have at least one store ID for fallback references
-      let defaultStoreUuid: string | null = null;
-      if (storeIdMap.size > 0) {
-        defaultStoreUuid = storeIdMap.values().next().value || null;
-      }
-
-      // -------------------------------------------------------------
-      // STEP D: UPSERT SCHEDULES (Jadwal Pengiriman dari Google Sheets)
-      // -------------------------------------------------------------
-      if (this.config.syncSchedules && localSchedules.length > 0) {
-        // First try to look up any stores in Supabase to resolve IDs if storeIdMap was empty
-        if (!defaultStoreUuid) {
-          const { data: existingStores } = await supabase.from('stores').select('id, store_code, store_name').limit(100);
-          if (existingStores && existingStores.length > 0) {
-            defaultStoreUuid = existingStores[0].id;
-            existingStores.forEach((s: any) => {
-              storeIdMap.set(s.store_code.toUpperCase(), s.id);
-              storeIdMap.set(s.store_name.toUpperCase(), s.id);
-            });
-          }
-        }
-
-        const schedulePayload = localSchedules.map((sch, schIdx) => {
-          const areaStd = standardizeAreaName(sch.areaName || sch.store?.storeName || 'Banyuwangi Central');
-          const isBali = sch.isInterIsland || areaStd.includes('DENPASAR') || areaStd.includes('SINGARAJA') || areaStd.includes('NEGARA') || areaStd.includes('BALI');
-
-          // Match store ID
-          const matchedStoreUuid = 
-            (sch.store?.storeCode && storeIdMap.get(sch.store.storeCode.toUpperCase())) ||
-            (sch.store?.storeName && storeIdMap.get(sch.store.storeName.toUpperCase())) ||
-            storeIdMap.get(areaStd.toUpperCase()) ||
-            defaultStoreUuid;
-
-          // Match fleet ID
-          const matchedFleetUuid = 
-            (sch.fleet?.plateNumber && fleetIdMap.get(sch.fleet.plateNumber.toUpperCase())) ||
-            (sch.fleet?.initialCode && fleetIdMap.get(sch.fleet.initialCode.toUpperCase())) ||
-            null;
-
-          // Match crew ID
-          const matchedCrewUuid = 
-            (sch.crew?.name && crewIdMap.get(sch.crew.name.trim().toUpperCase())) ||
-            null;
-
-          const depIso = sch.departureDate || new Date().toISOString();
-          const arrIso = sch.estimatedArrival || new Date(new Date(depIso).getTime() + 8 * 3600000).toISOString();
-
-          return {
-            tracking_number: sch.trackingNumber || `PO-AKK-AUTO-${schIdx + 1}`,
-            origin_name: sch.originName || 'Gudang Pusat Banyuwangi DC',
-            origin_latitude: sch.originCoords ? sch.originCoords[0] : -8.1906,
-            origin_longitude: sch.originCoords ? sch.originCoords[1] : 114.3708,
-            store_id: matchedStoreUuid,
-            fleet_id: matchedFleetUuid,
-            crew_id: matchedCrewUuid,
-            status: ['scheduled', 'in_transit', 'delivered', 'delayed'].includes(sch.status) ? sch.status : 'scheduled',
-            departure_date: depIso,
-            estimated_arrival: arrIso,
-            cargo_description: sch.cargoDescription || `Karton Box & Sheet Kemasan - ${areaStd}`,
-            cargo_weight_ton: Number(sch.cargoWeightTon) || (isBali ? 4.5 : 2.5),
-            is_inter_island: isBali,
-            ferry_booking_code: isBali ? (sch.ferryBookingCode || `ASDP-KTP-GLM-${schIdx + 100}`) : null,
-            transit_port: isBali ? 'Pelabuhan Ketapang Banyuwangi -> Gilimanuk Bali' : null,
-            notes: sch.notes || `Rute Pengiriman Distribusi ${areaStd}`
-          };
-        }).filter(item => Boolean(item.store_id)); // Foreign key constraint requires a valid store_id
-
-        if (schedulePayload.length > 0) {
-          const { data: schRes, error: schErr } = await supabase
-            .from('schedules')
-            .upsert(schedulePayload, { onConflict: 'tracking_number' })
-            .select('id, tracking_number');
-
-          if (schErr) {
-            if (schErr.code === '42501') rlsWarning = true;
-            if (schErr.code === 'PGRST205') tableMissingWarning = true;
-            console.warn('[DataBridge] Schedules upsert note:', schErr.message);
-          } else if (schRes) {
-            schedulesUpserted = schRes.length;
-          }
-        }
+        schedulesUpserted = localSchedules.length;
       }
 
       const durationMs = Math.round(performance.now() - startTime);
       const timestampIso = new Date().toISOString();
-
-      // Formulate final status
-      let finalStatus: 'success' | 'warning' | 'error' = 'success';
-      let message = `Sinkronisasi DataBridge berhasil (${durationMs}ms)! ${schedulesUpserted} jadwal, ${storesUpserted} toko, ${fleetsUpserted} armada, dan ${crewsUpserted} kru telah diperbarui di Supabase.`;
-
-      if (tableMissingWarning) {
-        finalStatus = 'warning';
-        message = 'Tabel database Supabase belum dibuat. Jalankan skrip schema.sql di SQL Editor Supabase untuk mengaktifkan tabel relasional.';
-      } else if (rlsWarning) {
-        finalStatus = 'warning';
-        message = 'Akses RLS (Row Level Security) aktif di Supabase. Jalankan skrip "DataBridge Policy" di SQL Editor Supabase agar proses upsert diizinkan untuk peran Anon.';
-      }
+      const message = `Sinkronisasi DataBridge berhasil (${durationMs}ms): ${schedulesUpserted} jadwal, ${storesUpserted} toko, ${fleetsUpserted} armada, ${crewsUpserted} kru tersimpan di Hostinger MySQL.`;
 
       this.config.lastSyncTimestamp = timestampIso;
-      this.config.lastSyncStatus = finalStatus;
+      this.config.lastSyncStatus = 'success';
       this.config.lastSyncMessage = message;
       this.saveConfigToStorage();
 
-      // Record in local log
       const logEntry: DataBridgeLogEntry = {
         id: `db-log-${Date.now()}`,
         timestamp: timestampIso,
-        status: finalStatus,
+        status: 'success',
         storesCount: storesUpserted,
         schedulesCount: schedulesUpserted,
         fleetsCount: fleetsUpserted,
@@ -569,52 +352,40 @@ class DataBridgeService {
       this.logs = [logEntry, ...this.logs.slice(0, 49)];
       this.saveLogsToStorage();
 
-      // Also attempt to log into Supabase databridge_sync_logs table if created
       try {
-        await supabase.from('databridge_sync_logs').insert([
-          {
-            status: finalStatus,
-            source_type: 'google_sheets_api',
-            sheet_name: this.config.sheetTitle || 'ALL',
-            stores_count: storesUpserted,
-            schedules_count: schedulesUpserted,
-            fleets_count: fleetsUpserted,
-            crews_count: crewsUpserted,
-            message,
-            duration_ms: durationMs
-          }
-        ]);
-      } catch {
-        // non-blocking
+        await requestJson('/api/databridge/log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...logEntry, sheetName: this.config.sheetTitle || 'ALL' })
+        });
+      } catch (logErr) {
+        console.warn('[DataBridge] Remote audit log notice:', logErr);
       }
 
       this.isSyncing = false;
       this.notifyListeners();
-
       return {
-        success: finalStatus === 'success',
+        success: true,
         timestamp: timestampIso,
         durationMs,
         storesUpserted,
         schedulesUpserted,
         fleetsUpserted,
         crewsUpserted,
-        status: finalStatus,
+        status: 'success',
         message,
-        rlsWarning,
-        tableMissingWarning
+        rlsWarning: false,
+        tableMissingWarning: false
       };
     } catch (err: any) {
       const durationMs = Math.round(performance.now() - startTime);
       const timestampIso = new Date().toISOString();
-      const errMsg = err?.message || 'Terjadi kesalahan sistem saat sinkronisasi DataBridge.';
-
+      const errMsg = err?.message || 'Terjadi kesalahan saat sinkronisasi DataBridge ke Hostinger MySQL.';
       this.config.lastSyncTimestamp = timestampIso;
       this.config.lastSyncStatus = 'error';
       this.config.lastSyncMessage = errMsg;
       this.saveConfigToStorage();
-
-      const errorLog: DataBridgeLogEntry = {
+      this.logs = [{
         id: `db-log-${Date.now()}`,
         timestamp: timestampIso,
         status: 'error',
@@ -625,13 +396,10 @@ class DataBridgeService {
         message: errMsg,
         triggerSource,
         durationMs
-      };
-      this.logs = [errorLog, ...this.logs.slice(0, 49)];
+      }, ...this.logs.slice(0, 49)];
       this.saveLogsToStorage();
-
       this.isSyncing = false;
       this.notifyListeners();
-
       return {
         success: false,
         timestamp: timestampIso,
@@ -645,6 +413,7 @@ class DataBridgeService {
       };
     }
   }
+
 }
 
 export const dataBridgeService = new DataBridgeService();

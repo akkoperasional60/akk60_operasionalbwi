@@ -1,0 +1,67 @@
+AKK OPERASIONAL - HOSTINGER MYSQL REVISI FINAL
+
+==============================================================================
+1. ENVIRONMENT VARIABLES WEBSITE HOSTINGER (PERTAHANKAN / TAMBAHKAN)
+==============================================================================
+Atur variabel berikut di Hostinger Dashboard -> Environment Variables
+(JANGAN commit nilai secret ke GitHub dan JANGAN pakai prefix VITE_ untuk password/secret):
+
+NODE_ENV=production
+APP_URL=https://akkoperasional.com
+
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_NAME=u194997008_akk_operasional
+DB_USER=u194997008_akk_app
+DB_PASSWORD=<secret>
+
+SESSION_SECRET=<random minimal 32 karakter>
+
+BOOTSTRAP_ADMIN_EMAIL=<email admin>
+BOOTSTRAP_ADMIN_PASSWORD=<password minimal 12 karakter>
+BOOTSTRAP_ADMIN_NAME=<nama admin>
+
+WHATSAPP_API_KEY=<secret>
+GEMINI_API_KEY=<opsional secret>
+
+==============================================================================
+2. ATURAN PENTING BOOTSTRAP SUPER ADMIN
+==============================================================================
+- BOOTSTRAP_ADMIN_* hanya digunakan untuk membuat Super Admin pertama pada database baru.
+- Setelah database berhasil membuat Super Admin dan login pertama berhasil:
+  WAJIB HAPUS BOOTSTRAP_ADMIN_PASSWORD dari Environment Variables Hostinger.
+  BOOTSTRAP_ADMIN_EMAIL dan BOOTSTRAP_ADMIN_NAME juga boleh dihapus setelah bootstrap selesai.
+
+==============================================================================
+3. VARIABEL YANG HARUS DIHAPUS DARI ENVIRONMENT VARIABLES WEB HOSTINGER
+==============================================================================
+Hapus 5 variabel berikut dari Environment Variables website Hostinger:
+- APK_KEYSTORE_PASSWORD
+- APK_KEY_PASSWORD
+- APK_KEY_ALIAS
+- APK_PORTAL_URL
+- APK_FALLBACK_PORTAL_URL
+
+Alasan: Kelima variabel APK_* tersebut khusus untuk proses build APK Android lokal/CI,
+bukan kebutuhan runtime website Node.js di Hostinger. Jangan menaruh kredensial signing
+APK di environment website.
+
+==============================================================================
+4. KONFIGURASI NODE.JS & DATABASE HOSTINGER
+==============================================================================
+Node.js: 22.x
+Build command: npm run build
+Start command: npm start
+Branch: main
+
+DATABASE:
+- Backup database terlebih dahulu.
+- Import schema.sql melalui phpMyAdmin ke database u194997008_akk_operasional.
+- Schema bersifat non-destruktif terhadap tabel aplikasi existing (tidak DROP/TRUNCATE).
+
+VALIDASI SETELAH DEPLOY:
+1. GET /api/db-status -> success=true
+2. Login Super Admin -> /api/auth/me harus valid
+3. Setelah login Super Admin berhasil, hapus BOOTSTRAP_ADMIN_PASSWORD dari Hostinger ENV
+4. Test CRUD Armada, Crew, Toko, Jadwal
+5. Pastikan refresh browser tetap mengambil data dari MySQL

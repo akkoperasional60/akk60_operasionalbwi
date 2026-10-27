@@ -10,7 +10,6 @@ import { CrewDeliveryHistoryView } from './components/CrewDeliveryHistoryView';
 import { UserManagement } from './components/UserManagement';
 import { ExcelTrackingEvaluator } from './components/ExcelTrackingEvaluator';
 import { CustomerMapping } from './components/CustomerMapping';
-import { TracksolidGateway } from './components/TracksolidGateway';
 import { FleetFormCenter } from './components/FleetFormCenter';
 import { SupabaseSqlArchitecture } from './components/SupabaseSqlArchitecture';
 import { SalesAdminHub, SalesAdminSubTab } from './components/sales/SalesAdminHub';
@@ -42,7 +41,6 @@ const FLEET_MANAGEMENT_TABS: NavTab[] = [
   'fleets',
   'spareparts',
   'fuel_efficiency',
-  'tracksolid',
   'fleet_forms'
 ];
 
@@ -101,12 +99,25 @@ export default function App() {
   const { notifications, setOnNavigateCallback, setIsDrawerOpen } = useToast();
   const unreadCount = notifications.filter(n => !n.read).length;
 
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => logisticsStore.isAuthenticated());
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [isAuthChecking, setIsAuthChecking] = useState<boolean>(true);
 
   useEffect(() => {
-    return logisticsStore.subscribe(() => {
-      setIsAuthenticated(logisticsStore.isAuthenticated());
+    let active = true;
+    void logisticsStore.restoreServerSession().finally(() => {
+      if (active) {
+        setIsAuthenticated(logisticsStore.isAuthenticated());
+        setIsAuthChecking(false);
+      }
     });
+
+    const unsubscribe = logisticsStore.subscribe(() => {
+      if (active) setIsAuthenticated(logisticsStore.isAuthenticated());
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -122,17 +133,6 @@ export default function App() {
       return next;
     });
   };
-
-  useEffect(() => {
-    try {
-      const searchParams = new URLSearchParams(window.location.search);
-      if (searchParams.get('tab') === 'driver_portal' || (typeof navigator !== 'undefined' && navigator.userAgent && navigator.userAgent.includes('AKKDriverMobile'))) {
-        if (!isDriver()) {
-          logisticsStore.setCurrentRole('driver');
-        }
-      }
-    } catch {}
-  }, [isDriver]);
 
   const prevUserRef = useRef<{ id: string; role: string }>({
     id: currentUser.id,
@@ -171,7 +171,6 @@ export default function App() {
       case 'fuel_efficiency': return 'Efisiensi Bahan Bakar (BBM) & Konsumsi Armada';
       case 'crew_history': return 'Riwayat Pengiriman & Audit SLA Kru';
       case 'tracking_eval': return 'Audit Evaluasi Muat & Bongkar (Excel)';
-      case 'tracksolid': return 'Integrasi GPS Tracksolid Pro';
       case 'fleet_forms': return 'Formulir Operasional Armada';
       case 'sales_dashboard': return 'Sales Hub: Dashboard & SLA Penjualan';
       case 'sales_activities': return 'Sales Hub: Aktivitas Harian Admin';
@@ -206,7 +205,7 @@ export default function App() {
       case 'activity_log': return 'Audit Log & Aktivitas Sistem';
       case 'customer_map': return 'Pemetaan Toko Retail & Mitra';
       case 'users': return 'Approval & Manajemen Pengguna';
-      case 'architecture': return 'Arsitektur Database Supabase SQL';
+      case 'architecture': return 'Arsitektur Database Hostinger MySQL';
       case 'e2e_testing': return 'Pusat Pengujian E2E & Simulasi Akun Pengguna';
       default: return 'Sistem Operasional AKK';
     }
@@ -221,6 +220,19 @@ export default function App() {
     setAuthDefaultTab(defaultTab);
     setIsAuthOpen(true);
   };
+
+
+  if (isAuthChecking) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-200 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-3 text-center">
+          <ShieldCheck className="w-9 h-9 text-emerald-400 animate-pulse" />
+          <div className="text-sm font-semibold">Memverifikasi sesi Hostinger...</div>
+          <div className="text-xs text-slate-500">Autentikasi diperiksa langsung ke backend sebelum aplikasi dibuka.</div>
+        </div>
+      </div>
+    );
+  }
 
   if (!isAuthenticated) {
     return (
@@ -453,10 +465,6 @@ export default function App() {
 
           {currentTab === 'customer_map' && (
             <CustomerMapping onScheduleForStore={handleScheduleForStore} />
-          )}
-
-          {currentTab === 'tracksolid' && (canManageFleet() || canAccess(currentUser, 'tracksolid')) && (
-            <TracksolidGateway />
           )}
 
           {currentTab === 'fleet_forms' && (canManageFleet() || canAccess(currentUser, 'fleet_forms')) && (

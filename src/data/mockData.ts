@@ -18,7 +18,6 @@ export const INITIAL_PROFILES: UserProfile[] = [
   {
     id: 'usr-001',
     email: 'admin@gmail.com',
-    password: 'admin123',
     fullName: 'Super Admin',
     role: 'super_admin',
     department: 'Manajemen & Direksi',
@@ -32,7 +31,6 @@ export const INITIAL_PROFILES: UserProfile[] = [
   {
     id: 'usr-bahri',
     email: 'bahri@gmail.com',
-    password: 'password123',
     fullName: 'Muhammad Syaiful Bahri',
     role: 'spv_logistik',
     department: 'Logistik & Pengiriman',
@@ -46,7 +44,6 @@ export const INITIAL_PROFILES: UserProfile[] = [
   {
     id: 'usr-operasional',
     email: 'bayun791@gmail.com',
-    password: 'Bayu1509',
     fullName: 'Bayu Novianto Dimas Permana',
     role: 'operasional',
     department: 'Operasional',
@@ -60,7 +57,6 @@ export const INITIAL_PROFILES: UserProfile[] = [
   {
     id: 'usr-security',
     email: 'security@gmail.com',
-    password: 'password123',
     fullName: 'Hairul Rozikin',
     role: 'security',
     department: 'Satpam',
@@ -74,7 +70,6 @@ export const INITIAL_PROFILES: UserProfile[] = [
   {
     id: 'usr-budiono',
     email: 'budiono@gmail.com',
-    password: 'budiono',
     fullName: 'Budiono',
     role: 'driver',
     department: 'Pengiriman',
@@ -88,7 +83,6 @@ export const INITIAL_PROFILES: UserProfile[] = [
   {
     id: 'usr-saifur',
     email: 'saifur@gmail.com',
-    password: 'password123',
     fullName: 'Saifur Rizal',
     role: 'crew_helper',
     department: 'Pengiriman',
@@ -102,7 +96,6 @@ export const INITIAL_PROFILES: UserProfile[] = [
   {
     id: 'usr-hr',
     email: 'shelly.hr@gmail.com',
-    password: 'password123',
     fullName: 'Shelly Cahyaningthias Novitasari',
     role: 'hr_admin',
     department: 'Human Resources',
@@ -116,7 +109,6 @@ export const INITIAL_PROFILES: UserProfile[] = [
   {
     id: 'usr-hendri',
     email: 'hendri.st@gmail.com',
-    password: 'Hendri',
     fullName: 'Hendri ST',
     role: 'super_admin',
     department: 'Manajemen & Direksi',
@@ -130,7 +122,6 @@ export const INITIAL_PROFILES: UserProfile[] = [
   {
     id: 'usr-sales',
     email: 'shoim.sales@gmail.com',
-    password: 'password123',
     fullName: 'Muhammad Shoim',
     role: 'sales_admin',
     department: 'Adm. Penjualan',
@@ -144,7 +135,6 @@ export const INITIAL_PROFILES: UserProfile[] = [
   {
     id: 'usr-purchasing',
     email: 'dewi.purchasing@gmail.com',
-    password: 'password123',
     fullName: 'Dewi Lestari',
     role: 'purchasing_admin',
     department: 'Adm. Pembelian',
@@ -158,7 +148,6 @@ export const INITIAL_PROFILES: UserProfile[] = [
   {
     id: 'usr-finance',
     email: 'annisa.finance@gmail.com',
-    password: 'password123',
     fullName: 'Annisa Nurfawzia Faraswati',
     role: 'finance_tax_admin',
     department: 'Finance & Tax',
@@ -172,7 +161,6 @@ export const INITIAL_PROFILES: UserProfile[] = [
   {
     id: 'usr-marketing-online',
     email: 'darwin.online@gmail.com',
-    password: 'password123',
     fullName: 'I Made Darwin Susila',
     role: 'marketing_online',
     department: 'Marketing',
@@ -186,7 +174,6 @@ export const INITIAL_PROFILES: UserProfile[] = [
   {
     id: 'usr-marketing-offline',
     email: 'zainal.offline@gmail.com',
-    password: 'password123',
     fullName: 'Zainal Abidinsyah',
     role: 'marketing_offline',
     department: 'Marketing',

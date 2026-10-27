@@ -1,11 +1,9 @@
-import { getSupabaseClient } from './supabaseService';
 import { Schedule, ShipmentStatus } from '../types';
 
 /**
- * Supabase Realtime Synchronization & Driver Push Notification Service
+ * Hostinger MySQL Live Synchronization & Driver Push Notification Service
  * --------------------------------------------------------------------
- * Manages real-time PostgreSQL subscriptions (`INSERT`, `UPDATE`, `DELETE`) and
- * broadcast channels via Supabase Realtime WebSockets.
+ * Uses lightweight polling against the Hostinger MySQL-backed API plus same-device custom events.
  * Enforces strict driver-level filtering so each driver only receives push
  * notifications and real-time updates for schedules assigned specifically to them.
  */
@@ -567,324 +565,158 @@ export function dispatchToAdminLogistics(
   return notif;
 }
 
-export const supabaseRealtimeSync = {
-  /**
-   * Subscribe to real-time changes on core operational tables
-   */
-  subscribe(onDataChanged?: (event: { table: string; eventType: string; payload: any }) => void): void {
-    if (onDataChanged && !listeners.includes(onDataChanged)) {
-      listeners.push(onDataChanged);
-    }
+let hostingerPollTimer: ReturnType<typeof setInterval> | null = null;
+let lastHostingerSchedules = new Map<string, any>();
+let pollInitialized = false;
 
-    if (isSubscribed && realtimeChannel) return;
+function scheduleSignature(schedule: any): string {
+  return JSON.stringify({
+    id: schedule?.id,
+    status: schedule?.status,
+    crewId: schedule?.crewId || schedule?.crew_id,
+    crewHelperId: schedule?.crewHelperId || schedule?.crew_helper_id,
+    crewHelper2Id: schedule?.crewHelper2Id || schedule?.crew_helper2_id,
+    fleetId: schedule?.fleetId || schedule?.fleet_id,
+    storeId: schedule?.storeId || schedule?.store_id,
+    departureDate: schedule?.departureDate || schedule?.departure_date,
+    estimatedArrival: schedule?.estimatedArrival || schedule?.estimated_arrival,
+    actualArrival: schedule?.actualArrival || schedule?.actual_arrival,
+    notes: schedule?.notes,
+    areaName: schedule?.areaName || schedule?.area_name,
+    trackingNumber: schedule?.trackingNumber || schedule?.tracking_number
+  });
+}
 
-    const client = getSupabaseClient();
-    if (!client) {
-      console.warn('[SupabaseRealtime] Client not initialized. Realtime subscription skipped.');
+async function pollHostingerSchedules(): Promise<void> {
+  if (typeof fetch === 'undefined') return;
+  try {
+    const response = await fetch('/api/schedules/persisted', { cache: 'no-store' });
+    if (!response.ok) return;
+    const payload = await response.json();
+    const schedules = Array.isArray(payload?.schedules) ? payload.schedules : [];
+    const nextMap = new Map<string, any>();
+    schedules.forEach((schedule: any) => {
+      if (schedule?.id) nextMap.set(String(schedule.id), schedule);
+    });
+
+    if (!pollInitialized) {
+      lastHostingerSchedules = nextMap;
+      pollInitialized = true;
+      triggerStoreSync();
       return;
     }
 
-    if (realtimeChannel) {
-      try {
-        client.removeChannel(realtimeChannel);
-      } catch (e) {}
-      realtimeChannel = null;
-    }
+    nextMap.forEach((schedule, id) => {
+      const previous = lastHostingerSchedules.get(id);
+      if (!previous) {
+        notifyListeners('schedules', 'INSERT', schedule);
+        dispatchToMatchingDrivers('INSERT', schedule, null);
+      } else if (scheduleSignature(previous) !== scheduleSignature(schedule)) {
+        notifyListeners('schedules', 'UPDATE', schedule);
+        dispatchToMatchingDrivers('UPDATE', schedule, previous);
+        dispatchToAdminLogistics(schedule, previous, 'local_sync');
+      }
+    });
 
-    isSubscribed = false;
+    lastHostingerSchedules.forEach((previous, id) => {
+      if (!nextMap.has(id)) notifyListeners('schedules', 'DELETE', previous);
+    });
 
-    try {
-      realtimeChannel = client
-        .channel('akk-operations-realtime', {
-          config: { broadcast: { self: true } }
-        })
-        .on(
-          'postgres_changes',
-          { event: 'INSERT', schema: 'public', table: 'schedules' },
-          (payload) => {
-            console.log('[SupabaseRealtime] Schedule INSERT received:', payload);
-            notifyListeners('schedules', 'INSERT', payload.new);
-            dispatchToMatchingDrivers('INSERT', payload.new, null);
-            triggerStoreSync();
-          }
-        )
-        .on(
-          'postgres_changes',
-          { event: 'UPDATE', schema: 'public', table: 'schedules' },
-          (payload) => {
-            console.log('[SupabaseRealtime] Schedule UPDATE received:', payload);
-            notifyListeners('schedules', 'UPDATE', payload.new);
-            dispatchToMatchingDrivers('UPDATE', payload.new, payload.old);
-            dispatchToAdminLogistics(payload.new, payload.old, 'supabase_realtime');
-            triggerStoreSync();
-          }
-        )
-        .on(
-          'postgres_changes',
-          { event: 'DELETE', schema: 'public', table: 'schedules' },
-          (payload) => {
-            notifyListeners('schedules', 'DELETE', payload.old);
-            triggerStoreSync();
-          }
-        )
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'fleets' },
-          (payload) => {
-            notifyListeners('fleets', payload.eventType, payload.new || payload.old);
-            triggerStoreSync();
-          }
-        )
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'driver_reports' },
-          (payload) => {
-            notifyListeners('driver_reports', payload.eventType, payload.new || payload.old);
-            triggerStoreSync();
-          }
-        )
-        .on('broadcast', { event: 'driver-schedule-push' }, (payload) => {
-          const data = payload?.payload;
-          if (data && data.schedule) {
-            dispatchToMatchingDrivers(data.eventType || 'UPDATE', data.schedule, data.previousSchedule, data.notification);
-            triggerStoreSync();
-          }
-        })
-        .on('broadcast', { event: 'admin-status-push' }, (payload) => {
-          const data = payload?.payload;
-          if (data && data.notification) {
-            const notif = data.notification as AdminStatusNotification;
-            const prev = getAdminStatusNotifications();
-            const next = [notif, ...prev.filter(item => item.id !== notif.id)].slice(0, 50);
-            saveAdminStatusNotifications(next);
-            adminStatusListeners.forEach((cb) => {
-              try { cb(notif); } catch (e) {}
-            });
-            window.dispatchEvent(
-              new CustomEvent('akk-admin-status-notification', { detail: notif })
-            );
-            window.dispatchEvent(
-              new CustomEvent('akk-admin-status-updated', { detail: { notifs: next } })
-            );
-            triggerStoreSync();
-          }
-        })
-        .subscribe((status) => {
-          if (status === 'SUBSCRIBED') {
-            isSubscribed = true;
-            console.log('[SupabaseRealtime] Successfully subscribed to AKK operations channel.');
-          } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
-            isSubscribed = false;
-          }
-        });
-    } catch (err) {
-      isSubscribed = false;
-      console.error('[SupabaseRealtime] Failed to establish realtime subscription:', err);
-    }
+    lastHostingerSchedules = nextMap;
+    triggerStoreSync();
+  } catch (err) {
+    console.warn('[HostingerLive] Schedule polling skipped:', err);
+  }
+}
+
+function ensureHostingerPolling(): void {
+  if (hostingerPollTimer || typeof window === 'undefined') return;
+  void pollHostingerSchedules();
+  hostingerPollTimer = setInterval(() => void pollHostingerSchedules(), 15000);
+  isSubscribed = true;
+}
+
+export const supabaseRealtimeSync = {
+  /** Legacy object name retained so existing UI imports stay compatible. */
+  subscribe(onDataChanged?: (event: { table: string; eventType: string; payload: any }) => void): void {
+    if (onDataChanged && !listeners.includes(onDataChanged)) listeners.push(onDataChanged);
+    ensureHostingerPolling();
   },
 
-  /**
-   * Subscribe specifically for a single Driver's schedule assignments & ongoing updates.
-   * Ensures the driver ONLY receives notifications for tasks assigned to them (`crew_id=eq.${driverId}`).
-   */
   subscribeForDriver(config: DriverSubscriptionConfig): () => void {
-    const key = `${config.driverId || 'anon'}_${config.driverName || ''}`;
+    const key = `${normalizeIdentifier(config.driverId)}:${normalizeIdentifier(config.driverName)}` || `driver-${Date.now()}`;
     driverSubscribers.set(key, config);
-
-    // Ensure main channel is active
-    this.subscribe();
-
-    const client = getSupabaseClient();
-    if (client && config.driverId && !driverFilteredChannels.has(config.driverId)) {
-      try {
-        const driverChannel = client
-          .channel(`driver-assigned-schedules-${config.driverId}`)
-          .on(
-            'postgres_changes',
-            {
-              event: 'INSERT',
-              schema: 'public',
-              table: 'schedules',
-              filter: `crew_id=eq.${config.driverId}`
-            },
-            (payload) => {
-              dispatchToMatchingDrivers('INSERT', payload.new, null);
-              triggerStoreSync();
-            }
-          )
-          .on(
-            'postgres_changes',
-            {
-              event: 'UPDATE',
-              schema: 'public',
-              table: 'schedules',
-              filter: `crew_id=eq.${config.driverId}`
-            },
-            (payload) => {
-              dispatchToMatchingDrivers('UPDATE', payload.new, payload.old);
-              triggerStoreSync();
-            }
-          )
-          .subscribe();
-
-        driverFilteredChannels.set(config.driverId, driverChannel);
-      } catch (err) {
-        console.warn('[SupabaseRealtime] Driver-filtered channel setup notice:', err);
-      }
-    }
-
+    ensureHostingerPolling();
     return () => {
       driverSubscribers.delete(key);
-      if (client && config.driverId) {
-        const stillHasDriver = Array.from(driverSubscribers.values()).some(s => s.driverId === config.driverId);
-        if (!stillHasDriver && driverFilteredChannels.has(config.driverId)) {
-          try {
-            client.removeChannel(driverFilteredChannels.get(config.driverId));
-          } catch {}
-          driverFilteredChannels.delete(config.driverId);
-        }
-      }
     };
   },
 
-  /**
-   * Publishes a schedule assignment (`INSERT`) or ongoing schedule update (`UPDATE`)
-   * across Supabase PostgreSQL, Supabase Realtime Broadcast, and local driver listeners.
-   * Only drivers assigned to this schedule will receive the push notification.
-   */
   async publishScheduleChange(
     eventType: 'INSERT' | 'UPDATE',
-    schedule: Schedule,
-    previousSchedule?: Schedule | null
-  ): Promise<DriverRealtimeNotificationPayload> {
-    const notification = buildDriverNotificationPayload(eventType, schedule, previousSchedule);
-
-    // 1. Dispatch immediately to any connected driver subscribers matching this schedule's driver
-    dispatchToMatchingDrivers(eventType, schedule, previousSchedule, notification);
-
-    // 2. Broadcast over Supabase Realtime WebSocket channel for multi-device / multi-tab driver sessions
-    try {
-      if (realtimeChannel && isSubscribed) {
-        realtimeChannel.send({
-          type: 'broadcast',
-          event: 'driver-schedule-push',
-          payload: {
-            eventType,
-            schedule,
-            previousSchedule: previousSchedule || null,
-            notification
-          }
-        });
-      }
-    } catch (err) {
-      console.warn('[SupabaseRealtime] Broadcast send notice:', err);
-    }
-
-    // 3. Upsert to Supabase `schedules` table so `postgres_changes` listeners on other devices fire
-    try {
-      const client = getSupabaseClient();
-      if (client) {
-        const dbPayload: Record<string, any> = {
-          id: schedule.id,
-          tracking_number: schedule.trackingNumber,
-          origin_name: schedule.originName || 'Gudang Pusat Banyuwangi DC',
-          origin_latitude: schedule.originCoords?.[0] ?? -8.1906,
-          origin_longitude: schedule.originCoords?.[1] ?? 114.3708,
-          store_id: schedule.storeId,
-          fleet_id: schedule.fleetId,
-          crew_id: schedule.crewId,
-          status: schedule.status,
-          departure_date: schedule.departureDate,
-          estimated_arrival: schedule.estimatedArrival,
-          actual_arrival: schedule.actualArrival || null,
-          cargo_description: schedule.cargoDescription,
-          cargo_weight_ton: schedule.cargoWeightTon,
-          is_inter_island: schedule.isInterIsland,
-          ferry_booking_code: schedule.ferryBookingCode || null,
-          transit_port: schedule.transitPort || null,
-          notes: schedule.notes || null
-        };
-        await client.from('schedules').upsert(dbPayload, { onConflict: 'id' });
-      }
-    } catch {}
-
-    // 4. Emit window event for same-device listeners
-    try {
-      window.dispatchEvent(
-        new CustomEvent('akk-driver-schedule-realtime', {
-          detail: { eventType, schedule, previousSchedule, notification }
-        })
-      );
-    } catch {}
-
-    return notification;
-  },
-
-  /**
-   * Specifically broadcasts a schedule status change to SPV Logistik & Super Admin
-   * over Supabase Realtime WebSocket broadcast and updates PostgreSQL table.
-   */
-  async publishScheduleStatusChange(
     schedule: Partial<Schedule> & Record<string, any>,
-    oldStatus?: string,
-    extraNotes?: string
-  ): Promise<AdminStatusNotification | null> {
-    const notif = dispatchToAdminLogistics(schedule, oldStatus ? { status: oldStatus } : null, 'local_sync');
-    if (!notif) return null;
+    previousSchedule?: (Partial<Schedule> & Record<string, any>) | null
+  ): Promise<DriverRealtimeNotificationPayload | null> {
+    if (!schedule) return null;
+    const notif = buildDriverNotificationPayload(eventType, schedule, previousSchedule || null);
+    notifyListeners('schedules', eventType, schedule);
+    dispatchToMatchingDrivers(eventType, schedule, previousSchedule || null, notif);
 
-    // 1. Broadcast over Supabase Realtime channel
     try {
-      if (realtimeChannel && isSubscribed) {
-        realtimeChannel.send({
-          type: 'broadcast',
-          event: 'admin-status-push',
-          payload: { notification: notif, schedule }
-        });
-      }
-    } catch (err) {
-      console.warn('[SupabaseRealtime] Broadcast admin-status-push notice:', err);
-    }
+      window.dispatchEvent(new CustomEvent('akk-driver-schedule-realtime', {
+        detail: { eventType, schedule, previousSchedule, notification: notif }
+      }));
+    } catch {}
 
-    // 2. Upsert to Supabase `schedules` table so other connected clients receive postgres_changes
-    try {
-      const client = getSupabaseClient();
-      if (client && schedule.id) {
-        await client
-          .from('schedules')
-          .update({
-            status: schedule.status,
-            notes: extraNotes || schedule.notes,
-            actual_arrival: schedule.status === 'delivered' ? new Date().toISOString() : undefined
-          })
-          .eq('id', schedule.id);
-      }
-    } catch (err) {
-      console.warn('[SupabaseRealtime] Supabase schedules status update note:', err);
+    if (eventType === 'UPDATE' && previousSchedule && previousSchedule.status !== schedule.status) {
+      dispatchToAdminLogistics(schedule, previousSchedule, 'local_sync');
     }
-
+    triggerStoreSync();
     return notif;
   },
 
-  /**
-   * Unsubscribe from Supabase Realtime channel
-   */
-  unsubscribe(): void {
-    const client = getSupabaseClient();
-    if (client && realtimeChannel) {
-      client.removeChannel(realtimeChannel);
-      realtimeChannel = null;
-      isSubscribed = false;
-      console.log('[SupabaseRealtime] Unsubscribed from AKK operations channel.');
+  async publishScheduleStatusChange(
+    schedule: Partial<Schedule> & Record<string, any>,
+    oldStatus?: ShipmentStatus | string,
+    extraNotes?: string
+  ): Promise<AdminStatusNotification | null> {
+    if (!schedule) return null;
+    const previousSchedule = { ...schedule, status: oldStatus || schedule.status };
+    const scheduleWithNotes = { ...schedule, notes: extraNotes ?? schedule.notes };
+    const notif = dispatchToAdminLogistics(scheduleWithNotes, previousSchedule, 'local_sync');
+
+    try {
+      if (schedule.id) {
+        await fetch(`/api/schedules/${encodeURIComponent(String(schedule.id))}/status`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            status: schedule.status,
+            notes: extraNotes ?? schedule.notes,
+            trackingNumber: schedule.trackingNumber || schedule.tracking_number,
+            actualArrival: schedule.status === 'delivered' ? new Date().toISOString() : schedule.actualArrival
+          })
+        });
+      }
+    } catch (err) {
+      console.warn('[HostingerLive] Status persistence skipped:', err);
     }
+
+    triggerStoreSync();
+    return notif;
   },
 
-  /**
-   * Register a listener callback
-   */
+  unsubscribe(): void {
+    if (hostingerPollTimer) clearInterval(hostingerPollTimer);
+    hostingerPollTimer = null;
+    isSubscribed = false;
+    pollInitialized = false;
+    lastHostingerSchedules = new Map();
+  },
+
   addListener(callback: (event: { table: string; eventType: string; payload: any }) => void): () => void {
-    if (!listeners.includes(callback)) {
-      listeners.push(callback);
-    }
+    if (!listeners.includes(callback)) listeners.push(callback);
+    ensureHostingerPolling();
     return () => {
       const idx = listeners.indexOf(callback);
       if (idx !== -1) listeners.splice(idx, 1);
@@ -901,15 +733,14 @@ function notifyListeners(table: string, eventType: string, payload: any) {
     try {
       l({ table, eventType, payload });
     } catch (err) {
-      console.error('[SupabaseRealtime] Error in listener callback:', err);
+      console.error('[HostingerLive] Error in listener callback:', err);
     }
   }
 }
 
 function triggerStoreSync() {
   try {
-    // Notify window components that state has synchronized from Supabase Realtime
-    window.dispatchEvent(new CustomEvent('akk-realtime-synced', { detail: { timestamp: Date.now() } }));
+    window.dispatchEvent(new CustomEvent('akk-realtime-synced', { detail: { timestamp: Date.now(), source: 'hostinger_mysql' } }));
   } catch {}
 }
 

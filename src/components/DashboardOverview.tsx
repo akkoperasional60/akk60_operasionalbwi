@@ -83,7 +83,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ onNavigate
       setCurrentUser(logisticsStore.getCurrentUser());
     });
 
-    // Ensure Supabase Realtime channel is actively subscribed
+    // Ensure Hostinger MySQL Live Sync channel is actively subscribed
     supabaseRealtimeSync.subscribe();
 
     return () => {
@@ -138,7 +138,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ onNavigate
     return `${diffDays} hari yang lalu`;
   };
 
-  // Test simulation trigger for Supabase Realtime status changes
+  // Test simulation trigger for Hostinger MySQL Live Sync status changes
   const handleSimulateStatusChange = async () => {
     setIsSimulating(true);
     setSimulatedFeedback(null);
@@ -162,7 +162,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ onNavigate
         trackingNumber: tracking,
         status: nextStatus,
         areaName: area,
-        notes: `Update status otomatis simulasi via Supabase Realtime (Waktu: ${new Date().toLocaleTimeString('id-ID')})`,
+        notes: `Update status otomatis simulasi via Hostinger MySQL Live Sync (Waktu: ${new Date().toLocaleTimeString('id-ID')})`,
         store: target?.store || {
           id: 'store-sim',
           storeCode: 'SIM',
@@ -198,7 +198,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ onNavigate
         }
       };
 
-      // Broadcast and record through Supabase Realtime
+      // Broadcast and record through Hostinger MySQL Live Sync
       await publishScheduleStatusChange(simulatedPayload, oldStatus, simulatedPayload.notes);
 
       // If existing in store, update in memory
@@ -234,7 +234,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ onNavigate
               <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-xs font-semibold border border-emerald-500/30">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
                 <Radio className="w-3 h-3 text-emerald-400" />
-                <span>Supabase Realtime: Aktif (Tabel schedules)</span>
+                <span>Hostinger Live Sync: Aktif (MySQL schedules)</span>
               </div>
 
               {isSpvOrAdmin && (
@@ -249,7 +249,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ onNavigate
               Dashboard Operasional &amp; Notifikasi Real-time
             </h2>
             <p className="text-slate-400 text-xs sm:text-sm max-w-2xl leading-relaxed">
-              Monitoring langsung perubahan status pengiriman armada secara real-time via Supabase Realtime. SPV Logistik &amp; Super Admin otomatis diberitahu saat armada berangkat, tiba di tujuan, atau mengalami kendala.
+              Monitoring langsung perubahan status pengiriman armada secara real-time via Hostinger MySQL Live Sync. SPV Logistik &amp; Super Admin otomatis diberitahu saat armada berangkat, tiba di tujuan, atau mengalami kendala.
             </p>
           </div>
 
@@ -258,7 +258,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ onNavigate
               onClick={handleSimulateStatusChange}
               disabled={isSimulating}
               className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-bold shadow-md shadow-blue-600/20 transition cursor-pointer disabled:opacity-50"
-              title="Kirim uji pembaruan status untuk memicu notifikasi Supabase Realtime"
+              title="Kirim uji pembaruan status untuk memicu notifikasi Hostinger MySQL Live Sync"
             >
               <Zap className={`w-4 h-4 text-amber-300 ${isSimulating ? 'animate-spin' : ''}`} />
               <span>{isSimulating ? 'Mengirim Realtime...' : '⚡ Simulasi Update Status'}</span>
@@ -368,7 +368,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ onNavigate
           </div>
           <div className="mt-2 text-[11px] text-slate-400 flex items-center gap-1">
             <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-            <span>Tersinkron Supabase Realtime</span>
+            <span>Tersinkron Hostinger MySQL Live Sync</span>
           </div>
         </div>
       </div>
@@ -389,7 +389,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ onNavigate
                 </span>
               </h3>
               <p className="text-xs text-slate-400">
-                Pembaruan status dari supir di lapangan, sistem checklist, serta perubahan tabel schedules Supabase
+                Pembaruan status dari supir di lapangan, sistem checklist, serta perubahan tabel schedules Hostinger MySQL
               </p>
             </div>
           </div>
@@ -459,7 +459,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ onNavigate
               <p className="text-xs text-slate-500">
                 {searchQuery || statusFilter !== 'all'
                   ? 'Coba sesuaikan kata kunci pencarian atau ganti filter status.'
-                  : 'Supabase Realtime sedang aktif mendengarkan perubahan status pada tabel schedules.'}
+                  : 'Hostinger MySQL Live Sync sedang aktif mendengarkan perubahan status pada tabel schedules.'}
               </p>
             </div>
           </div>

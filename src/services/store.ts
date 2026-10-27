@@ -69,7 +69,6 @@ import { AREA_CODE_MAP, standardizeAreaName } from '../utils/areaNormalizer';
 import { googleSheetsApiService } from './googleSheetsApiService';
 import { supabaseRealtimeSync } from './supabaseRealtimeSync';
 import {
-  getSupabaseClient,
   createFleetInSupabase,
   updateFleetInSupabase,
   deleteFleetInSupabase,
@@ -535,28 +534,20 @@ class LogisticsStore {
       }
     } catch {}
 
-    // 13 Official AKK Users Synchronization:
-    // Synchronize this.users directly with INITIAL_PROFILES to ensure exact names, emails, and passwords requested
+    // Official AKK profile synchronization (identity/role only).
+    // Passwords are never stored in browser state; authentication is handled by Hostinger MySQL.
     const existingById = new Map((this.users || []).map(u => [u.id, u]));
     this.users = INITIAL_PROFILES.map(initU => {
       const existing = existingById.get(initU.id);
-      if (existing) {
-        let userEmail = initU.email || existing.email;
-        let userPassword = initU.password || existing.password;
-        if (initU.id === 'usr-hendri' && (!existing.password || existing.password === 'admin123')) {
-          userPassword = 'Hendri';
-        }
-        return {
-          ...existing,
-          ...initU,
-          email: userEmail,
-          password: userPassword,
-          permissions: existing.permissions || initU.permissions,
-          status: existing.status || initU.status
-        };
-      }
-      return initU;
+      return {
+        ...(existing || {} as UserProfile),
+        ...initU,
+        password: undefined,
+        permissions: existing?.permissions || initU.permissions,
+        status: existing?.status || initU.status
+      } as UserProfile;
     });
+    this.users = this.users.map(u => ({ ...u, password: undefined } as UserProfile));
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
 
     // Sync active session if authenticated
@@ -591,23 +582,18 @@ class LogisticsStore {
     this.securityLogs = this.loadFromStorage(STORAGE_KEYS.SECURITY_LOGS, INITIAL_SECURITY_LOGS);
     this.scheduleChangeLogs = this.loadFromStorage(STORAGE_KEYS.SCHEDULE_CHANGE_LOGS, INITIAL_SCHEDULE_CHANGE_LOGS);
     this.systemActivities = this.loadFromStorage('akk_system_activities_v1', []);
-    const defaultSupabaseUrl = 'https://pfysnacxaixfnyvixmmh.supabase.co';
-    const defaultSupabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBmeXNuYWN4YWl4Zm55dml4bW1oIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEyMjE5NTksImV4cCI6MjEwNjc5Nzk1OX0.EDGipSEnsKVaOPW0kysT7X7YeCmpoj-whr2hIl9vYJE';
-
+    // Legacy config object retained only so older UI state does not crash after migration.
+    // No Supabase URL/key is embedded in the browser anymore; Hostinger MySQL is accessed via /api/*.
     const savedSupabaseConf = this.loadFromStorage(STORAGE_KEYS.SUPABASE_CONFIG, {
-      url: defaultSupabaseUrl,
-      anonKey: defaultSupabaseKey,
+      url: '',
+      anonKey: '',
       isConnected: true
     });
-
-    // Self-heal & strip /rest/v1/ or empty config if needed
-    if (!savedSupabaseConf || !savedSupabaseConf.url || savedSupabaseConf.url.includes('/rest/v1')) {
-      savedSupabaseConf.url = defaultSupabaseUrl;
-      savedSupabaseConf.anonKey = savedSupabaseConf.anonKey || defaultSupabaseKey;
-      savedSupabaseConf.isConnected = true;
-      this.saveToStorage(STORAGE_KEYS.SUPABASE_CONFIG, savedSupabaseConf);
-    }
-    this.supabaseConfig = savedSupabaseConf;
+    this.supabaseConfig = {
+      url: savedSupabaseConf?.url || '',
+      anonKey: savedSupabaseConf?.anonKey || '',
+      isConnected: savedSupabaseConf?.isConnected ?? true
+    };
 
     // Synchronize crew pool directly with User Management (driver & crew_helper)
     if (!this.crews || !Array.isArray(this.crews)) {
@@ -970,7 +956,7 @@ class LogisticsStore {
       }
     }
 
-    // Ensure latest Tracksolid devices matching NSTRARGO console
+    // Ensure latest Tracksolid devices matching Tracksolid console
     const hasLeadDevice = this.devices.some(d => d.imei === '353701090461274');
     if (!hasLeadDevice || this.devices.length !== INITIAL_TRACKSOLID_DEVICES.length) {
       this.devices = [...INITIAL_TRACKSOLID_DEVICES];
@@ -2164,6 +2150,55 @@ class LogisticsStore {
     return this.users;
   }
 
+  public async refreshUsersFromHostinger(): Promise<boolean> {
+    try {
+      const response = await fetch('/api/users', { credentials: 'same-origin' });
+      if (!response.ok) return false;
+      const payload = await response.json();
+      if (!Array.isArray(payload?.data)) return false;
+      const localById = new Map(this.users.map(u => [u.id, u]));
+      this.users = payload.data.map((r: any) => {
+        const local = localById.get(r.id);
+        const role = (r.role || local?.role || 'unassigned') as UserRole;
+        return {
+          ...(local || {} as UserProfile),
+          id: r.id,
+          email: r.email || local?.email || '',
+          fullName: r.fullName || r.name || local?.fullName || r.email || 'User',
+          role,
+          department: r.department || local?.department || 'Logistics Operations',
+          phone: r.phone || local?.phone || '',
+          status: r.status || local?.status || 'pending',
+          createdAt: r.createdAt || local?.createdAt,
+          approvedAt: r.approvedAt || local?.approvedAt,
+          approvedBy: r.approvedBy || local?.approvedBy,
+          notes: r.notes ?? local?.notes,
+          password: undefined,
+          permissions: local?.permissions || { modules: getDefaultPermissionsForRole(role) }
+        } as UserProfile;
+      });
+      this.saveToStorage(STORAGE_KEYS.USERS, this.users);
+      this.syncUsersWithCrews();
+      this.notify();
+      return true;
+    } catch (err) {
+      console.warn('[Hostinger Users] Gagal refresh:', err);
+      return false;
+    }
+  }
+
+  private syncUserToHostinger(userId: string, data: Partial<UserProfile>): void {
+    const payload: Record<string, any> = { ...data };
+    delete payload.password;
+    delete payload.permissions;
+    fetch(`/api/users/${encodeURIComponent(userId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(payload)
+    }).catch(err => console.warn('[Hostinger Users] Sync update gagal:', err));
+  }
+
   public getPendingUsersCount(): number {
     return this.users.filter(u => u.status === 'pending').length;
   }
@@ -2198,6 +2233,8 @@ class LogisticsStore {
 
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
     this.syncUsersWithCrews();
+    const approved = this.users.find(u => u.id === userId);
+    if (approved) this.syncUserToHostinger(userId, approved);
     this.notify();
   }
 
@@ -2225,6 +2262,8 @@ class LogisticsStore {
 
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
     this.syncUsersWithCrews();
+    const rejected = this.users.find(u => u.id === userId);
+    if (rejected) this.syncUserToHostinger(userId, rejected);
     this.notify();
   }
 
@@ -2252,6 +2291,7 @@ class LogisticsStore {
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
     this.syncUsersWithCrews();
     this.logActivity('Nonaktifkan User', user.fullName, `Akun ${user.fullName} dinonaktifkan. Hak akses ditutup, histori data tetap tersimpan.`);
+    this.syncUserToHostinger(userId, this.users[userIndex]);
     this.notify();
     return true;
   }
@@ -2284,6 +2324,7 @@ class LogisticsStore {
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
     this.syncUsersWithCrews();
     this.logActivity('Aktifkan User', user.fullName, `Akun ${user.fullName} diaktifkan kembali dan hak akses dipulihkan.`);
+    this.syncUserToHostinger(userId, this.users[userIndex]);
     this.notify();
     return true;
   }
@@ -2371,6 +2412,7 @@ class LogisticsStore {
 
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
     this.syncUsersWithCrews();
+    this.syncUserToHostinger(userId, updatedUser);
     this.notify();
     return true;
   }
@@ -2379,6 +2421,8 @@ class LogisticsStore {
     this.users = this.users.filter(u => u.id !== userId);
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
     this.syncUsersWithCrews();
+    fetch(`/api/users/${encodeURIComponent(userId)}`, { method: 'DELETE', credentials: 'same-origin' })
+      .catch(err => console.warn('[Hostinger Users] Hapus user gagal:', err));
     this.notify();
   }
 
@@ -2400,7 +2444,7 @@ class LogisticsStore {
       role: resolvedRole,
       department: data.department || 'Logistik & Pengiriman',
       phone: data.phone || '0812-3456-7890',
-      password: data.password || 'password123',
+      password: undefined,
       status: data.status || 'pending',
       createdAt: new Date().toISOString(),
       notes: data.notes || 'Pendaftaran mandiri melalui portal AKK - Menunggu persetujuan (acc) Super Admin',
@@ -2412,6 +2456,23 @@ class LogisticsStore {
     this.users = [newUser, ...this.users];
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
     this.syncUsersWithCrews();
+    const endpoint = this.currentUser?.role === 'super_admin' ? '/api/users' : '/api/auth/register';
+    fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({
+        id: newUser.id,
+        fullName: newUser.fullName,
+        email: newUser.email,
+        phone: newUser.phone,
+        role: newUser.role,
+        department: newUser.department,
+        status: newUser.status,
+        notes: newUser.notes,
+        password: data.password || ''
+      })
+    }).catch(err => console.warn('[Hostinger Users] Registrasi user gagal disinkronkan:', err));
     this.notify();
 
     return newUser;
@@ -2518,74 +2579,190 @@ class LogisticsStore {
   }
 
   public loginUser(identifier: string, password?: string): UserProfile | null {
+    // Legacy local login is intentionally strict and kept only for offline/dev compatibility.
+    // Production UI authenticates against Hostinger MySQL through loginUserRemote().
     const existing = this.findUserByIdentifier(identifier);
-    if (!existing) return null;
-    if (existing.status !== 'approved') return null;
-
-    const cleanPass = (password || '').trim();
-
-    // Verifikasi password jika diisi
-    if (cleanPass) {
-      const expectedPass = (existing.password || '').trim().toLowerCase();
-      const inputPassLower = cleanPass.toLowerCase();
-      const usernameLower = (existing.email || '').split('@')[0].toLowerCase();
-      const fullNameFirst = (existing.fullName || '').split(' ')[0].toLowerCase();
-      const fullNameClean = (existing.fullName || '').toLowerCase().replace(/\s+/g, '');
-
-      // Check against initial profile password if defined
-      const initProf = INITIAL_PROFILES.find(p => p.id === existing.id);
-      const initPassLower = (initProf?.password || '').trim().toLowerCase();
-
-      // Common admin & official alias passwords
-      const allowedAdminPass = [
-        'admin123',
-        'admin791',
-        'admin',
-        'bayun791',
-        'bayu1509',
-        'hendri',
-        'hendri123',
-        'hendrist',
-        'password123'
-      ];
-
-      const isSuperAdminMatch = existing.role === 'super_admin' && (
-        allowedAdminPass.includes(inputPassLower) ||
-        inputPassLower === expectedPass ||
-        inputPassLower === initPassLower ||
-        inputPassLower === usernameLower ||
-        inputPassLower === fullNameFirst ||
-        inputPassLower === fullNameClean
-      );
-
-      const isGeneralMatch = 
-        !expectedPass ||
-        expectedPass === inputPassLower ||
-        expectedPass === cleanPass ||
-        initPassLower === inputPassLower ||
-        inputPassLower === usernameLower ||
-        inputPassLower === fullNameFirst ||
-        inputPassLower === fullNameClean ||
-        inputPassLower === 'password123' ||
-        inputPassLower === 'admin123' ||
-        inputPassLower === 'admin' ||
-        inputPassLower === 'hendri' ||
-        inputPassLower === 'bayu1509' ||
-        inputPassLower === 'budiono';
-
-      if (!isSuperAdminMatch && !isGeneralMatch) return null;
-    }
-
-    this.currentUser = existing;
-    try {
-      if (typeof sessionStorage !== 'undefined') {
-        sessionStorage.setItem(STORAGE_KEYS.AUTH_SESSION, existing.id);
-      }
-    } catch {}
-    this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
-    this.syncCurrentUserToCrew();
-    this.notify();
+    if (!existing || existing.status !== 'approved') return null;
+    const expected = String(existing.password || '');
+    const supplied = String(password || '');
+    if (!expected || !supplied || supplied !== expected) return null;
+    this.setCurrentUser(existing);
     return existing;
+  }
+
+  public async loginUserRemote(identifier: string, password: string): Promise<UserProfile | null> {
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ identifier: identifier.trim(), password })
+      });
+      if (!response.ok) return null;
+      const payload = await response.json();
+      const remote = payload?.user;
+      if (!remote?.id) return null;
+
+      const existing = this.users.find(u => u.id === remote.id || u.email?.toLowerCase() === String(remote.email || '').toLowerCase());
+      const user: UserProfile = {
+        ...(existing || {} as UserProfile),
+        id: remote.id,
+        email: remote.email || existing?.email || '',
+        fullName: remote.name || existing?.fullName || remote.email || 'User',
+        role: remote.role || existing?.role || 'unassigned',
+        department: remote.department || existing?.department || 'Logistics Operations',
+        phone: remote.phone || existing?.phone || '',
+        status: remote.status || existing?.status || 'approved'
+      } as UserProfile;
+
+      const idx = this.users.findIndex(u => u.id === user.id);
+      if (idx >= 0) this.users[idx] = { ...this.users[idx], ...user, password: undefined } as UserProfile;
+      else this.users = [{ ...user, password: undefined } as UserProfile, ...this.users];
+      this.saveToStorage(STORAGE_KEYS.USERS, this.users);
+      this.setCurrentUser({ ...user, password: undefined } as UserProfile);
+      void this.hydrateOperationalDataFromHostinger();
+      if (user.role === 'super_admin') await this.refreshUsersFromHostinger();
+      return user;
+    } catch (err) {
+      console.warn('[Hostinger Auth] Login gagal:', err);
+      return null;
+    }
+  }
+
+  public async hydrateOperationalDataFromHostinger(): Promise<boolean> {
+    try {
+      const [fleetRes, crewRes, storeRes, scheduleRes] = await Promise.all([
+        fetch('/api/fleets', { credentials: 'same-origin' }),
+        fetch('/api/crews', { credentials: 'same-origin' }),
+        fetch('/api/stores', { credentials: 'same-origin' }),
+        fetch('/api/schedules/persisted', { credentials: 'same-origin' })
+      ]);
+
+      const [fleetPayload, crewPayload, storePayload, schedulePayload] = await Promise.all([
+        fleetRes.ok ? fleetRes.json().catch(() => ({})) : Promise.resolve({}),
+        crewRes.ok ? crewRes.json().catch(() => ({})) : Promise.resolve({}),
+        storeRes.ok ? storeRes.json().catch(() => ({})) : Promise.resolve({}),
+        scheduleRes.ok ? scheduleRes.json().catch(() => ({})) : Promise.resolve({})
+      ]);
+
+      if (fleetRes.ok && Array.isArray(fleetPayload?.data)) {
+        this.fleets = fleetPayload.data;
+        this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
+      }
+      if (crewRes.ok && Array.isArray(crewPayload?.data)) {
+        this.crews = crewPayload.data;
+        this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
+      }
+      if (storeRes.ok && Array.isArray(storePayload?.data)) {
+        this.stores = storePayload.data.filter((item: RetailStore) => !isAreaRouteItem(item));
+        this.saveToStorage(STORAGE_KEYS.STORES, this.stores);
+      }
+      if (scheduleRes.ok && schedulePayload?.exists && Array.isArray(schedulePayload?.schedules)) {
+        this.schedules = schedulePayload.schedules;
+        this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
+      }
+
+      this.syncUsersWithCrews();
+      this.notify();
+      return fleetRes.ok || crewRes.ok || storeRes.ok || scheduleRes.ok;
+    } catch (err) {
+      console.warn('[Hostinger MySQL] Gagal hydrate data operasional:', err);
+      return false;
+    }
+  }
+
+  public async restoreServerSession(): Promise<boolean> {
+    try {
+      const response = await fetch('/api/auth/me', {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: { 'Accept': 'application/json' }
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.user?.id) {
+        this.currentUser = { ...GUEST_USER_PROFILE };
+        try {
+          sessionStorage.removeItem(STORAGE_KEYS.AUTH_SESSION);
+          localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+        } catch {}
+        this.notify();
+        return false;
+      }
+
+      const remote = payload.user;
+      const role = (remote.role || 'unassigned') as UserRole;
+      const user: UserProfile = {
+        id: remote.id,
+        email: remote.email,
+        fullName: remote.name || remote.fullName || 'Pengguna',
+        role,
+        department: remote.department || 'Logistik',
+        phone: remote.phone || '',
+        status: remote.status || 'approved',
+        createdAt: remote.createdAt || new Date().toISOString(),
+        approvedAt: remote.approvedAt,
+        approvedBy: remote.approvedBy,
+        notes: remote.notes,
+        permissions: { modules: getDefaultPermissionsForRole(role) },
+        password: undefined
+      } as UserProfile;
+
+      const idx = this.users.findIndex(u => u.id === user.id || u.email?.toLowerCase() === user.email?.toLowerCase());
+      if (idx >= 0) this.users[idx] = { ...this.users[idx], ...user, password: undefined } as UserProfile;
+      else this.users = [user, ...this.users];
+      this.saveToStorage(STORAGE_KEYS.USERS, this.users);
+      this.setCurrentUser(user);
+      void this.hydrateOperationalDataFromHostinger();
+      if (user.role === 'super_admin') void this.refreshUsersFromHostinger();
+      return true;
+    } catch (err) {
+      console.warn('[Hostinger Auth] Restore session gagal:', err);
+      this.currentUser = { ...GUEST_USER_PROFILE };
+      try {
+        sessionStorage.removeItem(STORAGE_KEYS.AUTH_SESSION);
+        localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+      } catch {}
+      this.notify();
+      return false;
+    }
+  }
+
+  public async registerUserRemote(data: {
+    fullName: string;
+    email: string;
+    phone?: string;
+    department?: string;
+    password: string;
+  }): Promise<UserProfile | null> {
+    try {
+      const response = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(data)
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.user?.id) return null;
+      const remote = payload.user;
+      const user: UserProfile = {
+        id: remote.id,
+        email: remote.email,
+        fullName: remote.name || data.fullName,
+        role: remote.role || 'unassigned',
+        department: remote.department || data.department || 'Logistik',
+        phone: remote.phone || data.phone || '',
+        status: remote.status || 'pending',
+        createdAt: remote.createdAt || new Date().toISOString(),
+        permissions: { modules: getDefaultPermissionsForRole((remote.role || 'unassigned') as UserRole) }
+      } as UserProfile;
+      this.users = [user, ...this.users.filter(u => u.id !== user.id && u.email?.toLowerCase() !== user.email.toLowerCase())];
+      this.saveToStorage(STORAGE_KEYS.USERS, this.users);
+      this.notify();
+      return user;
+    } catch (err) {
+      console.warn('[Hostinger Auth] Registrasi gagal:', err);
+      return null;
+    }
   }
 
   public switchCurrentUser(userId: string) {
@@ -2616,6 +2793,7 @@ class LogisticsStore {
   }
 
   public logoutUser() {
+    fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
     this.currentUser = { ...GUEST_USER_PROFILE };
     try {
       if (typeof sessionStorage !== 'undefined') {
@@ -2641,30 +2819,31 @@ class LogisticsStore {
     }
   }
 
-  public resetUserPassword(userId: string, newPassword: string): boolean {
+  public async resetUserPassword(userId: string, newPassword: string): Promise<boolean> {
     const userIndex = this.users.findIndex(u => u.id === userId);
-    if (userIndex === -1) return false;
+    if (userIndex === -1 || newPassword.length < 8) return false;
 
-    this.users[userIndex] = {
-      ...this.users[userIndex],
-      password: newPassword
-    };
-    this.saveToStorage(STORAGE_KEYS.USERS, this.users);
+    try {
+      const response = await fetch(`/api/users/${encodeURIComponent(userId)}/password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ password: newPassword })
+      });
+      if (!response.ok) return false;
 
-    if (this.currentUser && this.currentUser.id === userId) {
-      this.currentUser = { ...this.currentUser, password: newPassword };
-      this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
+      // Never persist plaintext passwords in browser storage. Password hashing happens on the server.
+      this.users[userIndex] = { ...this.users[userIndex], password: undefined } as UserProfile;
+      this.saveToStorage(STORAGE_KEYS.USERS, this.users);
+      this.logActivity('Reset Password', this.users[userIndex].fullName, 'Password direset oleh Super Admin melalui backend Hostinger');
+      this.notify();
+      return true;
+    } catch (err) {
+      console.warn('[Hostinger Users] Reset password gagal:', err);
+      return false;
     }
-
-    this.logActivity('Reset Password', this.users[userIndex].fullName, 'Kata sandi berhasil dipulihkan melalui kode token verifikasi');
-    this.notify();
-    return true;
   }
 
-  /**
-   * Mengembalikan nama tampilan resmi portal yang selalu tersinkronisasi secara real-time
-   * dengan 'fullName' profil pengguna yang sedang login.
-   */
   public getPortalDisplayName(): string {
     if (!this.currentUser) return 'Driver Operasional';
     if (this.currentUser.role === 'super_admin') {
@@ -3276,35 +3455,25 @@ class LogisticsStore {
   }
 
   private async syncSingleUpdateToSupabase(item: OfflineScheduleStatusUpdate): Promise<boolean> {
+    // Legacy method name retained for compatibility; persistence now targets Hostinger MySQL.
     try {
-      const supabase = getSupabaseClient();
-      if (!supabase) return false;
-
-      const updatePayload: Record<string, any> = {
-        status: item.status,
-      };
-      if (item.status === 'delivered') {
-        updatePayload.actual_arrival = new Date().toISOString();
-      }
-      if (item.extraNotes && item.extraNotes.trim()) {
-        updatePayload.notes = item.extraNotes.trim();
-      } else if (item.podData?.podReceiverName) {
-        updatePayload.notes = `Diterima: ${item.podData.podReceiverName} (${item.podData.podConditionNote || 'Kondisi Baik'})${item.podData.podPhotoUrl ? ' [Bukti Foto POD OK]' : ''}`;
-      }
-
-      const { error: updErr } = await supabase
-        .from('schedules')
-        .update(updatePayload)
-        .eq('tracking_number', item.trackingNumber);
-
-      if (!updErr) return true;
-
-      const { error: idErr } = await supabase
-        .from('schedules')
-        .update(updatePayload)
-        .eq('id', item.scheduleId);
-
-      return !idErr;
+      const notes = item.extraNotes && item.extraNotes.trim()
+        ? item.extraNotes.trim()
+        : item.podData?.podReceiverName
+          ? `Diterima: ${item.podData.podReceiverName} (${item.podData.podConditionNote || 'Kondisi Baik'})${item.podData.podPhotoUrl ? ' [Bukti Foto POD OK]' : ''}`
+          : undefined;
+      const response = await fetch(`/api/schedules/${encodeURIComponent(item.scheduleId)}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          status: item.status,
+          notes,
+          trackingNumber: item.trackingNumber,
+          actualArrival: item.status === 'delivered' ? new Date().toISOString() : undefined
+        })
+      });
+      return response.ok;
     } catch {
       return false;
     }
@@ -3690,21 +3859,35 @@ class LogisticsStore {
         id: 'usr-' + Math.random().toString(36).substring(2, 8),
         fullName: cleanName,
         email: `${emailSlug}@gmail.com`,
-        password: `${emailSlug}123`,
+        password: undefined,
         role: targetUserRole,
         department: 'Logistik & Pengiriman',
         phone: crew.phone || '0812-3456-7890',
-        status: 'approved',
+        status: 'pending',
         createdAt: new Date().toISOString(),
-        approvedAt: new Date().toISOString(),
-        approvedBy: this.currentUser?.fullName || 'Super Admin',
-        notes: `Terintegrasi dari Data Kru & Jadwal Pengiriman (${crew.role})`,
+        notes: `Terintegrasi dari Data Kru & Jadwal Pengiriman (${crew.role}) — akun login menunggu verifikasi Super Admin`,
         permissions: {
           modules: getDefaultPermissionsForRole(targetUserRole)
         }
       };
       this.users = [createdUser, ...this.users];
       this.saveToStorage(STORAGE_KEYS.USERS, this.users);
+      // Bootstrap a pending server account with a one-time random password. Super Admin must reset it before activation.
+      const bootstrapPassword = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+        ? `${crypto.randomUUID()}!A9`
+        : `${Math.random().toString(36).slice(2)}${Date.now()}!A9`;
+      fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          fullName: createdUser.fullName,
+          email: createdUser.email,
+          phone: createdUser.phone,
+          department: createdUser.department,
+          password: bootstrapPassword
+        })
+      }).catch(err => console.warn('[Hostinger Users] Bootstrap akun kru gagal:', err));
     } else if (existingUser && existingUser.role !== 'driver' && existingUser.role !== 'crew_helper') {
       existingUser.role = targetUserRole;
       this.saveToStorage(STORAGE_KEYS.USERS, this.users);
@@ -3825,6 +4008,9 @@ class LogisticsStore {
     };
     this.stores = [...this.stores.filter(s => !isAreaRouteItem(s)), newStore];
     this.saveToStorage(STORAGE_KEYS.STORES, this.stores);
+    fetch('/api/stores', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(newStore)
+    }).catch(err => console.warn('[Hostinger Stores] Tambah toko gagal disinkronkan:', err));
     
     this.dispatchMiddleware({
       entityType: 'store',
@@ -3841,6 +4027,9 @@ class LogisticsStore {
   public setStores(newStores: RetailStore[]): void {
     this.stores = newStores.filter(s => !isAreaRouteItem(s));
     this.saveToStorage(STORAGE_KEYS.STORES, this.stores);
+    fetch('/api/stores/batch', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ stores: this.stores })
+    }).catch(err => console.warn('[Hostinger Stores] Batch toko gagal disinkronkan:', err));
     
     this.dispatchMiddleware({
       entityType: 'store',
@@ -3866,6 +4055,9 @@ class LogisticsStore {
     this.saveToStorage(STORAGE_KEYS.STORES, this.stores);
 
     if (updatedStore) {
+      fetch(`/api/stores/${encodeURIComponent(id)}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(updatedStore)
+      }).catch(err => console.warn('[Hostinger Stores] Update toko gagal disinkronkan:', err));
       this.dispatchMiddleware({
         entityType: 'store',
         action: 'update',
@@ -3884,6 +4076,8 @@ class LogisticsStore {
     this.saveToStorage(STORAGE_KEYS.STORES, this.stores);
 
     if (target) {
+      fetch(`/api/stores/${encodeURIComponent(id)}`, { method: 'DELETE', credentials: 'same-origin' })
+        .catch(err => console.warn('[Hostinger Stores] Hapus toko gagal disinkronkan:', err));
       this.dispatchMiddleware({
         entityType: 'store',
         action: 'delete',

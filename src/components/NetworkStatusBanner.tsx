@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Wifi, WifiOff, RefreshCw, X, ChevronUp, ChevronDown, Radio, CheckCircle2 } from 'lucide-react';
-import { tracksolidSyncService } from '../services/tracksolidSyncService';
 import { googleSheetsSyncService } from '../services/googleSheetsSyncService';
 import { dataBridgeService } from '../services/dataBridgeService';
 import { driverOfflineSyncService } from '../services/driverOfflineSyncService';
@@ -30,8 +29,7 @@ export const NetworkStatusBanner: React.FC<NetworkStatusBannerProps> = ({ onStat
       await Promise.allSettled([
         googleSheetsSyncService.syncNow('Force Data Sync (Reconnected)', false),
         dataBridgeService.syncNow('Force Data Sync (Reconnected)'),
-        driverOfflineSyncService.syncQueue(),
-        Promise.resolve(tracksolidSyncService.triggerSync('manual'))
+        driverOfflineSyncService.syncQueue()
       ]);
     } catch (err) {
       console.warn('[NetworkStatusBanner] Force Data Sync error:', err);
@@ -46,7 +44,7 @@ export const NetworkStatusBanner: React.FC<NetworkStatusBannerProps> = ({ onStat
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 3000);
       
-      const response = await fetch('/api/tracksolid/status', {
+      const response = await fetch('/api/db-status', {
         method: 'GET',
         cache: 'no-store',
         signal: controller.signal
@@ -62,8 +60,6 @@ export const NetworkStatusBanner: React.FC<NetworkStatusBannerProps> = ({ onStat
 
         if (wasOffline) {
           triggerForceDataSync();
-        } else {
-          tracksolidSyncService.triggerSync('auto');
         }
       } else if (!navigator.onLine) {
         setIsOffline(true);
@@ -87,11 +83,6 @@ export const NetworkStatusBanner: React.FC<NetworkStatusBannerProps> = ({ onStat
 
       if (wasOffline) {
         triggerForceDataSync();
-      } else {
-        // Trigger tracking sync immediately upon reconnection
-        try {
-          tracksolidSyncService.triggerSync('auto');
-        } catch {}
       }
 
       // Auto-dismiss the reconnected notification after 3.5 seconds

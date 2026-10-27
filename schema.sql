@@ -4,6 +4,7 @@
 -- Engine: MySQL / MariaDB (Importable via Hostinger phpMyAdmin)
 -- ====================================================================
 
+-- NON-DESTRUCTIVE: this file never DROPs or TRUNCATEs application tables.
 SET FOREIGN_KEY_CHECKS = 0;
 
 -- 1. USERS & PROFILES (Authentication & Role Based Access Control)
@@ -12,10 +13,14 @@ CREATE TABLE IF NOT EXISTS `users` (
   `email` VARCHAR(191) NOT NULL UNIQUE,
   `password_hash` VARCHAR(255) NOT NULL,
   `full_name` VARCHAR(255) NOT NULL,
-  `role` ENUM('super_admin', 'spv_logistik', 'driver') NOT NULL DEFAULT 'spv_logistik',
+  `role` VARCHAR(50) NOT NULL DEFAULT 'unassigned',
   `department` VARCHAR(100) DEFAULT 'Logistics Operations',
   `phone` VARCHAR(50) NULL,
-  `status` VARCHAR(20) DEFAULT 'approved',
+  `status` VARCHAR(20) DEFAULT 'pending',
+  `approved_at` DATETIME NULL,
+  `approved_by` VARCHAR(191) NULL,
+  `notes` TEXT NULL,
+  `permissions_json` JSON NULL,
   `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -33,6 +38,7 @@ CREATE TABLE IF NOT EXISTS `fleets` (
   `odometer_km` INT DEFAULT 0,
   `year` INT DEFAULT 2024,
   `last_maintenance` DATE NULL,
+  `payload_json` JSON NULL,
   `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -48,6 +54,7 @@ CREATE TABLE IF NOT EXISTS `crews` (
   `status` ENUM('available', 'on-duty', 'off') DEFAULT 'available',
   `trips_completed` INT DEFAULT 0,
   `rating` DECIMAL(3,2) DEFAULT 5.00,
+  `payload_json` JSON NULL,
   `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -67,6 +74,7 @@ CREATE TABLE IF NOT EXISTS `stores` (
   `phone` VARCHAR(50) NOT NULL,
   `delivery_window` VARCHAR(50) DEFAULT '08:00 - 17:00',
   `store_category` VARCHAR(50) DEFAULT 'Supermarket',
+  `payload_json` JSON NULL,
   `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -81,7 +89,9 @@ CREATE TABLE IF NOT EXISTS `schedules` (
   `store_id` VARCHAR(64) NULL,
   `fleet_id` VARCHAR(64) NULL,
   `crew_id` VARCHAR(64) NULL,
-  `status` ENUM('scheduled', 'in_transit', 'delivered', 'delayed') DEFAULT 'scheduled',
+  `crew_helper_id` VARCHAR(64) NULL,
+  `crew_helper2_id` VARCHAR(64) NULL,
+  `status` VARCHAR(30) DEFAULT 'scheduled',
   `departure_date` DATETIME NOT NULL,
   `estimated_arrival` DATETIME NOT NULL,
   `actual_arrival` DATETIME NULL,
@@ -91,6 +101,7 @@ CREATE TABLE IF NOT EXISTS `schedules` (
   `ferry_booking_code` VARCHAR(100) NULL,
   `transit_port` VARCHAR(100) NULL,
   `notes` TEXT NULL,
+  `payload_json` JSON NULL,
   `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (`store_id`) REFERENCES `stores`(`id`) ON DELETE SET NULL,
@@ -155,15 +166,51 @@ CREATE TABLE IF NOT EXISTS `fuel_logs` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
+-- 10. APP_STATE (Snapshot JSON persisten untuk data kompleks UI seperti jadwal mingguan)
+CREATE TABLE IF NOT EXISTS `app_state` (
+  `state_key` VARCHAR(100) NOT NULL PRIMARY KEY,
+  `state_json` JSON NOT NULL,
+  `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 11. ATTENDANCE (Presensi driver/helper)
+CREATE TABLE IF NOT EXISTS `attendance` (
+  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  `crew_id` VARCHAR(64) NOT NULL,
+  `date` DATE NOT NULL,
+  `status` VARCHAR(30) NOT NULL DEFAULT 'present',
+  `reason` TEXT NULL,
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  INDEX `idx_attendance_crew_date` (`crew_id`, `date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ====================================================================
+-- SAFE UPGRADE FOR AN EARLIER HOSTINGER SCHEMA (NO DROP / NO TRUNCATE)
+-- ====================================================================
+-- Hostinger Web/Cloud uses MariaDB, which supports ADD COLUMN IF NOT EXISTS.
+ALTER TABLE `users` MODIFY COLUMN `role` VARCHAR(50) NOT NULL DEFAULT 'unassigned';
+ALTER TABLE `users` MODIFY COLUMN `status` VARCHAR(20) NOT NULL DEFAULT 'pending';
+ALTER TABLE `users` ADD COLUMN IF NOT EXISTS `approved_at` DATETIME NULL AFTER `status`;
+ALTER TABLE `users` ADD COLUMN IF NOT EXISTS `approved_by` VARCHAR(191) NULL AFTER `approved_at`;
+ALTER TABLE `users` ADD COLUMN IF NOT EXISTS `notes` TEXT NULL AFTER `approved_by`;
+ALTER TABLE `users` ADD COLUMN IF NOT EXISTS `permissions_json` JSON NULL AFTER `notes`;
+
+ALTER TABLE `fleets` ADD COLUMN IF NOT EXISTS `payload_json` JSON NULL AFTER `last_maintenance`;
+ALTER TABLE `crews` ADD COLUMN IF NOT EXISTS `payload_json` JSON NULL AFTER `rating`;
+ALTER TABLE `stores` ADD COLUMN IF NOT EXISTS `payload_json` JSON NULL AFTER `store_category`;
+ALTER TABLE `schedules` MODIFY COLUMN `status` VARCHAR(30) NOT NULL DEFAULT 'scheduled';
+ALTER TABLE `schedules` ADD COLUMN IF NOT EXISTS `crew_helper_id` VARCHAR(64) NULL AFTER `crew_id`;
+ALTER TABLE `schedules` ADD COLUMN IF NOT EXISTS `crew_helper2_id` VARCHAR(64) NULL AFTER `crew_helper_id`;
+ALTER TABLE `schedules` ADD COLUMN IF NOT EXISTS `payload_json` JSON NULL AFTER `notes`;
+
 -- ====================================================================
 -- SEED DATA SETUP (Data Operasional Awal PT AKK Logistics)
 -- ====================================================================
 
--- Default Users (Super Admin & Head of Logistics)
-INSERT IGNORE INTO `users` (`id`, `email`, `password_hash`, `full_name`, `role`, `department`, `phone`, `status`) VALUES
-('usr-001', 'bayun791@gmail.com', 'Bayu1509', 'Bayu Novianto Dimas Permana, S.Si', 'super_admin', 'Direksi Operasional & Supply Chain', '0812-1351-3590', 'approved'),
-('usr-002', 'hendri@akk.co.id', 'Hendri', 'Hendri ST', 'spv_logistik', 'Head of Logistics', '0812-3456-7890', 'approved'),
-('usr-003', 'zainul@akk.co.id', 'driver123', 'Zainul Agustiar', 'driver', 'Fleet Driver', '0821-4455-6677', 'approved');
+-- USERS TIDAK DI-SEED DENGAN PASSWORD DEFAULT.
+-- Database existing tetap dipertahankan. Untuk database baru, aplikasi membuat Super Admin awal
+-- hanya jika BOOTSTRAP_ADMIN_EMAIL + BOOTSTRAP_ADMIN_PASSWORD diisi pada Environment Variables Hostinger.
+-- Setelah login pertama berhasil, hapus BOOTSTRAP_ADMIN_PASSWORD dari Environment Variables.
 
 -- Default Fleets (12 Unit Utama PT AKK Logistics)
 INSERT IGNORE INTO `fleets` (`id`, `plate_number`, `vehicle_type`, `tonnage_capacity`, `current_tonnage`, `status`, `fuel_level_percent`, `odometer_km`, `year`) VALUES

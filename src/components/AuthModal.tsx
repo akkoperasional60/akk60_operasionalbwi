@@ -152,192 +152,64 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
-
-    const targetIdentifier = recoveryInput.trim();
-    if (!targetIdentifier) {
+    if (!recoveryInput.trim()) {
       setErrorMsg('Silakan masukkan email atau username akun Anda.');
       return;
     }
-
-    setIsSendingCode(true);
-
-    setTimeout(() => {
-      setIsSendingCode(false);
-      const targetUser = logisticsStore.findUserByIdentifier(targetIdentifier);
-      if (!targetUser) {
-        setErrorMsg('Akun dengan email atau username tersebut tidak ditemukan di sistem AKK.');
-        return;
-      }
-
-      // Generate temporary secure recovery token (contoh: AKK-REC-4HEX-4HEX)
-      const randPart1 = Math.random().toString(36).substring(2, 6).toUpperCase();
-      const randPart2 = Math.random().toString(36).substring(2, 6).toUpperCase();
-      const token = `AKK-REC-${randPart1}-${randPart2}`;
-
-      // Generate 6-digit verification code
-      const code = Math.floor(100000 + Math.random() * 900000).toString();
-      const expiresAt = Date.now() + 15 * 60 * 1000; // 15 menit
-
-      const targetEmail = (targetUser.email && targetUser.email.includes('@'))
-        ? targetUser.email
-        : `${(targetUser.fullName || targetUser.id).toLowerCase().replace(/[^a-z0-9]/g, '')}@akk-packaging.co.id`;
-
-      const session: RecoverySession = {
-        user: targetUser,
-        token,
-        code,
-        expiresAt,
-        emailSentTo: targetEmail,
-        timestamp: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-      };
-
-      setRecoverySession(session);
-      setRecoveryStep('verify');
-      setVerificationCodeInput('');
-      setNewPassword('');
-      setConfirmNewPassword('');
-      setSuccessMsg(`Token pemulihan dibuat & kode verifikasi berhasil dikirimkan ke ${targetEmail} (Simulasi AKK Mail Service).`);
-    }, 500);
+    setRecoveryStep('request');
+    setRecoverySession(null);
+    setSuccessMsg('Reset password mandiri dinonaktifkan demi keamanan. Hubungi Super Admin untuk verifikasi identitas dan reset password dari User Management.');
   };
 
   const handleVerifyAndResetPassword = (e: React.FormEvent) => {
     e.preventDefault();
-    setErrorMsg('');
-    setSuccessMsg('');
-
-    if (!recoverySession) {
-      setErrorMsg('Sesi pemulihan tidak ditemukan. Silakan ajukan ulang.');
-      return;
-    }
-
-    if (Date.now() > recoverySession.expiresAt) {
-      setErrorMsg('Kode verifikasi dan token telah kedaluwarsa (lebih dari 15 menit). Silakan ajukan token baru.');
-      return;
-    }
-
-    const cleanCode = verificationCodeInput.replace(/\s+/g, '');
-    if (cleanCode !== recoverySession.code) {
-      setErrorMsg('Kode verifikasi 6-digit tidak cocok. Silakan periksa kode pada kotak simulasi email.');
-      return;
-    }
-
-    if (!newPassword) {
-      setErrorMsg('Silakan masukkan kata sandi baru.');
-      return;
-    }
-
-    if (newPassword.length < 4) {
-      setErrorMsg('Password baru minimal 4 karakter.');
-      return;
-    }
-
-    if (newPassword !== confirmNewPassword) {
-      setErrorMsg('Konfirmasi password tidak cocok.');
-      return;
-    }
-
-    const ok = logisticsStore.resetUserPassword(recoverySession.user.id, newPassword);
-    if (!ok) {
-      setErrorMsg('Gagal memperbarui kata sandi. Silakan coba kembali.');
-      return;
-    }
-
-    setSuccessMsg(`Kata sandi akun "${recoverySession.user.fullName}" berhasil diperbarui! Mengalihkan ke login...`);
-    setLoginEmail(recoverySession.user.email && recoverySession.user.email.includes('@') ? recoverySession.user.email : recoverySession.user.fullName);
-    setLoginPassword('');
-
-    setTimeout(() => {
-      setTab('login');
-      setRecoveryStep('request');
-      setRecoverySession(null);
-      setSuccessMsg('Kata sandi berhasil diperbarui. Silakan masuk menggunakan kata sandi baru Anda.');
-    }, 1300);
+    setErrorMsg('Kode pemulihan simulasi sudah dinonaktifkan. Hubungi Super Admin.');
   };
 
   if (!isOpen) return null;
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
-
-    // 1. Cek status lockout proteksi brute-force
     if (isLocked) {
       setErrorMsg(`Akses login sedang dikunci sementara karena ${MAX_FAILED_ATTEMPTS} kali percobaan gagal. Silakan tunggu ${countdown} detik.`);
       return;
     }
-
-    // 2. Skema Validasi Ketat Identitas (Email vs Username)
     if (!trimmedInput) {
       setErrorMsg('Silakan masukkan Email atau Username akun Anda.');
       return;
     }
-
-    if (inputType === 'email') {
-      if (!EMAIL_REGEX.test(trimmedInput)) {
-        setErrorMsg('Format email tidak valid. Masukkan alamat email yang lengkap dan benar (contoh: nama@perusahaan.com).');
-        return;
-      }
-    } else {
-      // Validasi ketat username
-      if (trimmedInput.length < 3) {
-        setErrorMsg('Username terlalu pendek. Masukkan minimal 3 karakter.');
-        return;
-      }
-      if (!USERNAME_REGEX.test(trimmedInput)) {
-        setErrorMsg('Format username tidak valid. Hanya boleh menggunakan huruf, angka, titik, strip, garis bawah, atau spasi (3-35 karakter).');
-        return;
-      }
+    if (inputType === 'email' && !EMAIL_REGEX.test(trimmedInput)) {
+      setErrorMsg('Format email tidak valid.');
+      return;
     }
-
-    // 3. Validasi Password
+    if (inputType === 'username' && (trimmedInput.length < 3 || !USERNAME_REGEX.test(trimmedInput))) {
+      setErrorMsg('Format username tidak valid.');
+      return;
+    }
     if (!loginPassword.trim()) {
       setErrorMsg('Silakan masukkan password akun Anda.');
       return;
     }
 
-    // 4. Proses Otentikasi
-    const targetAccount = logisticsStore.findUserByIdentifier(trimmedInput);
-    if (targetAccount) {
-      if (targetAccount.status === 'pending') {
-        setErrorMsg('Akun Anda masih menunggu persetujuan (acc) dari Super Admin. Belum dapat masuk ke sistem.');
-        return;
-      }
-      if (targetAccount.status === 'rejected') {
-        setErrorMsg('Akun Anda telah ditolak oleh Super Admin.');
-        return;
-      }
-      if (targetAccount.status === 'inactive') {
-        setErrorMsg('Akun Anda sedang berstatus Nonaktif. Silakan hubungi Super Admin.');
-        return;
-      }
-    }
-
-    const user = logisticsStore.loginUser(trimmedInput, loginPassword);
-
+    const user = await logisticsStore.loginUserRemote(trimmedInput, loginPassword.trim());
     if (!user) {
       const nextFailed = failedAttempts + 1;
       setFailedAttempts(nextFailed);
-      try {
-        localStorage.setItem(STORAGE_FAILED_KEY, String(nextFailed));
-      } catch {}
-
+      try { localStorage.setItem(STORAGE_FAILED_KEY, String(nextFailed)); } catch {}
       if (nextFailed >= MAX_FAILED_ATTEMPTS) {
         const lockoutTime = Date.now() + (LOCKOUT_DURATION_SECONDS * 1000);
         setLockoutUntil(lockoutTime);
         setCountdown(LOCKOUT_DURATION_SECONDS);
-        try {
-          localStorage.setItem(STORAGE_LOCKOUT_KEY, String(lockoutTime));
-        } catch {}
-        setErrorMsg(`Terlalu banyak percobaan gagal (${MAX_FAILED_ATTEMPTS}x). Demi keamanan, akun dikunci sementara selama ${LOCKOUT_DURATION_SECONDS} detik.`);
+        try { localStorage.setItem(STORAGE_LOCKOUT_KEY, String(lockoutTime)); } catch {}
+        setErrorMsg(`Terlalu banyak percobaan gagal (${MAX_FAILED_ATTEMPTS}x). Login dikunci sementara selama ${LOCKOUT_DURATION_SECONDS} detik.`);
       } else {
-        const sisa = MAX_FAILED_ATTEMPTS - nextFailed;
-        setErrorMsg(`${inputType === 'email' ? 'Email' : 'Username'} atau Password salah. (Percobaan ke-${nextFailed} dari ${MAX_FAILED_ATTEMPTS}. Sisa kesempatan: ${sisa}x).`);
+        setErrorMsg(`${inputType === 'email' ? 'Email' : 'Username'} atau Password salah / akun belum disetujui.`);
       }
       return;
     }
 
-    // 5. Berhasil Login -> Reset Proteksi Brute-Force
     setFailedAttempts(0);
     setLockoutUntil(0);
     setCountdown(0);
@@ -345,42 +217,41 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       localStorage.removeItem(STORAGE_FAILED_KEY);
       localStorage.removeItem(STORAGE_LOCKOUT_KEY);
     } catch {}
-
     setSuccessMsg(user.role === 'super_admin' ? 'Berhasil masuk sebagai Super Admin' : `Berhasil masuk sebagai ${user.fullName}`);
-    setTimeout(() => {
-      onClose();
-    }, 600);
+    setTimeout(() => onClose(), 500);
   };
 
-  const handleRegister = (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
-
-    if (registerData.password && registerData.password !== registerData.confirmPassword) {
+    if (!registerData.fullName.trim() || !registerData.email.trim()) {
+      setErrorMsg('Nama lengkap dan email wajib diisi.');
+      return;
+    }
+    if (!registerData.password || registerData.password.length < 8) {
+      setErrorMsg('Password minimal 8 karakter.');
+      return;
+    }
+    if (registerData.password !== registerData.confirmPassword) {
       setErrorMsg('Konfirmasi password tidak cocok.');
       return;
     }
 
-    const existing = logisticsStore.getUsers().find(u => u.email.toLowerCase() === registerData.email.toLowerCase());
-    if (existing) {
-      setErrorMsg('Email tersebut sudah terdaftar di sistem AKK.');
+    const newUser = await logisticsStore.registerUserRemote({
+      fullName: registerData.fullName.trim(),
+      email: registerData.email.trim(),
+      phone: registerData.phone.trim(),
+      department: registerData.department || 'Logistik',
+      password: registerData.password
+    });
+    if (!newUser) {
+      setErrorMsg('Pendaftaran gagal. Email mungkin sudah terdaftar atau database Hostinger belum dapat diakses.');
       return;
     }
-
-    const newUser = logisticsStore.registerUser({
-      fullName: registerData.fullName,
-      email: registerData.email,
-      phone: registerData.phone,
-      role: 'unassigned',
-      department: registerData.department || 'Logistik',
-      password: registerData.password || 'password123',
-      notes: 'Pendaftaran mandiri melalui portal AKK - Role perlu diisi oleh Super Admin'
-    });
-
-    setSuccessMsg(`Pendaftaran berhasil! Akun "${newUser.fullName}" terdaftar dan menunggu persetujuan (acc) dari Super Admin sebelum dapat masuk ke sistem.`);
+    setSuccessMsg(`Pendaftaran berhasil! Akun "${newUser.fullName}" menunggu persetujuan Super Admin.`);
     setTimeout(() => {
       setTab('login');
-      setSuccessMsg('Pendaftaran berhasil! Akun Anda sedang menunggu persetujuan (acc) Super Admin. Belum dapat masuk sebelum di-acc.');
+      setSuccessMsg('Pendaftaran berhasil. Akun belum dapat masuk sebelum disetujui Super Admin.');
     }, 1500);
   };
 

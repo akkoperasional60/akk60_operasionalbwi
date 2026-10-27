@@ -1,0 +1,21 @@
+HAPUS dari repository/source lama sebelum deploy:
+
+1. bun.lock
+2. Folder .aistudio/ seluruhnya (artefak editor, bukan runtime)
+3. Folder downloads/ seluruhnya (duplikasi APK lama)
+4. Semua APK lama berikut jika masih ada:
+   public/akk-web-portal.apk
+   public/akk-mobile-v1.apk
+   public/akk-driver-mobile.apk
+   public/AKK_Driver_Mobile_v1.0.4.apk
+   public/AKK_Driver_Mobile_v1.0.6.apk
+   public/downloads/akk-web-portal.apk
+   public/downloads/akk-mobile-v1.apk
+   public/downloads/akk-driver-mobile.apk
+   public/downloads/AKK_Driver_Mobile_v1.0.4.apk
+   public/downloads/AKK_Driver_Mobile_v1.0.6.apk
+
+ALASAN APK DIHAPUS:
+Binary APK pada ZIP lama masih tertanam URL hosting Google Cloud lama.
+Script scripts/build_apk.py sudah direvisi agar build APK berikutnya memakai APP_URL / domain Hostinger.
+Jangan publikasikan APK lama sebagai versi Hostinger. Build ulang APK setelah website Hostinger live.

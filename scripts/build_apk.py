@@ -17,14 +17,16 @@ import subprocess
 import shutil
 import struct
 import zlib
+import shlex
 
 WORKDIR = "/tmp/apk-final"
 ANDROID_JAR = "/usr/lib/android-sdk/platforms/android-23/android.jar"
 APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TARGET_SIZE = 15520597
 
-ONLINE_PORTAL_URL = "https://ais-dev-mfybdfggflmtyxul5kqfzl-66929656488.asia-southeast1.run.app/?tab=driver_portal"
-FALLBACK_PORTAL_URL = "https://ais-pre-mfybdfggflmtyxul5kqfzl-66929656488.asia-southeast1.run.app/?tab=driver_portal"
+DEFAULT_APP_URL = os.environ.get("APP_URL", "https://akkoperasional.com").rstrip("/")
+ONLINE_PORTAL_URL = os.environ.get("APK_PORTAL_URL", f"{DEFAULT_APP_URL}/?tab=driver_portal")
+FALLBACK_PORTAL_URL = os.environ.get("APK_FALLBACK_PORTAL_URL", ONLINE_PORTAL_URL)
 
 def log(msg):
     print(f"[APK-BUILD] {msg}")
@@ -728,6 +730,11 @@ public class MainActivity extends Activity {{
     subprocess.check_call(f"dx --dex --output={WORKDIR}/build/classes.dex {WORKDIR}/build/classes", shell=True)
 
 def package_and_sign():
+    keystore_password = os.environ.get("APK_KEYSTORE_PASSWORD", "").strip()
+    key_password = os.environ.get("APK_KEY_PASSWORD", "").strip() or keystore_password
+    key_alias = os.environ.get("APK_KEY_ALIAS", "akkdriver").strip() or "akkdriver"
+    if len(keystore_password) < 12 or len(key_password) < 12:
+        raise RuntimeError("APK signing secret belum dikonfigurasi. Set APK_KEYSTORE_PASSWORD dan APK_KEY_PASSWORD (minimal 12 karakter) di environment lokal/CI; jangan hardcode di source.")
     log("Mengemas sumber daya dan menandatangani paket APK...")
     asset_payload_size = 15480000 + (TARGET_SIZE - 15500117) + 2437
     with open(f"{WORKDIR}/assets/akk_resources.bin", "wb") as f:
@@ -747,11 +754,11 @@ def package_and_sign():
     # Keystore
     keystore = f"{WORKDIR}/release.keystore"
     if not os.path.exists(keystore):
-        cmd_keytool = f'keytool -genkeypair -v -keystore {keystore} -storepass akkdriver2025 -keypass akkdriver2025 -alias akkdriver -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=PT AKK Logistics, OU=Mobile Dev, O=PT Anugrah Kemasan Kreatif, L=Banyuwangi, ST=Jawa Timur, C=ID"'
+        cmd_keytool = f'keytool -genkeypair -v -keystore {keystore} -storepass {keystore_password} -keypass {key_password} -alias {key_alias} -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=PT AKK Logistics, OU=Mobile Dev, O=PT Anugrah Kemasan Kreatif, L=Banyuwangi, ST=Jawa Timur, C=ID"'
         subprocess.check_call(cmd_keytool, shell=True)
 
     # apksigner (v1 + v2 Signature Scheme)
-    cmd_sign = f"apksigner sign --ks {keystore} --ks-pass pass:akkdriver2025 --ks-key-alias akkdriver --key-pass pass:akkdriver2025 --v1-signing-enabled true --v2-signing-enabled true {WORKDIR}/build/aligned.apk"
+    cmd_sign = f"apksigner sign --ks {shlex.quote(keystore)} --ks-pass {shlex.quote('pass:' + keystore_password)} --ks-key-alias {shlex.quote(key_alias)} --key-pass {shlex.quote('pass:' + key_password)} --v1-signing-enabled true --v2-signing-enabled true {shlex.quote(WORKDIR + '/build/aligned.apk')}"
     subprocess.check_call(cmd_sign, shell=True)
 
     # Verify
@@ -765,17 +772,6 @@ def copy_to_distribution():
 
     targets = [
         os.path.join(APP_ROOT, "public/downloads/akk-mobile-v1.apk"),
-        os.path.join(APP_ROOT, "public/downloads/AKK_Driver_Mobile_v1.0.4.apk"),
-        os.path.join(APP_ROOT, "public/downloads/AKK_Driver_Mobile_v1.0.6.apk"),
-        os.path.join(APP_ROOT, "public/akk-mobile-v1.apk"),
-        os.path.join(APP_ROOT, "public/AKK_Driver_Mobile_v1.0.4.apk"),
-        os.path.join(APP_ROOT, "public/AKK_Driver_Mobile_v1.0.6.apk"),
-        os.path.join(APP_ROOT, "downloads/akk-mobile-v1.apk"),
-        os.path.join(APP_ROOT, "downloads/AKK_Driver_Mobile_v1.0.4.apk"),
-        os.path.join(APP_ROOT, "downloads/AKK_Driver_Mobile_v1.0.6.apk"),
-        os.path.join(APP_ROOT, "dist/akk-mobile-v1.apk"),
-        os.path.join(APP_ROOT, "dist/downloads/akk-mobile-v1.apk"),
-        os.path.join(APP_ROOT, "dist/downloads/AKK_Driver_Mobile_v1.0.6.apk"),
     ]
 
     for t in targets:

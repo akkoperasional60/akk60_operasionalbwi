@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { UserProfile, UserRole } from '../types';
 import { logisticsStore } from '../services/store';
-import { getSupabaseClient } from '../services/supabaseService';
 import {
   canAccess,
   getUserRoleDisplayTitle,
@@ -37,17 +36,7 @@ export function useRoleAccess(): UseRoleAccessReturn {
       setUser(logisticsStore.getCurrentUser());
     });
 
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      supabase.auth
-        .getSession()
-        .then(({ data }) => {
-          setIsSupabaseAuthenticated(Boolean(data?.session?.user));
-        })
-        .catch(() => {
-          setIsSupabaseAuthenticated(false);
-        });
-    }
+    setIsSupabaseAuthenticated(Boolean(logisticsStore.getCurrentUser()?.id && logisticsStore.getCurrentUser().id !== 'guest'));
 
     return () => {
       unsubscribe();

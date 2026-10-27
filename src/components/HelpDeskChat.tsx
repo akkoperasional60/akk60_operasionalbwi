@@ -82,7 +82,6 @@ const getTabContextName = (tab?: string): string => {
     case 'schedules': return 'Jadwal Pengiriman';
     case 'fuel_efficiency': return 'Efisiensi BBM';
     case 'customer_map': return 'Pemetaan Toko';
-    case 'tracksolid': return 'GPS Tracksolid';
     case 'fleet_forms': return 'Formulir Armada';
     case 'crew_history': return 'Audit SLA & Kru';
     case 'tracking_eval': return 'Evaluasi Muat (Excel)';
@@ -137,15 +136,6 @@ const getTabQuickReplies = (tab?: string, lastMessage?: string): QuickReply[] =>
       { id: 'cm_luar', label: 'Toko Luar Pulau', prompt: 'Mana saja jaringan toko retail di area luar Pulau Jawa/Bali?', icon: <Globe size={12} className="text-emerald-400" /> },
       { id: 'cm_rute', label: 'Rute Distribusi', prompt: 'Bagaimana visualisasi rute distribusi dari Gudang Banyuwangi DC?', icon: <Truck size={12} className="text-blue-400" /> },
       { id: 'cm_tambah', label: 'Tambah Toko Baru', prompt: 'Bagaimana cara menginput data toko retail pelanggan baru ke peta?', icon: <Plus size={12} className="text-purple-400" /> },
-    ];
-  }
-
-  if (tab === 'tracksolid') {
-    return [
-      { id: 'ts_realtime', label: 'Status GPS Realtime', prompt: 'Apakah semua perangkat GPS Tracksolid Pro armada online saat ini?', icon: <Radio size={12} className="text-emerald-400" /> },
-      { id: 'ts_lacak', label: 'Lacak Posisi Truk', prompt: 'Bagaimana cara melacak posisi armada yang sedang menuju lokasi pelanggan?', icon: <Truck size={12} className="text-blue-400" /> },
-      { id: 'ts_idle', label: 'Riwayat Berhenti/Idle', prompt: 'Bagaimana mengecek durasi berhenti atau idle mesin truk di perjalanan?', icon: <Clock size={12} className="text-amber-400" /> },
-      { id: 'ts_alert', label: 'Alert Peringatan', prompt: 'Apakah ada notifikasi peringatan overspeed atau pemutusan GPS?', icon: <AlertTriangle size={12} className="text-rose-400" /> },
     ];
   }
 

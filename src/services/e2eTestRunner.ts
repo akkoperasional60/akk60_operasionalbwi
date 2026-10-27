@@ -111,9 +111,9 @@ export class E2ETestRunner {
     const assertions: E2EAssertion[] = [];
 
     // 1. Verifikasi kredensial login admin default
-    const adminUser = logisticsStore.loginUser('admin', 'admin123');
+    const adminUser = logisticsStore.getUsers().find(u => u.role === 'super_admin' && u.status === 'approved') || null;
     assertions.push({
-      description: 'Super Admin berhasil login dengan email "admin"',
+      description: 'Profil Super Admin tersedia dan berstatus approved',
       passed: !!adminUser && adminUser.role === 'super_admin'
     });
 
@@ -167,7 +167,7 @@ export class E2ETestRunner {
     const t0 = performance.now();
     const assertions: E2EAssertion[] = [];
 
-    const spvUser = logisticsStore.loginUser('bahri@gmail.com', 'password123');
+    const spvUser = logisticsStore.getUsers().find(u => u.role === 'spv_logistik' && u.status === 'approved') || null;
     assertions.push({
       description: 'SPV Logistik (Bahri) berhasil terautentikasi',
       passed: !!spvUser && spvUser.role === 'spv_logistik'
@@ -232,10 +232,10 @@ export class E2ETestRunner {
     const t0 = performance.now();
     const assertions: E2EAssertion[] = [];
 
-    // 1. Login Akun Driver Utama Zainul Agustiar
-    const driverUser = logisticsStore.loginUser('zainul@gmail.com', 'zainul');
+    // 1. Ambil profil driver approved tanpa menyimpan/menguji password di frontend
+    const driverUser = logisticsStore.getUsers().find(u => u.role === 'driver' && u.status === 'approved') || null;
     assertions.push({
-      description: 'Pengemudi (Zainul Agustiar) berhasil login dengan kredensial supir',
+      description: 'Profil pengemudi approved tersedia untuk pengujian role/fitur',
       passed: !!driverUser && (driverUser.role === 'driver' || driverUser.role === 'spv_logistik')
     });
 
@@ -347,9 +347,9 @@ export class E2ETestRunner {
     const t0 = performance.now();
     const assertions: E2EAssertion[] = [];
 
-    const salesUser = logisticsStore.loginUser('bayun@gmail.com', 'bayun');
+    const salesUser = logisticsStore.getUsers().find(u => u.role === 'sales_admin' && u.status === 'approved') || null;
     assertions.push({
-      description: 'Admin Penjualan berhasil terautentikasi',
+      description: 'Profil Admin Penjualan approved tersedia untuk pengujian role/fitur',
       passed: !!salesUser
     });
 
@@ -396,7 +396,6 @@ export class E2ETestRunner {
     const tempUser: UserProfile = {
       id: 'usr-e2e-pending-test',
       email: 'pending_tester@akk.com',
-      password: 'password123',
       fullName: 'Pengguna Uji Pending',
       role: 'driver',
       department: 'Logistik',

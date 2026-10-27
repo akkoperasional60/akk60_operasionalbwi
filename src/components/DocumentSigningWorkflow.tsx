@@ -152,7 +152,7 @@ export const DocumentSigningWorkflow: React.FC<DocumentSigningWorkflowProps> = (
                 </span>
               </h3>
               <p className="text-[11px] text-slate-400">
-                Otorisasi berlapis 4 peran (SPV, Operasional, Security, Driver) terintegrasi Supabase
+                Otorisasi berlapis 4 peran (SPV, Operasional, Security, Driver) terintegrasi Hostinger MySQL
               </p>
             </div>
           </div>
@@ -402,7 +402,7 @@ export const DocumentSigningWorkflow: React.FC<DocumentSigningWorkflowProps> = (
         <div className="p-3.5 px-5 bg-slate-950 border-t border-slate-800 flex items-center justify-between">
           <div className="text-[11px] text-slate-400 flex items-center gap-1.5">
             <Lock className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Sinkronisasi Otomatis Supabase &amp; LocalStorage</span>
+            <span>Sinkronisasi Otomatis Hostinger MySQL &amp; LocalStorage</span>
           </div>
 
           <button

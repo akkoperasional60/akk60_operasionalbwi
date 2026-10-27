@@ -166,24 +166,20 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
   const [visiblePasswords, setVisiblePasswords] = useState<Record<string, boolean>>({});
   const [copiedPasswordUserId, setCopiedPasswordUserId] = useState<string | null>(null);
 
-  const getEffectivePassword = (u: UserProfile): string => {
-    if (u.password && u.password.trim()) return u.password;
-    if (u.role === 'super_admin') return 'admin123';
-    if (u.email && u.email.includes('@')) return u.email.split('@')[0].toLowerCase();
-    return 'password123';
-  };
+  const getEffectivePassword = (_u: UserProfile): string => 'Tersimpan sebagai hash di server';
 
   const togglePasswordVisibility = (userId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     setVisiblePasswords(prev => ({ ...prev, [userId]: !prev[userId] }));
   };
 
-  const handleCopyUserPassword = (u: UserProfile, e?: React.MouseEvent) => {
+  const handleCopyUserPassword = (_u: UserProfile, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    const pass = getEffectivePassword(u);
-    navigator.clipboard.writeText(pass).catch(() => {});
-    setCopiedPasswordUserId(u.id);
-    setTimeout(() => setCopiedPasswordUserId(null), 2000);
+    setPageModalNotification({
+      title: 'Password Tidak Dapat Ditampilkan',
+      message: 'Password disimpan sebagai hash scrypt di Hostinger MySQL. Gunakan menu Reset Password untuk menetapkan password baru.',
+      type: 'info'
+    });
   };
 
   // In-Page Pop-up Notification Modal State (Request: popup di depan halaman user manajemen)
@@ -354,19 +350,17 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
     showNotification('Salin Akses Berhasil', `Berhasil menyalin hak akses dari ${sourceUser.fullName}. Klik 'Simpan Akses' di kanan bawah untuk menerapkan ke database.`, 'success');
   };
 
-  const handleChangePassword = () => {
+  const handleChangePassword = async () => {
     if (!selectedUser) return;
-    if (!newPasswordInput || newPasswordInput.length < 6) {
-      showNotification('Password Tidak Valid', 'Password baru minimal harus 6 karakter.', 'warning');
+    if (!newPasswordInput || newPasswordInput.length < 8) {
+      showNotification('Password Tidak Valid', 'Password baru minimal harus 8 karakter.', 'warning');
       return;
     }
     if (newPasswordInput !== confirmPasswordInput) {
       showNotification('Password Tidak Cocok', 'Konfirmasi password tidak cocok dengan password baru. Harap periksa kembali kedua input.', 'error');
       return;
     }
-    const success = logisticsStore.updateUserProfile(selectedUser.id, {
-      password: newPasswordInput
-    });
+    const success = await logisticsStore.resetUserPassword(selectedUser.id, newPasswordInput);
     if (success) {
       showNotification('Password Berhasil Diubah', `Password baru untuk akun "${selectedUser.fullName}" berhasil disimpan ke database.`, 'success');
       setSaveSuccessMessage(`Password akun "${selectedUser.fullName}" berhasil diubah.`);
@@ -496,6 +490,14 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
   const handleCreateUser = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newUser.email) return;
+    if (!newUser.password || newUser.password.length < 8) {
+      setPageModalNotification({
+        title: 'Password Belum Valid',
+        message: 'Saat membuat akun baru, masukkan password minimal 8 karakter. Password akan dikirim ke backend dan disimpan sebagai hash.',
+        type: 'warning'
+      });
+      return;
+    }
 
     const chosenRole: UserRole = newUser.role || 'unassigned';
     const isCrewRole = chosenRole === 'driver' || chosenRole === 'crew_helper';
@@ -506,7 +508,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       phone: newUser.phone || '0812-3456-7890',
       role: chosenRole,
       department: newUser.department || 'Logistik & Pengiriman',
-      password: newUser.password || 'password123',
+      password: newUser.password,
       status: chosenRole !== 'unassigned' ? 'approved' : 'pending',
       notes: isCrewRole
         ? `Akun ${chosenRole === 'driver' ? 'Kru Supir / Driver' : 'Kru Helper / Kernet'} aktif & terintegrasi otomatis ke Daftar Jadwal Pengiriman`
@@ -1428,7 +1430,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
               <button
                 type="button"
                 onClick={handleChangePassword}
-                disabled={!newPasswordInput || newPasswordInput.length < 6 || newPasswordInput !== confirmPasswordInput}
+                disabled={!newPasswordInput || newPasswordInput.length < 8 || newPasswordInput !== confirmPasswordInput}
                 className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:bg-slate-800 disabled:text-slate-600 text-slate-950 font-bold text-xs transition cursor-pointer shadow-md shadow-amber-500/20 active:scale-95 disabled:cursor-not-allowed"
               >
                 Simpan Password Baru

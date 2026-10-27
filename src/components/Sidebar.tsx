@@ -69,7 +69,6 @@ export type NavTab =
   | 'fuel_efficiency'
   | 'crew_history'
   | 'tracking_eval'
-  | 'tracksolid'
   | 'fleet_forms'
   | 'sales_dashboard'
   | 'sales_activities'
@@ -790,7 +789,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   ) : undefined
                 )}
                 {canSysUsers && renderNavItem('e2e_testing', 'Pengujian E2E & Simulasi', <ShieldCheck className="w-4 h-4 text-emerald-400" />)}
-                {canSysArch && renderNavItem('architecture', 'Skema SQL Supabase', <Database className="w-4 h-4" />)}
+                {canSysArch && renderNavItem('architecture', 'Skema SQL MySQL', <Database className="w-4 h-4" />)}
               </div>
             </div>
           );

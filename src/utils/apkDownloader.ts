@@ -27,7 +27,7 @@ export const AKK_WEB_PORTAL_APK_INFO: ApkReleaseInfo = {
   description: 'APK Web Portal Lengkap: Berisi seluruh menu administrasi, manajemen logistik, sales, purchasing, HR, finance, warehouse, dan driver portal.',
   features: [
     'Semua Modul & Menu Portal Administratif PT AKK',
-    'Sinkronisasi Realtime Supabase PostgreSQL',
+    'Sinkronisasi Realtime Hostinger MySQL',
     'Dashboard Eksekutif & Manajemen Armada 12 Unit',
     'Manajemen Rute Mingguan & Smart Fill Otomatis',
     'Portal Driver Mobile Terintegrasi Lengkap'

@@ -119,7 +119,7 @@ npm run build:apk
 3. **Pengemasan Aset**: Menyatukan sumber daya antarmuka offline dan ikon launcher resolusi tinggi (`res/mipmap-*`).
 4. **Penyelarasan Memori (Zipalign)**: Menjalankan `zipalign -p 4` untuk optimasi pembacaan memori RAM Android.
 5. **Penandatanganan Digital (Apksigner)**: Menandatangani berkas dengan skema ganda **v1 (JAR signing)** dan **v2 (APK Signature Scheme v2)**.
-6. **Distribusi Otomatis**: Menyalin hasil build langsung ke `public/downloads/akk-mobile-v1.apk` dan `public/akk-mobile-v1.apk`.
+6. **Distribusi Otomatis**: Menyalin hasil build ke satu lokasi canonical: `public/downloads/akk-mobile-v1.apk`. Nama alias lama dilayani oleh route Express tanpa menduplikasi binary.
 
 ---
 

@@ -21,8 +21,6 @@ VERSION_STATE_PATH = os.path.join(APP_ROOT, ".version_state.json")
 PUBLIC_VERSION_PATH = os.path.join(APP_ROOT, "public/version.json")
 DOWNLOAD_APK_TARGETS = [
     os.path.join(APP_ROOT, "public/downloads/akk-mobile-v1.apk"),
-    os.path.join(APP_ROOT, "public/akk-mobile-v1.apk"),
-    os.path.join(APP_ROOT, "downloads/akk-mobile-v1.apk")
 ]
 
 def get_file_hash(filepath):

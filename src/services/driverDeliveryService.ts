@@ -1,6 +1,5 @@
 import { Schedule, ShipmentStatus, Crew, Fleet, RetailStore } from '../types';
 import { logisticsStore } from './store';
-import { getSupabaseClient } from './supabaseService';
 
 export interface DriverDeliveryStats {
   totalAssigned: number;
@@ -27,109 +26,42 @@ class DriverDeliveryService {
     deliveries: Schedule[];
     isSupabaseLive: boolean;
   }> {
-    const supabase = getSupabaseClient();
-    const localSchedules = logisticsStore.getSchedules();
-    const allCrews = logisticsStore.getCrews();
-
-    // Default target driver: the provided driverId, or the first active driver from crews
-    const activeDriver = driverId 
-      ? allCrews.find(c => c.id === driverId || c.name.toLowerCase() === driverId.toLowerCase())
-      : allCrews.find(c => c.role.includes('Driver')) || allCrews[0];
-
-    const targetDriverId = activeDriver?.id || driverId || '';
-    const targetDriverName = activeDriver?.name || '';
-
     let isSupabaseLive = false;
+    const localSchedules = logisticsStore.getSchedules();
+    const activeCrew = logisticsStore.getActiveDriverCrew();
+    const targetDriverId = driverId || activeCrew?.id || '';
+    const targetDriverName =
+      (driverId ? logisticsStore.getCrews().find(c => c.id === driverId)?.name : activeCrew?.name) ||
+      logisticsStore.getCurrentUser()?.fullName ||
+      '';
 
-    // Try live Supabase query
-    if (supabase) {
-      try {
-        const { data: schData, error: schError } = await supabase
-          .from('schedules')
-          .select(`
-            id,
-            tracking_number,
-            origin_name,
-            origin_latitude,
-            origin_longitude,
-            store_id,
-            fleet_id,
-            crew_id,
-            status,
-            departure_date,
-            estimated_arrival,
-            actual_arrival,
-            cargo_description,
-            cargo_weight_ton,
-            is_inter_island,
-            ferry_booking_code,
-            transit_port,
-            notes,
-            created_at
-          `)
-          .order('departure_date', { ascending: true });
-
-        if (!schError && schData && schData.length > 0) {
-          isSupabaseLive = true;
-          // Hydrate foreign keys with store references
-          const stores = logisticsStore.getStores();
-          const fleets = logisticsStore.getFleets();
-
-          const hydrated: Schedule[] = schData.map(row => {
-            const matchedStore = stores.find(s => s.id === row.store_id || s.storeName.toLowerCase() === (row.origin_name || '').toLowerCase());
-            const matchedFleet = fleets.find(f => f.id === row.fleet_id);
-            const matchedCrew = allCrews.find(c => c.id === row.crew_id);
-
-            return {
-              id: row.id,
-              trackingNumber: row.tracking_number,
-              originName: row.origin_name || 'Gudang Pusat Banyuwangi DC',
-              originCoords: [Number(row.origin_latitude) || -8.1906, Number(row.origin_longitude) || 114.3708],
-              storeId: row.store_id || (matchedStore ? matchedStore.id : 'str-01'),
-              store: matchedStore,
-              fleetId: row.fleet_id || '',
-              fleet: matchedFleet,
-              crewId: row.crew_id || '',
-              crew: matchedCrew,
-              status: (['scheduled', 'picked_up', 'in_transit', 'delivered', 'delayed'].includes(row.status)
-                ? row.status
-                : 'scheduled') as ShipmentStatus,
-              departureDate: row.departure_date,
-              estimatedArrival: row.estimated_arrival,
-              actualArrival: row.actual_arrival,
-              cargoDescription: row.cargo_description || 'Muatan Karton Box AKK',
-              cargoWeightTon: Number(row.cargo_weight_ton) || 2.5,
-              isInterIsland: Boolean(row.is_inter_island),
-              ferryBookingCode: row.ferry_booking_code,
-              transitPort: row.transit_port,
-              notes: row.notes,
-              createdAt: row.created_at
-            };
-          });
-
-          // Filter for target driver if specified
+    // Hostinger MySQL remote snapshot
+    try {
+      const res = await fetch('/api/schedules/persisted', { credentials: 'same-origin' });
+      if (res.ok) {
+        const remote = await res.json();
+        const remoteSchedules: Schedule[] = Array.isArray(remote?.schedules) ? remote.schedules : [];
+        if (remoteSchedules.length > 0) {
           const filtered = targetDriverId || targetDriverName
-            ? hydrated.filter(s => 
-                s.crewId === targetDriverId || 
-                (s.crew && s.crew.name.toLowerCase() === targetDriverName.toLowerCase())
+            ? remoteSchedules.filter((sch: Schedule) =>
+                sch.crewId === targetDriverId ||
+                sch.crewHelperId === targetDriverId ||
+                sch.crewHelper2Id === targetDriverId ||
+                (targetDriverName && sch.crew?.name?.toLowerCase() === targetDriverName.toLowerCase())
               )
-            : hydrated;
-
-          // If driver has matches in Supabase, return them
-          if (filtered.length > 0) {
-            return { deliveries: filtered, isSupabaseLive: true };
-          }
+            : remoteSchedules;
+          if (filtered.length > 0) return { deliveries: filtered, isSupabaseLive: true };
         }
-      } catch (err) {
-        console.warn('[DriverDeliveryService] Supabase pull notice, using local store:', err);
       }
+    } catch (err) {
+      console.warn('[DriverDeliveryService] Hostinger MySQL pull notice, using local store:', err);
     }
 
     // Fallback: Filter local store schedules
     const targetDeliveries = (targetDriverId || targetDriverName)
-      ? localSchedules.filter(s => 
+      ? localSchedules.filter((s: Schedule) => 
           s.crewId === targetDriverId ||
-          (s.crew && s.crew.name.toLowerCase() === targetDriverName.toLowerCase()) ||
+          (targetDriverName && s.crew && s.crew.name.toLowerCase() === targetDriverName.toLowerCase()) ||
           s.crewHelperId === targetDriverId
         )
       : localSchedules;
@@ -158,47 +90,25 @@ class DriverDeliveryService {
     // 1. Optimistic Local Store update (instant reactivity for UI)
     logisticsStore.updateScheduleStatus(scheduleId, newStatus, reasonOrNotes, podData);
 
-    // 2. Sync to Supabase Backend
-    const supabase = getSupabaseClient();
-    let syncedToSupabase = false;
-
-    if (supabase) {
-      try {
-        const updatePayload: Record<string, any> = {
+    // 2. Persist status to Hostinger MySQL snapshot
+    let syncedToSupabase = false; // Legacy return field kept for compatibility; true means remote DB synced.
+    try {
+      const notes = reasonOrNotes?.trim() || (podData?.podReceiverName
+        ? `Diterima: ${podData.podReceiverName} (${podData.podConditionNote || 'Kondisi Baik'})${podData.podPhotoUrl ? ' [Bukti Foto POD OK]' : ''}`
+        : undefined);
+      const response = await fetch(`/api/schedules/${encodeURIComponent(scheduleId)}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          trackingNumber,
           status: newStatus,
-        };
-
-        if (newStatus === 'delivered') {
-          updatePayload.actual_arrival = new Date().toISOString();
-        }
-
-        if (reasonOrNotes && reasonOrNotes.trim()) {
-          updatePayload.notes = reasonOrNotes.trim();
-        } else if (podData?.podReceiverName) {
-          updatePayload.notes = `Diterima: ${podData.podReceiverName} (${podData.podConditionNote || 'Kondisi Baik'})${podData.podPhotoUrl ? ' [Bukti Foto POD OK]' : ''}`;
-        }
-
-        // Try updating by tracking_number first
-        const { error: updErr, count } = await supabase
-          .from('schedules')
-          .update(updatePayload)
-          .eq('tracking_number', trackingNumber);
-
-        if (!updErr) {
-          syncedToSupabase = true;
-        } else {
-          // If tracking number update had note, attempt update by UUID
-          const { error: idErr } = await supabase
-            .from('schedules')
-            .update(updatePayload)
-            .eq('id', scheduleId);
-          if (!idErr) {
-            syncedToSupabase = true;
-          }
-        }
-      } catch (err) {
-        console.warn('[DriverDeliveryService] Supabase status sync exception (persisted locally):', err);
-      }
+          notes,
+          actualArrival: newStatus === 'delivered' ? new Date().toISOString() : undefined
+        })
+      });
+      syncedToSupabase = response.ok;
+    } catch (err) {
+      console.warn('[DriverDeliveryService] Hostinger MySQL status sync exception (persisted locally):', err);
     }
 
     const statusLabels: Record<ShipmentStatus, string> = {
