@@ -620,11 +620,39 @@ class LogisticsStore {
       this.stores = [...INITIAL_STORES];
       this.saveToStorage(STORAGE_KEYS.STORES, this.stores);
     } else {
-      // Purge delivery area route items that were accidentally injected into retail stores table
-      const originalCount = this.stores.length;
-      this.stores = this.stores.filter(s => !isAreaRouteItem(s));
-      if (this.stores.length !== originalCount) {
-        console.log(`[Store Sanitizer] Cleaned ${originalCount - this.stores.length} area route items from retail store database. Total valid retail stores: ${this.stores.length}`);
+      let storesUpdated = false;
+      const filteredStores = this.stores.filter(s => !isAreaRouteItem(s));
+      if (filteredStores.length !== this.stores.length) {
+        storesUpdated = true;
+      }
+      this.stores = filteredStores.map((s, idx) => {
+        const ref = INITIAL_STORES.find(initS => initS.id === s.id || initS.storeCode === s.storeCode || initS.storeName.toLowerCase() === (s.storeName || '').toLowerCase());
+        const nextKecamatan = s.kecamatan || ref?.kecamatan || ((s.city || '').match(/\((.*?)\)/)?.[1]) || s.city || 'Genteng';
+        const nextKabupaten = s.kabupaten || ref?.kabupaten || (s.city || '').replace(/\s*\(.*?\)/g, '').replace(/^Kota\s+/i, '') || 'Banyuwangi';
+        const nextNomor = s.nomor ?? ref?.nomor ?? idx + 1;
+        if (s.kecamatan !== nextKecamatan || s.kabupaten !== nextKabupaten || s.nomor !== nextNomor) {
+          storesUpdated = true;
+          return {
+            ...s,
+            nomor: nextNomor,
+            kecamatan: nextKecamatan,
+            kabupaten: nextKabupaten
+          };
+        }
+        return s;
+      });
+
+      INITIAL_STORES.forEach(initStore => {
+        const exists = this.stores.some(
+          s => s.id === initStore.id || s.storeCode === initStore.storeCode || (s.storeName || '').trim().toLowerCase() === initStore.storeName.trim().toLowerCase()
+        );
+        if (!exists) {
+          this.stores.push({ ...initStore });
+          storesUpdated = true;
+        }
+      });
+
+      if (storesUpdated) {
         this.saveToStorage(STORAGE_KEYS.STORES, this.stores);
       }
     }
@@ -867,6 +895,28 @@ class LogisticsStore {
       }
       return f;
     });
+
+    // Sinkronisasi status armada (Ready / Kirim / Servis) dengan jadwal pengiriman aktif:
+    // - Status 'maintenance' (Servis) tetap dipertahankan.
+    // - Status 'on-duty' (Kirim) hanya aktif apabila armada sedang memiliki jadwal yang sudah Gate-Out ('in_transit' / 'picked_up' / 'delayed').
+    // - Selain itu otomatis menjadi 'available' (Ready) agar siap digunakan jadwal berikutnya.
+    this.fleets = this.fleets.map(f => {
+      if (f.status === 'maintenance') return f;
+      const hasActiveTrip = (this.schedules || []).some(
+        sch =>
+          ['in_transit', 'picked_up', 'delayed'].includes(sch.status) &&
+          (sch.fleetId === f.id ||
+            (sch.fleet?.plateNumber &&
+              sch.fleet.plateNumber.trim().toUpperCase() === f.plateNumber.trim().toUpperCase()))
+      );
+      const targetStatus: Fleet['status'] = hasActiveTrip ? 'on-duty' : 'available';
+      if (f.status !== targetStatus) {
+        updatedFleets = true;
+        return { ...f, status: targetStatus };
+      }
+      return f;
+    });
+
     this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
 
     // Auto-migrate any cached state from Cikarang DC to Banyuwangi DC & sanitize combined Denpasar 1 & 2
@@ -979,6 +1029,33 @@ class LogisticsStore {
         throw new Error(`Akses Ditolak [RBAC Middleware]: Peran '${user.role}' (${user.fullName}) tidak diizinkan mengakses fungsi admin/operasional '${actionCategory}'. Akses dibatasi khusus Portal Driver Mobile.`);
       }
     }
+  }
+
+  /**
+   * RBAC Helper: Checks if a role has access to specific sub-menu or operation
+   */
+  public hasSubMenuAccess(role?: string, module?: string, subMenu?: string, accessLevel?: string): boolean {
+    if (!role) return true;
+    const r = String(role).toLowerCase();
+    if (r === 'super_admin' || r === 'spv_logistik' || r === 'operasional' || r === 'dispatcher' || r === 'admin') {
+      return true;
+    }
+    if (r === 'driver' || r === 'crew_helper' || r === 'helper') {
+      return subMenu === 'driver_mobile' || subMenu === 'driver_reports';
+    }
+    return true;
+  }
+
+  public hasMenuAccess(role?: string, menuId?: string): boolean {
+    if (!role) return true;
+    const r = String(role).toLowerCase();
+    if (r === 'super_admin' || r === 'spv_logistik' || r === 'operasional' || r === 'dispatcher' || r === 'admin') {
+      return true;
+    }
+    if (r === 'driver' || r === 'crew_helper' || r === 'helper') {
+      return menuId === 'driver_mobile' || menuId === 'driver_reports';
+    }
+    return true;
   }
 
   /**
@@ -2730,6 +2807,15 @@ class LogisticsStore {
     const areaName = resolveScheduleAreaName(schedule);
     const isBali = schedule.isInterIsland || areaName.toUpperCase().includes('BALI') || areaName.toUpperCase().includes('DENPASAR') || areaName.toUpperCase().includes('SINGARAJA') || areaName.toUpperCase().includes('NEGARA');
 
+    const depMatch = (schedule.departureDate || '').match(/T(\d{2}:\d{2})/);
+    const arrMatch = (schedule.estimatedArrival || '').match(/T(\d{2}:\d{2})/);
+    const resolvedDeliveryWindow =
+      schedule.store?.deliveryWindow && schedule.store.deliveryWindow !== '08:00 - 17:00'
+        ? schedule.store.deliveryWindow
+        : depMatch && arrMatch
+        ? `${depMatch[1]} - ${arrMatch[1]}`
+        : schedule.store?.deliveryWindow || '07:30 - 17:00';
+
     const areaStore: RetailStore = {
       id: schedule.storeId && !schedule.storeId.startsWith('str-fix-') ? schedule.storeId : `area-${areaName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
       storeCode: `AREA-${areaName.substring(0, 4).toUpperCase().replace(/[^A-Z0-9]/g, '')}`,
@@ -2742,7 +2828,7 @@ class LogisticsStore {
       longitude: isBali ? 115.2126 : 114.369,
       contactPerson: 'PIC Distribusi Area',
       phone: '-',
-      deliveryWindow: '08:00 - 17:00',
+      deliveryWindow: resolvedDeliveryWindow,
       storeCategory: 'Distribution Hub'
     };
 
@@ -2754,8 +2840,8 @@ class LogisticsStore {
       createdAt: new Date().toISOString()
     };
 
-    // Update fleet & crew status if scheduled or in_transit
-    if (newSchedule.status === 'in_transit' || newSchedule.status === 'scheduled') {
+    // Status armada berubah menjadi 'on-duty' (Kirim) hanya saat sudah Gate-Out ('in_transit' / 'picked_up')
+    if (newSchedule.status === 'in_transit' || newSchedule.status === 'picked_up') {
       this.updateFleetStatus(newSchedule.fleetId, 'on-duty', newSchedule.cargoWeightTon);
       this.updateCrewStatus(newSchedule.crewId, 'on-duty');
     }
@@ -3006,7 +3092,8 @@ class LogisticsStore {
       podReceiverName?: string;
       podConditionNote?: string;
       podPhotoTimestamp?: string;
-    }
+    },
+    postTripFleetStatus?: Fleet['status']
   ) {
     let deliveredSchedule: Schedule | null = null;
     let targetSch: Schedule | null = null;
@@ -3026,6 +3113,7 @@ class LogisticsStore {
           ...(podData?.podReceiverName ? { podReceiverName: podData.podReceiverName } : {}),
           ...(podData?.podConditionNote ? { podConditionNote: podData.podConditionNote } : {}),
         };
+        const targetFleetKey = sch.fleetId || sch.fleet?.plateNumber || '';
         if (status === 'delivered') {
           updated.actualArrival = new Date().toISOString();
           deliveredSchedule = updated;
@@ -3033,10 +3121,13 @@ class LogisticsStore {
           if (podData?.podPhotoUrl) {
             this.attachImageToSchedule(sch.id, podData.podPhotoUrl, 'proof_of_delivery', `POD Penerima: ${podData.podReceiverName || 'PIC'}`);
           }
-          // Release fleet and crew
-          this.updateFleetStatus(sch.fleetId, 'available', 0);
+          // Ketika driver/helper klik sudah berada di gudang, status armada otomatis berubah menjadi Ready ('available') atau Servis ('maintenance')
+          const resolvedPostStatus: Fleet['status'] = postTripFleetStatus || 'available';
+          if (targetFleetKey) {
+            this.updateFleetStatus(targetFleetKey, resolvedPostStatus, 0);
+          }
           this.updateCrewStatus(sch.crewId, 'available');
-          const fltDelivered = this.fleets.find(f => f.id === sch.fleetId);
+          const fltDelivered = this.fleets.find(f => f.id === sch.fleetId || f.plateNumber === sch.fleet?.plateNumber);
           const crwDelivered = this.crews.find(c => c.id === sch.crewId);
           const alreadyGateIn = this.securityLogs.some(l => l.scheduleId === sch.id && l.status === 'Tiba di Gudang');
           if (!alreadyGateIn) {
@@ -3049,11 +3140,14 @@ class LogisticsStore {
             );
           }
         } else if (status === 'picked_up' || status === 'in_transit') {
-          this.updateFleetStatus(sch.fleetId, 'on-duty');
+          // Ketika driver/helper klik Gate-Out, status armada otomatis berubah menjadi Kirim ('on-duty')
+          if (targetFleetKey) {
+            this.updateFleetStatus(targetFleetKey, 'on-duty');
+          }
           this.updateCrewStatus(sch.crewId, 'on-duty');
           this.logActivity('Update Status Driver', 'Pengiriman', `Status ${sch.trackingNumber} menjadi ${status}`);
           if (status === 'in_transit') {
-            const flt = this.fleets.find(f => f.id === sch.fleetId);
+            const flt = this.fleets.find(f => f.id === sch.fleetId || f.plateNumber === sch.fleet?.plateNumber);
             const crw = this.crews.find(c => c.id === sch.crewId);
             const store = this.stores.find(s => s.id === sch.storeId);
             const alreadyLogged = this.securityLogs.some(l => l.scheduleId === sch.id && l.status === 'Gate-Out');
@@ -3323,9 +3417,16 @@ class LogisticsStore {
     };
   }
 
-  public updateFleetStatus(id: string, status: Fleet['status'], tonnage?: number) {
+  public updateFleetStatus(idOrPlate: string, status: Fleet['status'], tonnage?: number) {
+    const cleanTarget = (idOrPlate || '').trim().toUpperCase();
+    let matchedId = idOrPlate;
     this.fleets = this.fleets.map(f => {
-      if (f.id === id) {
+      if (
+        f.id === idOrPlate ||
+        f.plateNumber.trim().toUpperCase() === cleanTarget ||
+        (f.initialCode && f.initialCode.trim().toUpperCase() === cleanTarget)
+      ) {
+        matchedId = f.id;
         return {
           ...f,
           status,
@@ -3337,17 +3438,193 @@ class LogisticsStore {
     this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
 
     // Asynchronous backend integration with Supabase
-    updateFleetInSupabase(id, { status, currentTonnage: tonnage }).catch(err => console.warn('[Supabase Fleet Status Sync Note]', err));
+    updateFleetInSupabase(matchedId, { status, currentTonnage: tonnage }).catch(err => console.warn('[Supabase Fleet Status Sync Note]', err));
 
     this.dispatchMiddleware({
       entityType: 'fleet',
       action: 'status_change',
-      id,
-      data: { id, status, currentTonnage: tonnage },
+      id: matchedId,
+      data: { id: matchedId, status, currentTonnage: tonnage },
       timestamp: new Date().toISOString()
     });
 
     this.notify();
+  }
+
+  /**
+   * Mengambil informasi status kondisi armada secara real-time terintegrasi dengan:
+   * - Check-In / Gate-Out / Tiba di Gudang (Check-Out) Tim Pengiriman
+   * - Jadwal Pengiriman Hari Ini
+   * - Data Armada & Portal Driver
+   *
+   * 3 Status Kondisi Armada:
+   * 1. Ready ('available'): Siap digunakan jadwal esok harinya (setelah klik sudah berada di gudang / normal). Penanda: Titik Besar Hijau.
+   * 2. Kirim ('on-duty'): Sedang dipakai kirim tim pengiriman (setelah driver/helper klik Gate-Out). Penanda: Titik Besar Biru + Area Kirim hari tersebut.
+   * 3. Servis ('maintenance'): Dalam keadaan perbaikan dan TIDAK BISA diaturkan kirim. Penanda: Titik Besar Merah.
+   */
+  public getFleetLiveOperationalInfo(
+    fleetOrId: Fleet | string,
+    targetDateStr?: string
+  ): {
+    effectiveStatus: 'available' | 'on-duty' | 'maintenance';
+    statusLabel: 'Ready' | 'Kirim' | 'Servis';
+    dotColorClass: string;
+    badgeColorClass: string;
+    areaName: string | null;
+    driverName: string | null;
+    helperName: string | null;
+    canBeScheduled: boolean;
+    statusDescription: string;
+    scheduleStatus: Schedule['status'] | null;
+  } {
+    const fleet =
+      typeof fleetOrId === 'string'
+        ? this.fleets.find(
+            f =>
+              f.id === fleetOrId ||
+              f.plateNumber.trim().toUpperCase() === fleetOrId.trim().toUpperCase()
+          )
+        : fleetOrId;
+
+    if (!fleet) {
+      return {
+        effectiveStatus: 'available',
+        statusLabel: 'Ready',
+        dotColorClass: 'bg-emerald-500 ring-4 ring-emerald-500/20',
+        badgeColorClass: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
+        areaName: null,
+        driverName: null,
+        helperName: null,
+        canBeScheduled: true,
+        statusDescription: 'Siap digunakan jadwal esok harinya',
+        scheduleStatus: null
+      };
+    }
+
+    const todayIso = targetDateStr || new Date().toISOString().slice(0, 10);
+    const cleanPlate = (fleet.plateNumber || '').trim().toUpperCase();
+
+    const matchesFleet = (sch: Schedule) => {
+      if (sch.fleetId === fleet.id) return true;
+      const schPlate = (sch.fleet?.plateNumber || '').trim().toUpperCase();
+      if (schPlate && schPlate === cleanPlate) return true;
+      return false;
+    };
+
+    // 1. Cari jadwal yang sedang aktif di jalan (sudah klik Gate-Out: in_transit, picked_up, delayed)
+    const activeTripSch = (this.schedules || []).find(
+      sch => ['in_transit', 'picked_up', 'delayed'].includes(sch.status) && matchesFleet(sch)
+    );
+
+    // 2. Cari jadwal pada tanggal hari ini (atau tanggal terpilih) untuk menampilkan info area kirim hari tersebut
+    const dateMatchedSch =
+      activeTripSch ||
+      (this.schedules || []).find(
+        sch =>
+          matchesFleet(sch) &&
+          (sch.departureDate || sch.createdAt || '').slice(0, 10) === todayIso
+      ) ||
+      (this.schedules || []).find(sch => matchesFleet(sch) && sch.status === 'scheduled');
+
+    let resolvedArea: string | null = null;
+    let resolvedDriver: string | null = null;
+    let resolvedHelper: string | null = null;
+
+    if (dateMatchedSch) {
+      resolvedArea =
+        dateMatchedSch.areaName ||
+        dateMatchedSch.store?.storeName ||
+        null;
+      resolvedDriver =
+        dateMatchedSch.crew?.name ||
+        this.crews.find(c => c.id === dateMatchedSch.crewId)?.name ||
+        null;
+      resolvedHelper =
+        dateMatchedSch.crewHelper?.name ||
+        (dateMatchedSch.crewHelperId
+          ? this.crews.find(c => c.id === dateMatchedSch.crewHelperId)?.name || null
+          : null);
+    }
+
+    // Cek juga dari data Check-In shift aktif hari ini jika belum ada di jadwal
+    if (!resolvedArea && typeof localStorage !== 'undefined') {
+      try {
+        const rawShifts = localStorage.getItem('akk_driver_shifts_v2');
+        if (rawShifts) {
+          const shifts: any[] = JSON.parse(rawShifts);
+          const activeShift = shifts.find(
+            s =>
+              s.date === todayIso &&
+              s.status !== 'checked_out' &&
+              (s.fleetId === fleet.id ||
+                (s.plateNumber && s.plateNumber.trim().toUpperCase() === cleanPlate))
+          );
+          if (activeShift) {
+            resolvedDriver = resolvedDriver || activeShift.driverName || null;
+          }
+        }
+      } catch {}
+    }
+
+    // Penentuan 3 Status Kondisi Armada:
+    // - Servis ('maintenance'): Armada dalam perbaikan (tidak bisa diaturkan kirim)
+    // - Kirim ('on-duty'): Armada sedang dipakai kirim (setelah klik Gate-Out atau status armada 'on-duty')
+    // - Ready ('available'): Armada siap digunakan jadwal esok harinya (setelah klik sudah berada di gudang / standby)
+    let effectiveStatus: 'available' | 'on-duty' | 'maintenance' = 'available';
+    if (fleet.status === 'maintenance') {
+      effectiveStatus = 'maintenance';
+    } else if (activeTripSch || fleet.status === 'on-duty') {
+      effectiveStatus = 'on-duty';
+    } else {
+      effectiveStatus = 'available';
+    }
+
+    if (effectiveStatus === 'maintenance') {
+      return {
+        effectiveStatus: 'maintenance',
+        statusLabel: 'Servis',
+        dotColorClass: 'bg-rose-500 ring-4 ring-rose-500/25',
+        badgeColorClass: 'bg-rose-500/15 text-rose-300 border-rose-500/40',
+        areaName: resolvedArea,
+        driverName: resolvedDriver,
+        helperName: resolvedHelper,
+        canBeScheduled: false,
+        statusDescription: 'Dalam perbaikan (Tidak bisa diaturkan kirim)',
+        scheduleStatus: dateMatchedSch?.status || null
+      };
+    }
+
+    if (effectiveStatus === 'on-duty') {
+      return {
+        effectiveStatus: 'on-duty',
+        statusLabel: 'Kirim',
+        dotColorClass: 'bg-blue-500 ring-4 ring-blue-500/25',
+        badgeColorClass: 'bg-blue-500/15 text-blue-300 border-blue-500/40',
+        areaName: resolvedArea,
+        driverName: resolvedDriver,
+        helperName: resolvedHelper,
+        canBeScheduled: true,
+        statusDescription: resolvedArea
+          ? `Sedang Kirim • Area: ${resolvedArea}`
+          : 'Sedang dipakai kirim tim pengiriman (Gate-Out)',
+        scheduleStatus: dateMatchedSch?.status || 'in_transit'
+      };
+    }
+
+    return {
+      effectiveStatus: 'available',
+      statusLabel: 'Ready',
+      dotColorClass: 'bg-emerald-500 ring-4 ring-emerald-500/25',
+      badgeColorClass: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40',
+      areaName: resolvedArea,
+      driverName: resolvedDriver,
+      helperName: resolvedHelper,
+      canBeScheduled: true,
+      statusDescription: resolvedArea
+        ? `Siap jadwal esok • Area Hari Ini: ${resolvedArea}`
+        : 'Siap untuk digunakan jadwal esok harinya',
+      scheduleStatus: dateMatchedSch?.status || null
+    };
   }
 
   public updateFleet(id: string, updatedFields: Partial<Fleet>) {

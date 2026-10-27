@@ -9,6 +9,8 @@ export interface DeliveryAssignment {
   armada: string;
   backup?: string;
   target?: string;
+  departureTime?: string;
+  targetReturnTime?: string;
   isManuallyEdited?: boolean;
 }
 

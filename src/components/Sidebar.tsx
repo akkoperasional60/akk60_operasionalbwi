@@ -352,13 +352,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <div className="flex items-center justify-between px-2 mb-1">
                   <button
                     onClick={() => setIsLogistikOpen(!isLogistikOpen)}
-                    className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 hover:text-cyan-400 transition cursor-pointer text-left w-full"
+                    className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 hover:text-blue-400 transition cursor-pointer text-left w-full"
                   >
-                    <Truck className="w-3.5 h-3.5 text-cyan-400" />
+                    <Truck className="w-3.5 h-3.5 text-blue-400" />
                     <span>Logistik & Pengiriman</span>
                     <span className="ml-auto text-slate-400">
                       {isLogistikOpen ? (
-                        <ChevronDown className="w-3.5 h-3.5 text-cyan-400" />
+                        <ChevronDown className="w-3.5 h-3.5 text-blue-400" />
                       ) : (
                         <ChevronRight className="w-3.5 h-3.5" />
                       )}
@@ -502,12 +502,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <div className="flex items-center justify-between px-2 mb-1">
                   <button
                     onClick={() => setIsWarehouseOpen(!isWarehouseOpen)}
-                    className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 hover:text-cyan-400 transition cursor-pointer text-left w-full"
+                    className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 hover:text-blue-400 transition cursor-pointer text-left w-full"
                   >
-                    <Building2 className="w-3.5 h-3.5 text-cyan-400" />
+                    <Building2 className="w-3.5 h-3.5 text-blue-400" />
                     <span>Gudang</span>
                     <span className="ml-auto">
-                      {isWarehouseOpen ? <ChevronDown className="w-3.5 h-3.5 text-cyan-400" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                      {isWarehouseOpen ? <ChevronDown className="w-3.5 h-3.5 text-blue-400" /> : <ChevronRight className="w-3.5 h-3.5" />}
                     </span>
                   </button>
                 </div>
@@ -522,8 +522,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   {renderNavItem(
                     'warehouse_scanner',
                     'Pemindaian Foto Barang',
-                    <Camera className="w-4 h-4 text-cyan-400" />,
-                    <span className="px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-extrabold text-[9px] uppercase tracking-wide">
+                    <Camera className="w-4 h-4 text-blue-400" />,
+                    <span className="px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-300 font-extrabold text-[9px] uppercase tracking-wide">
                       Scan
                     </span>
                   )}
@@ -878,17 +878,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="lg:hidden fixed top-0 left-0 right-0 z-40 h-16 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-4 flex items-center justify-between neu-flat">
         <button
           onClick={() => setIsMobileOpen(!isMobileOpen)}
-          className="p-2 rounded-xl neu-button text-slate-300 hover:text-cyan-400 cursor-pointer transition active:scale-95"
+          className="p-2 rounded-xl neu-button text-slate-300 hover:text-blue-400 cursor-pointer transition active:scale-95"
           aria-label="Toggle Navigation Menu"
         >
-          {isMobileOpen ? <X className="w-5 h-5 text-amber-400" /> : <Menu className="w-5 h-5" />}
+          {isMobileOpen ? <X className="w-5 h-5 text-amber-500" /> : <Menu className="w-5 h-5" />}
         </button>
         <AkkLogo size="sm" showSubtitle={false} />
         <div className="flex items-center gap-2">
           <ThemeSwitcher variant="icon-only" />
           <button
             onClick={() => onOpenAuth('login')}
-            className="p-2 rounded-xl neu-button text-amber-400 cursor-pointer transition active:scale-95 shadow-[0_0_8px_rgba(245,158,11,0.3)]"
+            className="p-2 rounded-xl neu-button text-amber-500 hover:bg-slate-800 cursor-pointer transition active:scale-95"
             title="Masuk / Kelola Akun"
           >
             <LogIn className="w-4 h-4" />

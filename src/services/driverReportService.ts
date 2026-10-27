@@ -153,6 +153,45 @@ class DriverReportService {
         status: 'verified',
         verifiedBy: 'SPV Logistik',
         verifiedAt: new Date(Date.now() - 86400000 - 1000 * 60 * 60).toISOString()
+      },
+      {
+        id: 'REP-2026-005',
+        timestamp: new Date(Date.now() - 1000 * 60 * 95).toISOString(),
+        date: today,
+        driverId: 'crew-01',
+        driverName: 'Zainul Agustiar',
+        userRole: 'Driver',
+        helperName: 'Rifaldi Aminullah',
+        plateNumber: 'P 8125 VC',
+        category: 'istirahat',
+        areaName: 'SUSULAN ROGOJAMPI (Banyuwangi)',
+        customerOutletName: 'Toko Sinar Plastik Rogojampi',
+        notes: '[ABSEN KIRIMAN PELANGGAN: Toko Sinar Plastik Rogojampi] Barang pesanan 25 dus kemasan telah diterima lengkap oleh pemilik toko.',
+        photoUrl: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=600&auto=format&fit=crop&q=80',
+        latitude: -8.3075,
+        longitude: 114.2975,
+        gmapsUrl: 'https://www.google.com/maps?q=-8.3075,114.2975',
+        status: 'verified',
+        verifiedBy: 'SPV Logistik DC',
+        verifiedAt: new Date(Date.now() - 1000 * 60 * 60).toISOString()
+      },
+      {
+        id: 'REP-2026-006',
+        timestamp: new Date(Date.now() - 1000 * 60 * 240).toISOString(),
+        date: today,
+        driverId: 'crew-01',
+        driverName: 'Zainul Agustiar',
+        userRole: 'Driver',
+        helperName: 'Rifaldi Aminullah',
+        plateNumber: 'P 8125 VC',
+        category: 'presensi_shift',
+        areaName: 'SUSULAN ROGOJAMPI (Banyuwangi)',
+        checkinTimeFormatted: '07:30 WIB',
+        checkoutTimeFormatted: undefined,
+        securityPin: '1234',
+        notes: '[PRESENSI CHECK-IN] Waktu Masuk: 07:30 WIB (Status: Sedang Bertugas) | PIN Keamanan: 1234',
+        status: 'verified',
+        verifiedBy: 'Sistem Presensi Terpadu'
       }
     ];
   }
@@ -187,6 +226,17 @@ class DriverReportService {
               date: r.timestamp ? getLocalDateStr(new Date(r.timestamp)) : (r.date || getLocalDateStr())
             };
           });
+          const hasCustomerAttendance = normalized.some(r => r.category === 'istirahat');
+          if (!hasCustomerAttendance) {
+            const sampleCustomerAttendance = this.getInitialReports()
+              .filter(r => r.category === 'istirahat')
+              .map(r => ({
+                ...r,
+                date: r.date || (r.timestamp ? getLocalDateStr(new Date(r.timestamp)) : getLocalDateStr())
+              }));
+            normalized.unshift(...sampleCustomerAttendance);
+            hadDuplicates = true;
+          }
           if (hadDuplicates) {
             try {
               localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));

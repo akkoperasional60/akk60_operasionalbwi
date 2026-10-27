@@ -266,7 +266,9 @@ export function calculateScheduleTimestamps(
 export function getDriverPortalDepartureLabel(
   departureDateStr?: string | null,
   areaName?: string | null,
-  storeName?: string | null
+  storeName?: string | null,
+  estimatedArrivalStr?: string | null,
+  deliveryWindowStr?: string | null
 ): {
   badgeTitle: string;
   departureText: string;
@@ -275,7 +277,54 @@ export function getDriverPortalDepartureLabel(
   isTomorrowRun: boolean;
   timing: AreaScheduleTiming;
 } {
-  const timing = getAreaScheduleTiming(areaName, storeName);
+  const baseTiming = getAreaScheduleTiming(areaName, storeName);
+  let timing: AreaScheduleTiming = { ...baseTiming };
+
+  // Ekstrak Jam Keberangkatan & Target Jam Kepulangan langsung dari jadwal jika tersedia
+  let customDepHHMM = '';
+  let customRetHHMM = '';
+
+  if (deliveryWindowStr && typeof deliveryWindowStr === 'string') {
+    const winMatch = deliveryWindowStr.match(/(\d{2}[:.]\d{2})\s*-\s*(\d{2}[:.]\d{2})/);
+    if (winMatch && deliveryWindowStr.trim() !== '08:00 - 17:00') {
+      customDepHHMM = winMatch[1].replace('.', ':');
+      customRetHHMM = winMatch[2].replace('.', ':');
+    }
+  }
+
+  if (!customDepHHMM && departureDateStr && typeof departureDateStr === 'string') {
+    const depMatch = departureDateStr.match(/T(\d{2}:\d{2})/);
+    if (depMatch) {
+      customDepHHMM = depMatch[1];
+    }
+  }
+
+  if (!customRetHHMM && estimatedArrivalStr && typeof estimatedArrivalStr === 'string') {
+    const arrMatch = estimatedArrivalStr.match(/T(\d{2}:\d{2})/);
+    if (arrMatch) {
+      customRetHHMM = arrMatch[1];
+    }
+  }
+
+  if (customDepHHMM) {
+    const [dh, dm] = customDepHHMM.split(':').map(Number);
+    if (!isNaN(dh) && !isNaN(dm)) {
+      timing.departureHour = dh;
+      timing.departureMinute = dm;
+      timing.departureLabel = `${String(dh).padStart(2, '0')}:${String(dm).padStart(2, '0')} WIB`;
+      timing.isNightDeparture = dh >= 18;
+    }
+  }
+
+  if (customRetHHMM) {
+    const [rh, rm] = customRetHHMM.split(':').map(Number);
+    if (!isNaN(rh) && !isNaN(rm)) {
+      timing.returnHour = rh;
+      timing.returnMinute = rm;
+      timing.returnLabel = `${String(rh).padStart(2, '0')}:${String(rm).padStart(2, '0')} WIB`;
+    }
+  }
+
   const now = new Date();
   const depDate = departureDateStr ? new Date(departureDateStr) : new Date();
 
@@ -298,28 +347,28 @@ export function getDriverPortalDepartureLabel(
 
   if (timing.isNightDeparture) {
     if (isTomorrow || isToday) {
-      badgeTitle = '🌙 Berangkat Nanti Malam';
-      departureText = `Nanti Malam: ${timing.departureLabel}`;
-      returnText = `Pulang: Besok ${timing.returnLabel}`;
+      badgeTitle = '🌙 Berangkat Malam';
+      departureText = `Berangkat: ${timing.departureLabel}`;
+      returnText = `Pulang: ${timing.returnLabel}`;
     } else {
       const dayName = depDate.toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short' });
       badgeTitle = `🌙 Berangkat Malam (${dayName})`;
-      departureText = `${timing.departureLabel} (Malam)`;
-      returnText = `Pulang: Besok ${timing.returnLabel}`;
+      departureText = `Berangkat: ${timing.departureLabel}`;
+      returnText = `Pulang: ${timing.returnLabel}`;
     }
   } else {
     if (isTomorrow) {
-      badgeTitle = '☀️ Berangkat Besok Pagi';
-      departureText = `Besok Pagi: ${timing.departureLabel}`;
-      returnText = `Pulang: Besok ${timing.returnLabel}`;
+      badgeTitle = '☀️ Jadwal Besok';
+      departureText = `Berangkat: ${timing.departureLabel}`;
+      returnText = `Pulang: ${timing.returnLabel}`;
     } else if (isToday) {
-      badgeTitle = '☀️ Berangkat Pagi Ini';
-      departureText = `Pagi Ini: ${timing.departureLabel}`;
-      returnText = `Pulang: Hari Ini ${timing.returnLabel}`;
+      badgeTitle = '☀️ Jadwal Hari Ini';
+      departureText = `Berangkat: ${timing.departureLabel}`;
+      returnText = `Pulang: ${timing.returnLabel}`;
     } else {
       const dayName = depDate.toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short' });
       badgeTitle = `☀️ Jadwal Kirim (${dayName})`;
-      departureText = `${timing.departureLabel}`;
+      departureText = `Berangkat: ${timing.departureLabel}`;
       returnText = `Pulang: ${timing.returnLabel}`;
     }
   }

@@ -682,7 +682,8 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
   };
 
   const filteredFleets = fleets.filter(f => {
-    const matchesStatus = fleetFilter === 'all' || f.status === fleetFilter;
+    const liveInfo = logisticsStore.getFleetLiveOperationalInfo(f);
+    const matchesStatus = fleetFilter === 'all' || liveInfo.effectiveStatus === fleetFilter;
     const matchesType = vehicleTypeFilter === 'all' || f.vehicleType === vehicleTypeFilter;
     const q = searchQuery.toLowerCase().trim();
     const matchesQuery =
@@ -690,7 +691,9 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
       f.plateNumber.toLowerCase().includes(q) ||
       f.vehicleType.toLowerCase().includes(q) ||
       (f.initialCode && f.initialCode.toLowerCase().includes(q)) ||
-      (f.brand && f.brand.toLowerCase().includes(q));
+      (f.brand && f.brand.toLowerCase().includes(q)) ||
+      (liveInfo.areaName && liveInfo.areaName.toLowerCase().includes(q)) ||
+      liveInfo.statusLabel.toLowerCase().includes(q);
     return matchesStatus && matchesType && matchesQuery;
   });
 
@@ -865,10 +868,10 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                     onChange={(e) => setFleetFilter(e.target.value)}
                     className="px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-hidden focus:border-blue-500 cursor-pointer"
                   >
-                    <option value="all">Semua Status</option>
-                    <option value="available">Ready (Available)</option>
-                    <option value="on-duty">On-Duty</option>
-                    <option value="maintenance">Maintenance</option>
+                    <option value="all">Semua Status Kondisi</option>
+                    <option value="available">● Ready (Siap Jadwal Esok)</option>
+                    <option value="on-duty">● Kirim (Sedang Dipakai Kirim)</option>
+                    <option value="maintenance">● Servis (Dalam Perbaikan)</option>
                   </select>
 
                   {/* Tipe Kendaraan Dropdown */}
@@ -997,6 +1000,93 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
         </div>
       )}
 
+      {/* 3 Indikator Status Kondisi Armada Terintegrasi (Ready, Kirim, Servis + Titik Besar Warna) */}
+      {activeTab === 'fleets' && (() => {
+        const liveInfos = fleets.map(f => logisticsStore.getFleetLiveOperationalInfo(f));
+        const readyCount = liveInfos.filter(i => i.effectiveStatus === 'available').length;
+        const kirimCount = liveInfos.filter(i => i.effectiveStatus === 'on-duty').length;
+        const servisCount = liveInfos.filter(i => i.effectiveStatus === 'maintenance').length;
+
+        return (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+            <button
+              type="button"
+              onClick={() => setFleetFilter(fleetFilter === 'available' ? 'all' : 'available')}
+              className={`p-3.5 rounded-xl border text-left transition flex items-start justify-between gap-3 cursor-pointer ${
+                fleetFilter === 'available'
+                  ? 'bg-emerald-950/40 border-emerald-500/60 shadow-xs'
+                  : 'bg-slate-900 border-slate-800 hover:border-emerald-500/40'
+              }`}
+            >
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 ring-4 ring-emerald-500/20 shrink-0" />
+                  <span className="font-black text-emerald-400 text-xs uppercase tracking-wide">
+                    Status Ready
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-snug">
+                  Siap digunakan untuk jadwal esok harinya (otomatis Ready setelah tim klik sudah berada di gudang).
+                </p>
+              </div>
+              <span className="text-xl font-black font-mono text-emerald-400 shrink-0">
+                {readyCount}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setFleetFilter(fleetFilter === 'on-duty' ? 'all' : 'on-duty')}
+              className={`p-3.5 rounded-xl border text-left transition flex items-start justify-between gap-3 cursor-pointer ${
+                fleetFilter === 'on-duty'
+                  ? 'bg-blue-950/40 border-blue-500/60 shadow-xs'
+                  : 'bg-slate-900 border-slate-800 hover:border-blue-500/40'
+              }`}
+            >
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="w-3.5 h-3.5 rounded-full bg-blue-500 ring-4 ring-blue-500/20 shrink-0" />
+                  <span className="font-black text-blue-400 text-xs uppercase tracking-wide">
+                    Status Kirim
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-snug">
+                  Sedang dipakai kirim tim pengiriman (otomatis berubah menjadi Kirim setelah klik Gate-Out).
+                </p>
+              </div>
+              <span className="text-xl font-black font-mono text-blue-400 shrink-0">
+                {kirimCount}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setFleetFilter(fleetFilter === 'maintenance' ? 'all' : 'maintenance')}
+              className={`p-3.5 rounded-xl border text-left transition flex items-start justify-between gap-3 cursor-pointer ${
+                fleetFilter === 'maintenance'
+                  ? 'bg-rose-950/40 border-rose-500/60 shadow-xs'
+                  : 'bg-slate-900 border-slate-800 hover:border-rose-500/40'
+              }`}
+            >
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="w-3.5 h-3.5 rounded-full bg-rose-500 ring-4 ring-rose-500/20 shrink-0" />
+                  <span className="font-black text-rose-400 text-xs uppercase tracking-wide">
+                    Status Servis
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-snug">
+                  Armada dalam keadaan perbaikan dan terkunci (tidak bisa diaturkan jadwal kirim).
+                </p>
+              </div>
+              <span className="text-xl font-black font-mono text-rose-400 shrink-0">
+                {servisCount}
+              </span>
+            </button>
+          </div>
+        );
+      })()}
+
       {/* Fleets Content: Table View */}
       {activeTab === 'fleets' && viewMode === 'table' && (
         <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-sm">
@@ -1007,7 +1097,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                   <th className="py-3 px-4 w-12 text-center">#</th>
                   <th className="py-3 px-4">Armada &amp; Inisial</th>
                   <th className="py-3 px-4">Tipe &amp; Spek Box</th>
-                  <th className="py-3 px-4 text-center">Status</th>
+                  <th className="py-3 px-4 text-center">Status Kondisi &amp; Area Kirim</th>
                   <th className="py-3 px-4">Sopir / PIC</th>
                   <th className="py-3 px-4">Spare Part &amp; Servis</th>
                   <th className="py-3 px-4">Pajak / KIR</th>
@@ -1055,24 +1145,39 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                           <div className="text-[10px] text-slate-500">{fleet.brand || '-'} ({fleet.year || '-'})</div>
                         </td>
                         <td className="py-3 px-4 text-center">
-                          <button
-                            type="button"
-                            onClick={() => toggleFleetStatus(fleet)}
-                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold border transition cursor-pointer ${
-                              fleet.status === 'available'
-                                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
-                                : fleet.status === 'on-duty'
-                                ? 'bg-blue-500/10 text-blue-400 border-blue-500/30 hover:bg-blue-500/20'
-                                : 'bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20'
-                            }`}
-                            title="Klik untuk ubah status armada"
-                          >
-                            <span>
-                              {fleet.status === 'available' && '● Ready'}
-                              {fleet.status === 'on-duty' && '● On-Duty'}
-                              {fleet.status === 'maintenance' && '● Servis'}
-                            </span>
-                          </button>
+                          {(() => {
+                            const liveInfo = logisticsStore.getFleetLiveOperationalInfo(fleet);
+                            return (
+                              <div className="flex flex-col items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleFleetStatus(fleet)}
+                                  className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold border transition cursor-pointer ${liveInfo.badgeColorClass}`}
+                                  title="Klik untuk ubah status kondisi armada (Ready -> Kirim -> Servis)"
+                                >
+                                  <span className={`w-3.5 h-3.5 rounded-full shrink-0 ${liveInfo.dotColorClass}`} />
+                                  <span>{liveInfo.statusLabel}</span>
+                                </button>
+                                <div className="text-[10px] text-slate-400 font-medium max-w-[180px] truncate" title={liveInfo.statusDescription}>
+                                  {liveInfo.effectiveStatus === 'on-duty' ? (
+                                    <span className="text-blue-300 font-semibold">
+                                      Area: {liveInfo.areaName || 'Sedang Kirim'}
+                                    </span>
+                                  ) : liveInfo.effectiveStatus === 'maintenance' ? (
+                                    <span className="text-rose-400 font-semibold">
+                                      Tidak bisa diatur kirim
+                                    </span>
+                                  ) : liveInfo.areaName ? (
+                                    <span className="text-emerald-300/90">
+                                      Area Hari Ini: {liveInfo.areaName}
+                                    </span>
+                                  ) : (
+                                    <span>Siap jadwal esok</span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td className="py-3 px-4">
                           {assignedCrew ? (
@@ -1199,20 +1304,30 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                     </h3>
                   </div>
 
-                  <button
-                    onClick={() => toggleFleetStatus(fleet)}
-                    className={`px-2.5 py-1 rounded-full text-xs font-semibold cursor-pointer border transition ${
-                      fleet.status === 'available'
-                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                        : fleet.status === 'on-duty'
-                        ? 'bg-blue-500/10 text-blue-400 border-blue-500/30'
-                        : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-                    }`}
-                  >
-                    {fleet.status === 'available' && '● Ready (Available)'}
-                    {fleet.status === 'on-duty' && '● On-Duty (Aktif)'}
-                    {fleet.status === 'maintenance' && '● Servis / Bengkel'}
-                  </button>
+                  {(() => {
+                    const liveInfo = logisticsStore.getFleetLiveOperationalInfo(fleet);
+                    return (
+                      <div className="flex flex-col items-end gap-1">
+                        <button
+                          onClick={() => toggleFleetStatus(fleet)}
+                          className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold cursor-pointer border transition ${liveInfo.badgeColorClass}`}
+                          title="Klik untuk ubah status kondisi armada (Ready -> Kirim -> Servis)"
+                        >
+                          <span className={`w-3.5 h-3.5 rounded-full shrink-0 ${liveInfo.dotColorClass}`} />
+                          <span>{liveInfo.statusLabel}</span>
+                        </button>
+                        <span className="text-[10px] text-slate-400 font-medium">
+                          {liveInfo.effectiveStatus === 'on-duty'
+                            ? `Area: ${liveInfo.areaName || 'Sedang Kirim'}`
+                            : liveInfo.effectiveStatus === 'maintenance'
+                            ? 'Dalam perbaikan (Tidak bisa kirim)'
+                            : liveInfo.areaName
+                            ? `Area: ${liveInfo.areaName}`
+                            : 'Siap jadwal esok'}
+                        </span>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div className="grid grid-cols-2 gap-2 text-xs">
@@ -2347,6 +2462,37 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                     <span>{fleetFormErrors.initialCode}</span>
                   </p>
                 )}
+              </div>
+
+              {/* Status Kondisi Armada (Ready / Kirim / Servis) */}
+              <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
+                <label className="text-slate-200 font-bold block text-xs">
+                  Status Kondisi Armada (Terintegrasi Jadwal &amp; Portal)
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { value: 'available', label: 'Ready', desc: 'Siap jadwal esok', dot: 'bg-emerald-500', activeBg: 'bg-emerald-500/15 border-emerald-500 text-emerald-300' },
+                    { value: 'on-duty', label: 'Kirim', desc: 'Sedang pengiriman', dot: 'bg-blue-500', activeBg: 'bg-blue-500/15 border-blue-500 text-blue-300' },
+                    { value: 'maintenance', label: 'Servis', desc: 'Perbaikan (Kunci)', dot: 'bg-rose-500', activeBg: 'bg-rose-500/15 border-rose-500 text-rose-300' }
+                  ].map(opt => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setEditingFleet({ ...editingFleet, status: opt.value as FleetStatus })}
+                      className={`p-2.5 rounded-xl border text-left transition cursor-pointer ${
+                        editingFleet.status === opt.value
+                          ? opt.activeBg
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 font-bold text-xs">
+                        <span className={`w-3 h-3 rounded-full shrink-0 ${opt.dot}`} />
+                        <span>{opt.label}</span>
+                      </div>
+                      <div className="text-[10px] opacity-80 mt-0.5">{opt.desc}</div>
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">

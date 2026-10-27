@@ -30,6 +30,8 @@ export interface ParsedSheetTrip {
   dateStr?: string;
   dayName?: string;
   target?: string;
+  departureTime?: string;
+  targetReturnTime?: string;
   notes?: string;
   backup?: string;
 }

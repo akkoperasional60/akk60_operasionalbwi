@@ -219,6 +219,12 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
         'Checklist Armada Tersimpan',
         `Inspeksi ${inspectionType === 'pre_trip' ? 'Pra-Jalan (Pagi)' : 'Pasca-Jalan (Pulang)'} ${plateNumber} berhasil dicatat (${passedCount} Lolos, ${issueCount} Perhatian).`
       );
+      setNotes('');
+      setOdometerInput('');
+      setPhotoUrl(null);
+      if (cameraInputRef.current) {
+        cameraInputRef.current.value = '';
+      }
       if (onSaved) onSaved(finalChecklist);
       onClose();
     } else {

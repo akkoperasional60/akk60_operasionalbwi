@@ -688,6 +688,24 @@ export const ScheduleManagement: React.FC<ScheduleManagementProps> = ({
     }
 
     setSchedules(logisticsStore.getSchedules());
+    const freshTimestamps = calculateScheduleTimestamps(new Date(), 'JAJAG_RETAIL');
+    setNewSchedule({
+      trackingNumber: 'TRK-' + new Date().toISOString().substring(0, 10).replace(/-/g, '') + '-' + Math.floor(Math.random() * 900 + 100),
+      storeId: 'JAJAG_RETAIL',
+      fleetId: fleets[0]?.id || 'flt-01',
+      crewId: crews.find(c => c.role.includes('Driver'))?.id || crews[0]?.id || 'crw-01',
+      crewHelperId: crews.find(c => c.role.includes('Helper'))?.id || '',
+      crewHelper2Id: '',
+      status: 'scheduled' as ShipmentStatus,
+      departureDate: freshTimestamps.departureDate,
+      estimatedArrival: freshTimestamps.estimatedArrival,
+      cargoDescription: '',
+      cargoWeightTon: 2.5,
+      isInterIsland: false,
+      ferryBookingCode: '',
+      transitPort: '',
+      notes: ''
+    });
     setIsAddScheduleOpen(false);
   };
 
@@ -1256,12 +1274,40 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                       className="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-white font-semibold focus:outline-none focus:border-blue-500 transition cursor-pointer"
                     >
                       <option value="">-- Pilih Truk Armada --</option>
-                      {fleets.map(fl => (
-                        <option key={fl.id} value={fl.id}>
-                          {fl.initialCode ? `[${fl.initialCode}] ` : ''}{fl.plateNumber}
-                        </option>
-                      ))}
+                      {fleets.map(fl => {
+                        const liveInfo = logisticsStore.getFleetLiveOperationalInfo(fl);
+                        const isServis = !liveInfo.canBeScheduled;
+                        return (
+                          <option key={fl.id} value={fl.id} disabled={isServis}>
+                            {fl.initialCode ? `[${fl.initialCode}] ` : ''}{fl.plateNumber} — {liveInfo.statusLabel}
+                            {liveInfo.effectiveStatus === 'on-duty' && liveInfo.areaName ? ` (Kirim: ${liveInfo.areaName})` : ''}
+                            {isServis ? ' [Servis - Tidak Bisa Dijadwalkan]' : ''}
+                          </option>
+                        );
+                      })}
                     </select>
+                    {newSchedule.fleetId && (() => {
+                      const selFleet = fleets.find(f => f.id === newSchedule.fleetId);
+                      if (!selFleet) return null;
+                      const liveInfo = logisticsStore.getFleetLiveOperationalInfo(selFleet);
+                      return (
+                        <div className="mt-2 flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px]">
+                          <div className="flex items-center gap-2">
+                            <span className={`w-3 h-3 rounded-full shrink-0 ${liveInfo.dotColorClass}`} />
+                            <span className="font-bold text-white">
+                              Status Armada: {liveInfo.statusLabel}
+                            </span>
+                          </div>
+                          <span className="text-[10px] font-medium text-slate-400 truncate">
+                            {liveInfo.effectiveStatus === 'on-duty' && liveInfo.areaName
+                              ? `Area Hari Ini: ${liveInfo.areaName}`
+                              : liveInfo.effectiveStatus === 'maintenance'
+                              ? 'Sedang Perbaikan (Servis)'
+                              : 'Siap Digunakan Kirim'}
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
 
@@ -1378,12 +1424,12 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                   </div>
                 )}
 
-                {/* Section 3: Waktu Keberangkatan & Estimasi Tiba di Gudang */}
+                {/* Section 3: Jam Keberangkatan & Target Jam Kepulangan */}
                 <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800/90 space-y-3">
                   <div className="flex items-center justify-between flex-wrap gap-2">
                     <span className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5">
-                      <Clock className="w-3.5 h-3.5 text-cyan-400" />
-                      <span>Jadwal Keberangkatan &amp; Estimasi Tiba di Gudang</span>
+                      <Clock className="w-3.5 h-3.5 text-blue-400" />
+                      <span>Jam Keberangkatan &amp; Target Jam Kepulangan</span>
                     </span>
                     <div className="flex items-center gap-1.5">
                       <button
@@ -1413,9 +1459,9 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                             estimatedArrival: timestamps.estimatedArrival
                           });
                         }}
-                        className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 cursor-pointer flex items-center gap-1 transition"
+                        className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/40 cursor-pointer flex items-center gap-1 transition"
                       >
-                        <span>📅 Jadwal H+1 (Besok)</span>
+                        <span>Jadwal H+1 (Besok)</span>
                       </button>
                     </div>
                   </div>
@@ -1423,7 +1469,7 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                     <div>
                       <label className="text-slate-300 font-bold block mb-1 text-[11px]">
-                        Estimasi Berangkat dari DC
+                        Jam Keberangkatan (Berangkat dari DC) *
                       </label>
                       <input
                         type="datetime-local"
@@ -1435,14 +1481,14 @@ const YEAR_LIST = ['Semua Tahun', '2024', '2025', '2026', '2027'];
                     </div>
                     <div>
                       <label className="text-slate-300 font-bold block mb-1 text-[11px]">
-                        Estimasi Tiba di Gudang
+                        Target Jam Kepulangan (Tiba di Gudang) *
                       </label>
                       <input
                         type="datetime-local"
                         required
                         value={newSchedule.estimatedArrival}
                         onChange={(e) => setNewSchedule({ ...newSchedule, estimatedArrival: e.target.value })}
-                        className="w-full px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-800 text-amber-400 font-semibold text-xs focus:outline-none focus:border-amber-500"
+                        className="w-full px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white font-semibold text-xs focus:outline-none focus:border-blue-500"
                       />
                     </div>
                   </div>

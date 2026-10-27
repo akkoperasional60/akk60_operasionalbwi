@@ -99,8 +99,11 @@ export interface Crew {
 
 export interface RetailStore {
   id: string;
+  nomor?: number | string;
   storeCode: string;
   storeName: string;
+  kecamatan?: string;
+  kabupaten?: string;
   island: 'Jawa' | 'Sumatera' | 'Bali & Nusa Tenggara' | 'Kalimantan' | 'Sulawesi' | 'Papua & Maluku';
   province: string;
   city: string;
@@ -253,9 +256,62 @@ export interface RouteStop {
   reason: 'Port Transit / Ferry Queue' | 'Driver Rest / Meals' | 'Traffic Congestion' | 'Retail Unloading' | 'Toll Gate Inspection';
 }
 
+export interface TracksolidTripLeg {
+  legNumber: number;
+  dateGroup: string;
+  startTime: string;
+  startLocation: string;
+  endTime: string;
+  endLocation: string;
+  mileageKm: number;
+  travelTime: string;
+  travelMinutes: number;
+  avgSpeedKmh: number;
+  maxSpeedKmh: number;
+  fuelPer100Km: number;
+  totalFuelLiters: number;
+  startLat: number;
+  startLng: number;
+  endLat: number;
+  endLng: number;
+  // Computed stop before/after this leg
+  stopBeforeMinutes?: number;
+  stopBeforeStart?: string;
+  stopBeforeEnd?: string;
+  matchedStoreId?: string;
+  matchedStoreName?: string;
+  matchedStoreKecamatan?: string;
+  matchedStoreKabupaten?: string;
+}
+
+export interface TracksolidDateSubtotal {
+  dateGroup: string;
+  tripCount: number;
+  totalMileageKm: number;
+  travelTime: string;
+  avgSpeedKmh: number;
+  maxSpeedKmh: number;
+  fuelPer100Km: number;
+  totalFuelLiters: number;
+}
+
+export interface TracksolidBottomSummary {
+  trips: number;
+  totalMileageKm: number;
+  duration: string;
+  avgSpeedKmh: number;
+  maxSpeedKmh: number;
+  totalFuelConsumptionLiters: number;
+  reportTitle?: string;
+}
+
 export interface TrackingEvaluation {
   fileName: string;
   scheduleId?: string;
+  fleetId?: string;
+  plateNumber?: string;
+  driverName?: string;
+  helperName?: string;
   totalPoints: number;
   totalDistanceKm: number;
   durationHours: number;
@@ -268,6 +324,9 @@ export interface TrackingEvaluation {
   delayMinutes: number;
   stops: RouteStop[];
   points: TrackingPoint[];
+  tripLegs?: TracksolidTripLeg[];
+  dateSubtotals?: TracksolidDateSubtotal[];
+  bottomSummary?: TracksolidBottomSummary;
 }
 
 export interface TrackingLog {

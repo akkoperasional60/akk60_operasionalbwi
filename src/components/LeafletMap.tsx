@@ -316,11 +316,14 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
         iconCreateFunction: (cluster: any) => {
           const count = cluster.getChildCount();
           const children = cluster.getAllChildMarkers();
-          const hasHighPriority = children.some((m: any) => m.options?.isHighPriority);
-          
-          let colorClass = 'bg-blue-600/95 border-blue-300 text-white shadow-xl ring-2 ring-blue-400/40';
-          if (hasHighPriority) {
-            colorClass = 'bg-amber-500/95 border-amber-200 text-slate-950 font-black shadow-2xl ring-2 ring-amber-300 animate-pulse';
+          const hasLuarPulau = children.some((m: any) => m.options?.locType === 'luar_pulau');
+          const hasLuarKota = children.some((m: any) => m.options?.locType === 'luar_kota');
+
+          let colorClass = 'bg-blue-600/95 border-white text-white shadow-xl ring-2 ring-blue-400/50';
+          if (hasLuarPulau) {
+            colorClass = 'bg-emerald-500/95 border-white text-white font-black shadow-xl ring-2 ring-emerald-300/60';
+          } else if (hasLuarKota) {
+            colorClass = 'bg-amber-400/95 border-slate-900 text-slate-950 font-black shadow-xl ring-2 ring-amber-300/70';
           }
 
           return L.divIcon({
@@ -459,23 +462,29 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
       }
 
       const isSelected = selectedStoreId === store.id;
-      const isHighPriority = ['Hypermarket', 'Supermarket', 'Distribution Hub', 'Horeca & Corporate'].includes(store.storeCategory);
       const locType = getStoreLocationType(store);
+      const kabupatenLabel = store.kabupaten || store.city || (locType === 'dalam_kota' ? 'Banyuwangi' : locType === 'luar_kota' ? 'Jawa Timur' : store.island);
+      const kecamatanLabel = store.kecamatan || '-';
 
-      let pinColor = 'bg-indigo-600 border-white text-white shadow-md ring-1 ring-indigo-400';
-      let badgeHtml = '<span class="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-800">Dalam Kota (Banyuwangi)</span>';
+      let pinColor = 'bg-blue-600 border-white text-white shadow-md ring-2 ring-blue-400/60';
+      let innerDotColor = 'bg-white';
+      let tooltipDotColor = 'bg-blue-400';
+      let badgeHtml = `<span class="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-300">Dalam Kota • ${kabupatenLabel}</span>`;
+
+      if (locType === 'luar_pulau') {
+        pinColor = 'bg-emerald-500 border-white text-white shadow-md ring-2 ring-emerald-300/70';
+        innerDotColor = 'bg-white';
+        tooltipDotColor = 'bg-emerald-400';
+        badgeHtml = `<span class="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-300">Luar Pulau • ${kabupatenLabel}</span>`;
+      } else if (locType === 'luar_kota') {
+        pinColor = 'bg-amber-400 border-slate-900 text-slate-950 font-bold shadow-md ring-2 ring-amber-300/80';
+        innerDotColor = 'bg-slate-950';
+        tooltipDotColor = 'bg-amber-400';
+        badgeHtml = `<span class="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-400">Luar Kota • ${kabupatenLabel}</span>`;
+      }
 
       if (isSelected) {
-        pinColor = 'bg-blue-600 border-white text-white scale-125 z-50 shadow-xl ring-4 ring-blue-400';
-      } else if (isHighPriority) {
-        pinColor = 'bg-amber-500 border-white text-slate-950 font-bold shadow-lg ring-2 ring-amber-300';
-        badgeHtml = `<span class="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300">★ High Priority (${store.storeCategory})</span>`;
-      } else if (locType === 'luar_pulau') {
-        pinColor = 'bg-emerald-500 border-white text-white shadow-md ring-1 ring-emerald-300';
-        badgeHtml = `<span class="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">${store.island} (Luar Pulau)</span>`;
-      } else if (locType === 'luar_kota') {
-        pinColor = 'bg-rose-500 border-white text-white shadow-md ring-1 ring-rose-300';
-        badgeHtml = `<span class="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-rose-100 text-rose-800">Luar Kota (${store.city || 'Jawa Timur'})</span>`;
+        pinColor = `${pinColor} scale-125 z-50 shadow-xl ring-4 ring-white`;
       }
 
       const storeIcon = L.divIcon({
@@ -483,7 +492,7 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
         html: `
           <div class="flex flex-col items-center group relative cursor-pointer">
             <div class="w-6 h-6 rounded-full border-2 flex items-center justify-center font-bold text-[10px] ${pinColor}">
-              <span class="w-2 h-2 rounded-full bg-white"></span>
+              <span class="w-2 h-2 rounded-full ${innerDotColor}"></span>
             </div>
           </div>
         `,
@@ -491,17 +500,17 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
         iconAnchor: [12, 12]
       });
 
-      const storeMarker = L.marker([lat, lng], { icon: storeIcon, isHighPriority } as any)
+      const storeMarker = L.marker([lat, lng], { icon: storeIcon, locType } as any)
         .on('click', () => {
-          userInteractedRef.current = true; // Mark user interaction so camera does not jump
+          userInteractedRef.current = true;
           if (onSelectStore) onSelectStore(store);
         });
 
       const tooltipHTML = `
         <div class="flex items-center gap-2 py-0.5 px-1 font-sans">
-          <span class="w-2 h-2 rounded-full ${isHighPriority ? 'bg-amber-400 ring-2 ring-amber-300' : 'bg-blue-400'} shrink-0"></span>
+          <span class="w-2.5 h-2.5 rounded-full ${tooltipDotColor} shrink-0"></span>
           <span class="font-bold text-white text-xs whitespace-nowrap">${store.storeName}</span>
-          <span class="text-[10px] text-slate-400 font-mono font-semibold">${store.storeCode}</span>
+          <span class="text-[10px] text-slate-300 font-semibold">(${kecamatanLabel !== '-' ? `${kecamatanLabel}, ` : ''}${kabupatenLabel})</span>
         </div>
       `;
 
@@ -512,19 +521,19 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
         className: 'custom-leaflet-tooltip'
       });
 
-      const popupContent = L.DomUtil.create('div', 'min-w-[250px] font-sans p-0.5');
+      const popupContent = L.DomUtil.create('div', 'min-w-[260px] font-sans p-0.5');
       popupContent.innerHTML = `
         <div class="flex items-center justify-between mb-1.5">
           ${badgeHtml}
-          <span class="text-[10px] text-slate-500 font-mono font-bold">${store.storeCode}</span>
+          <span class="text-[10px] text-slate-500 font-mono font-bold">${store.nomor ? `No. ${store.nomor}` : store.storeCode}</span>
         </div>
         <h4 class="font-bold text-slate-900 text-sm leading-snug">${store.storeName}</h4>
-        <p class="text-xs text-slate-600 mt-1">${store.address}</p>
+        <p class="text-xs text-slate-600 mt-1">${store.address || `Kec. ${kecamatanLabel}, Kab. ${kabupatenLabel}`}</p>
         <div class="mt-2.5 pt-2 border-t border-slate-200 grid grid-cols-2 gap-1.5 text-[11px] text-slate-600">
-          <div><strong>Kategori:</strong> ${store.storeCategory}</div>
-          <div><strong>Kota:</strong> ${store.city || '-'}</div>
-          <div><strong>PIC:</strong> ${store.contactPerson || '-'}</div>
-          <div><strong>Jendela Kirim:</strong> ${store.deliveryWindow || '08:00-17:00'}</div>
+          <div><strong>Kecamatan:</strong> ${kecamatanLabel}</div>
+          <div><strong>Kabupaten:</strong> ${kabupatenLabel}</div>
+          <div><strong>Latitude:</strong> <span class="font-mono">${lat.toFixed(6)}</span></div>
+          <div><strong>Longitude:</strong> <span class="font-mono">${lng.toFixed(6)}</span></div>
         </div>
         ${store.phone ? `<div class="text-[11px] mt-1 text-slate-600"><strong>Telp:</strong> <a href="tel:${store.phone}" class="text-blue-600 font-bold hover:underline">${store.phone}</a></div>` : ''}
       `;
@@ -977,12 +986,12 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
               <div className="flex items-center justify-between pb-2 border-b border-slate-800">
                 <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                   locType === 'luar_pulau'
-                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
                     : locType === 'luar_kota'
-                    ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                    : 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30'
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-400/40'
+                    : 'bg-blue-500/20 text-blue-300 border border-blue-500/40'
                 }`}>
-                  {locType === 'luar_pulau' ? `${selStore.island} (Luar Pulau)` : locType === 'luar_kota' ? `Luar Kota (${selStore.city || 'Jatim'})` : 'Dalam Kota (Banyuwangi)'}
+                  {locType === 'luar_pulau' ? `Luar Pulau (${selStore.kabupaten || selStore.city || selStore.island})` : locType === 'luar_kota' ? `Luar Kota (${selStore.kabupaten || selStore.city || 'Jatim'})` : `Dalam Kota (${selStore.kabupaten || 'Banyuwangi'})`}
                 </span>
                 <div className="flex items-center gap-2">
                   <span className="font-mono text-[11px] text-slate-400">{selStore.storeCode}</span>

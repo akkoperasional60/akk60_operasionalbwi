@@ -1639,18 +1639,6 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   ) => {
     setIsRefreshing(true);
 
-    // 1. Otomatis perbarui status armada ke 'Perjalanan' (on-duty) saat Mulai Kirim / In Transit
-    if (newStatus === 'in_transit' || newStatus === 'picked_up') {
-      if (delivery.fleetId) {
-        logisticsStore.updateFleetStatus(delivery.fleetId, 'on-duty');
-      }
-    } else if (newStatus === 'delivered') {
-      const targetFleetStatus = fleetStatusOverride || podModal.postTripFleetStatus || 'available';
-      if (delivery.fleetId) {
-        logisticsStore.updateFleetStatus(delivery.fleetId, targetFleetStatus);
-      }
-    }
-
     // Rekam pembaruan status ke antrean lokal (IndexedDB / localStorage) + Optimistic Store Update
     const res = await driverOfflineSyncService.recordTaskUpdate({
       scheduleId: delivery.id,
@@ -1661,6 +1649,24 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       notes: extraNotes,
       podData
     });
+
+    // Pastikan status armada terintegrasi penuh setelah perubahan status jadwal:
+    // - Klik Gate-Out ('in_transit' / 'picked_up') -> Status armada otomatis berubah menjadi Kirim ('on-duty')
+    // - Klik Sudah Berada di Gudang ('delivered') -> Status armada otomatis berubah menjadi Ready ('available') atau Servis ('maintenance')
+    const targetFleetKeys = [
+      delivery.fleetId,
+      assignedFleet?.id,
+      delivery.fleet?.plateNumber,
+      assignedFleet?.plateNumber
+    ].filter(Boolean) as string[];
+
+    if (newStatus === 'in_transit' || newStatus === 'picked_up') {
+      targetFleetKeys.forEach(fk => logisticsStore.updateFleetStatus(fk, 'on-duty'));
+    } else if (newStatus === 'delivered') {
+      const targetFleetStatus = fleetStatusOverride || podModal.postTripFleetStatus || 'available';
+      targetFleetKeys.forEach(fk => logisticsStore.updateFleetStatus(fk, targetFleetStatus, 0));
+    }
+    setFleets(logisticsStore.getFleets());
 
     addNotification(
       newStatus === 'delayed' ? 'sla_warning' : 'delivery',
@@ -2310,19 +2316,19 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   return (
     <div className="w-full max-w-md mx-auto bg-slate-950 min-h-screen text-slate-100 pb-24 shadow-2xl relative border-x border-slate-900 flex flex-col">
       {/* Top Mobile App Bar */}
-      <header className="sticky top-0 z-30 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-4 py-3 shadow-md">
+      <header className="sticky top-0 z-30 bg-slate-900/95 backdrop-blur-md border-b border-slate-800 px-4 py-3 shadow-sm">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0 font-bold">
+            <div className="w-9 h-9 rounded-xl bg-blue-600/15 border border-blue-500/30 flex items-center justify-center text-blue-400 shrink-0 font-bold">
               <Truck className="w-5 h-5" />
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 text-[10px] uppercase font-bold text-slate-400 tracking-wider">
                 <span>Driver AKK Mobile</span>
                 <span>•</span>
-                <span className={`inline-flex items-center gap-1 ${isSupabaseLive ? 'text-emerald-400' : 'text-cyan-400'}`}>
-                  <span className={`w-1.5 h-1.5 rounded-full ${isSupabaseLive ? 'bg-emerald-400' : 'bg-cyan-400'} animate-pulse`} />
-                  {isSupabaseLive ? 'Supabase Live' : 'Local DB'}
+                <span className="inline-flex items-center gap-1 text-blue-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+                  {isSupabaseLive ? 'Live DB' : 'Local DB'}
                 </span>
               </div>
               <h1 className="text-sm font-bold text-white truncate">
@@ -2592,11 +2598,26 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                         Role: {syncedUserRoleInfo.roleLabel}
                       </span>
                     </div>
-                    <div className="text-[10px] text-slate-400 truncate flex items-center gap-1 mt-0.5">
-                      <span>Armada:</span>
-                      <span className="text-amber-400 font-bold">{assignedFleet?.plateNumber || 'P 8509 VQ'}</span>
-                      <span>· {assignedFleet?.vehicleType || 'Pick Up Box'}</span>
-                    </div>
+                    {(() => {
+                      const fleetLive = assignedFleet
+                        ? logisticsStore.getFleetLiveOperationalInfo(assignedFleet)
+                        : null;
+                      return (
+                        <div className="text-[10px] text-slate-400 flex items-center gap-1.5 flex-wrap mt-1">
+                          <span>Armada:</span>
+                          <span className="text-amber-400 font-bold">{assignedFleet?.plateNumber || 'P 8509 VQ'}</span>
+                          {fleetLive && (
+                            <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold border ${fleetLive.badgeColorClass}`}>
+                              <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${fleetLive.dotColorClass}`} />
+                              <span>{fleetLive.statusLabel}</span>
+                              {fleetLive.areaName && (
+                                <span className="opacity-90">• {fleetLive.areaName}</span>
+                              )}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
 
@@ -3062,108 +3083,130 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                         )}
                       </div>
 
-                      {/* Tanggal Kirim & Timing Metadata */}
-                      {delivery.status === 'delivered' ? (
-                        <div className="space-y-2.5">
-                          <div className="grid grid-cols-2 gap-2 text-xs">
-                            <div className="bg-slate-950/40 p-2 rounded-xl border border-slate-800/60">
-                              <span className="text-[10px] text-slate-400 block flex items-center gap-1">
-                                <Truck className="w-3.5 h-3.5 text-blue-400" />
-                                <span>Waktu Mulai Kirim</span>
-                              </span>
-                              <div className="font-bold text-white text-xs mt-0.5">
-                                {new Date(delivery.departureDate || Date.now()).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
-                              </div>
-                              <div className="text-[10px] text-blue-400 font-semibold mt-0.5">
-                                Konfirmasi Mulai Berangkat
-                              </div>
-                            </div>
-
-                            <div className="bg-slate-950/40 p-2 rounded-xl border border-slate-800/60">
-                              <span className="text-[10px] text-slate-400 block flex items-center gap-1">
-                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                                <span>Waktu Selesai Kirim</span>
-                              </span>
-                              <div className="font-bold text-white text-xs mt-0.5">
-                                {new Date(delivery.actualArrival || Date.now()).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
-                              </div>
-                              <div className="text-[10px] text-emerald-400 font-semibold mt-0.5">
-                                Tiba di Gudang &amp; Selesai
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      ) : (() => {
+                      {/* Tanggal Kirim, Jam Keberangkatan & Target Jam Kepulangan */}
+                      {(() => {
                         const portalTiming = getDriverPortalDepartureLabel(
                           delivery.departureDate,
                           delivery.areaName,
-                          store?.storeName || delivery.store?.storeName
+                          store?.storeName || delivery.store?.storeName,
+                          delivery.estimatedArrival,
+                          store?.deliveryWindow || delivery.store?.deliveryWindow
                         );
+                        const deliveryFleetObj =
+                          fleets.find(f => f.id === delivery.fleetId) ||
+                          delivery.fleet ||
+                          assignedFleet;
+                        const fleetLiveInfo = deliveryFleetObj
+                          ? logisticsStore.getFleetLiveOperationalInfo(
+                              deliveryFleetObj,
+                              (delivery.departureDate || '').slice(0, 10) || undefined
+                            )
+                          : null;
+
                         return (
                           <div className="space-y-2">
-                            {/* Banner Khusus Area Luar Kota Berangkat Malam vs Reguler */}
-                            {portalTiming.isNightRun ? (
-                              <div className="p-2.5 rounded-xl bg-gradient-to-r from-amber-500/20 via-indigo-950/60 to-amber-500/10 border border-amber-500/40 flex items-center justify-between gap-2 shadow-xs">
-                                <div className="flex items-center gap-2.5 min-w-0">
-                                  <div className="w-7 h-7 rounded-lg bg-amber-500/25 border border-amber-500/40 text-amber-300 flex items-center justify-center shrink-0 font-bold">
-                                    <Moon className="w-4 h-4 text-amber-400" />
-                                  </div>
+                            {/* Status Kondisi Armada Terintegrasi (Titik Besar Warna + Status Ready/Kirim/Servis + Area Kirim) */}
+                            {deliveryFleetObj && fleetLiveInfo && (
+                              <div className="px-3 py-2 rounded-xl bg-slate-950/80 border border-slate-800 flex items-center justify-between gap-2 text-[11px]">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className={`w-3.5 h-3.5 rounded-full shrink-0 ${fleetLiveInfo.dotColorClass}`} />
                                   <div className="min-w-0">
-                                    <div className="font-black text-amber-300 text-xs truncate flex items-center gap-1.5">
-                                      <span>{portalTiming.badgeTitle}</span>
-                                      <span className="text-[10px] bg-amber-500/20 px-1.5 py-0.2 rounded text-amber-200 border border-amber-500/30">
-                                        {portalTiming.timing.departureLabel}
+                                    <div className="font-bold text-white flex items-center gap-1.5 flex-wrap">
+                                      <span className="font-mono">{deliveryFleetObj.plateNumber}</span>
+                                      {deliveryFleetObj.initialCode && (
+                                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 font-mono">
+                                          {deliveryFleetObj.initialCode}
+                                        </span>
+                                      )}
+                                      <span className={`px-2 py-0.2 rounded-full text-[10px] font-black border ${fleetLiveInfo.badgeColorClass}`}>
+                                        Status: {fleetLiveInfo.statusLabel}
                                       </span>
                                     </div>
-                                    <div className="text-[10px] text-slate-300 truncate mt-0.5">
-                                      Target Kepulangan: Besok jam <strong className="text-white">{portalTiming.timing.returnLabel}</strong>
+                                    <div className="text-[10px] text-slate-400 truncate mt-0.5">
+                                      {fleetLiveInfo.effectiveStatus === 'on-duty'
+                                        ? `Sedang Kirim di Area: ${delivery.areaName || store?.storeName || fleetLiveInfo.areaName || '-'}`
+                                        : fleetLiveInfo.effectiveStatus === 'maintenance'
+                                        ? 'Dalam perbaikan (Tidak bisa diaturkan kirim)'
+                                        : `Ready (Siap jadwal esok) • Area Kirim: ${delivery.areaName || store?.storeName || '-'}`}
                                     </div>
                                   </div>
                                 </div>
-                                <span className="px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-amber-500 text-slate-950 shrink-0">
-                                  Luar Kota
-                                </span>
-                              </div>
-                            ) : (
-                              <div className="px-2.5 py-1.5 rounded-xl bg-slate-900/80 border border-slate-800 flex items-center justify-between gap-2 text-[11px]">
-                                <div className="flex items-center gap-1.5 text-slate-300 min-w-0">
-                                  <Clock className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                                  <span className="truncate">
-                                    Berangkat <strong className="text-white">{portalTiming.timing.departureLabel}</strong> • Kepulangan <strong className="text-white">{portalTiming.timing.returnLabel}</strong>
-                                  </span>
-                                </div>
-                                <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-slate-800 text-slate-400 shrink-0">
-                                  Reguler
-                                </span>
                               </div>
                             )}
 
-                            <div className="grid grid-cols-2 gap-2 text-xs">
-                              <div className="bg-slate-950/40 p-2 rounded-xl border border-slate-800/60">
-                                <span className="text-[10px] text-slate-400 block flex items-center gap-1">
-                                  <Calendar className="w-3.5 h-3.5 text-emerald-400" />
-                                  <span>Tanggal Kirim</span>
-                                </span>
-                                <div className="font-bold text-white text-xs mt-1">
-                                  {delivery.departureDate 
-                                    ? new Date(delivery.departureDate).toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
-                                    : 'Hari ini'}
+                            {/* Banner Jam Keberangkatan & Target Jam Kepulangan */}
+                            <div className="px-3 py-2 rounded-xl bg-blue-950/30 border border-blue-500/30 flex items-center justify-between gap-2 text-[11px]">
+                              <div className="flex items-center gap-2 text-slate-200 min-w-0">
+                                <Clock className="w-4 h-4 text-blue-400 shrink-0" />
+                                <div className="truncate">
+                                  <span>Jam Keberangkatan: </span>
+                                  <strong className="text-white font-mono">{portalTiming.timing.departureLabel}</strong>
+                                  <span className="mx-1.5 text-slate-500">•</span>
+                                  <span>Target Kepulangan: </span>
+                                  <strong className="text-emerald-300 font-mono">{portalTiming.timing.returnLabel}</strong>
                                 </div>
                               </div>
-
-                              <div className="bg-slate-950/40 p-2 rounded-xl border border-slate-800/60">
-                                <span className="text-[10px] text-slate-400 block flex items-center gap-1">
-                                  <Clock className="w-3.5 h-3.5 text-blue-400" />
-                                  <span>Waktu &amp; Kepulangan</span>
-                                </span>
-                                <div className="font-bold text-amber-300 text-xs mt-0.5">
-                                  <span>{portalTiming.departureText}</span>
-                                </div>
-                                <div className="text-[10px] text-slate-300 font-medium mt-0.5">
-                                  {portalTiming.returnText}
-                                </div>
-                              </div>
+                              <span className="px-2 py-0.5 rounded text-[9px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30 shrink-0">
+                                {portalTiming.isNightRun ? 'Malam' : 'Reguler'}
+                              </span>
                             </div>
+
+                            {delivery.status === 'delivered' ? (
+                              <div className="grid grid-cols-2 gap-2 text-xs">
+                                <div className="bg-slate-950/40 p-2 rounded-xl border border-slate-800/60">
+                                  <span className="text-[10px] text-slate-400 block flex items-center gap-1">
+                                    <Truck className="w-3.5 h-3.5 text-blue-400" />
+                                    <span>Jam Keberangkatan</span>
+                                  </span>
+                                  <div className="font-bold text-white text-xs mt-0.5 font-mono">
+                                    {portalTiming.timing.departureLabel}
+                                  </div>
+                                  <div className="text-[10px] text-blue-400 font-semibold mt-0.5">
+                                    Target Pulang: {portalTiming.timing.returnLabel}
+                                  </div>
+                                </div>
+
+                                <div className="bg-slate-950/40 p-2 rounded-xl border border-slate-800/60">
+                                  <span className="text-[10px] text-slate-400 block flex items-center gap-1">
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                                    <span>Waktu Tiba di Gudang</span>
+                                  </span>
+                                  <div className="font-bold text-white text-xs mt-0.5 font-mono">
+                                    {new Date(delivery.actualArrival || Date.now()).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
+                                  </div>
+                                  <div className="text-[10px] text-emerald-400 font-semibold mt-0.5">
+                                    Armada Kembali Ready
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="grid grid-cols-2 gap-2 text-xs">
+                                <div className="bg-slate-950/40 p-2.5 rounded-xl border border-slate-800/60">
+                                  <span className="text-[10px] text-slate-400 block flex items-center gap-1">
+                                    <Calendar className="w-3.5 h-3.5 text-emerald-400" />
+                                    <span>Tanggal Kirim</span>
+                                  </span>
+                                  <div className="font-bold text-white text-xs mt-1">
+                                    {delivery.departureDate 
+                                      ? new Date(delivery.departureDate).toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+                                      : 'Hari ini'}
+                                  </div>
+                                </div>
+
+                                <div className="bg-slate-950/40 p-2.5 rounded-xl border border-slate-800/60">
+                                  <span className="text-[10px] text-slate-400 block flex items-center gap-1">
+                                    <Clock className="w-3.5 h-3.5 text-blue-400" />
+                                    <span>Jam Keberangkatan &amp; Pulang</span>
+                                  </span>
+                                  <div className="font-bold text-white text-xs mt-0.5 font-mono">
+                                    Berangkat: {portalTiming.timing.departureLabel}
+                                  </div>
+                                  <div className="text-[10px] text-emerald-400 font-semibold mt-0.5 font-mono">
+                                    Target Pulang: {portalTiming.timing.returnLabel}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         );
                       })()}
@@ -3258,18 +3301,14 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                                   onClick={() => setTransferModal({
                                     isOpen: true,
                                     delivery,
-                                    reason: delivery.transferRequest?.reason || 'Darurat / Halangan pribadi',
-                                    transferType: delivery.transferRequest?.transferType || 'Oper ke driver lain (Driver cari pengganti)',
-                                    gpsPhotoUrl: delivery.transferRequest?.gpsPhotoUrl || 'https://images.unsplash.com/photo-1526778548025-fa2f459cd5c1?w=600&auto=format&fit=crop&q=80',
-                                    constraintNote: delivery.transferRequest?.constraintNote || delivery.transferRequest?.notes || ''
+                                    reason: 'Darurat / Halangan pribadi',
+                                    transferType: 'Oper ke driver lain (Driver cari pengganti)',
+                                    gpsPhotoUrl: 'https://images.unsplash.com/photo-1526778548025-fa2f459cd5c1?w=600&auto=format&fit=crop&q=80',
+                                    constraintNote: ''
                                   })}
-                                  className={`w-full py-2.5 px-3 rounded-xl border-2 font-black text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-xs cursor-pointer ${
-                                    delivery.transferRequest?.status === 'pending'
-                                      ? 'bg-amber-100 dark:bg-amber-950/60 border-amber-600 dark:border-amber-400 text-amber-950 dark:text-amber-200'
-                                      : 'bg-amber-50 hover:bg-amber-100 dark:bg-amber-500/15 dark:hover:bg-amber-500/25 border-amber-500 text-amber-950 dark:text-amber-200'
-                                  }`}
+                                  className="w-full py-2.5 px-3 rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer"
                                 >
-                                  <ArrowRightLeft className="w-4 h-4 text-amber-700 dark:text-amber-400" />
+                                  <ArrowRightLeft className="w-4 h-4 text-blue-400" />
                                   <span>{delivery.transferRequest?.status === 'pending' ? 'Edit Oper Jadwal' : 'Minta Oper Jadwal'}</span>
                                 </button>
                               )}
@@ -3295,11 +3334,11 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                                   conditionNote: '',
                                   serviceNote: '',
                                   hasSignature: true,
-                                  photoUrl: delivery.podPhotoUrl || null,
-                                  photoTimestamp: delivery.podPhotoTimestamp || null,
+                                  photoUrl: null,
+                                  photoTimestamp: null,
                                   postTripFleetStatus: 'available'
                                 })}
-                                className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-md cursor-pointer"
+                                className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-sm cursor-pointer"
                               >
                                 <CheckCircle2 className="w-4 h-4" />
                                 <span>Konfirmasi Tiba di Gudang</span>
@@ -3322,34 +3361,26 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
                         {delivery.status === 'delayed' && (
                           <div className="space-y-2">
-                            <div className="flex items-center gap-2">
+                            {activeTab === 'active' && (
                               <button
-                                onClick={() => handleUpdateStatus(delivery, 'in_transit', 'Kendala teratasi, melanjutkan rute')}
-                                className="flex-1 py-2 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer"
+                                type="button"
+                                onClick={() => setPodModal({
+                                  isOpen: true,
+                                  delivery,
+                                  conditionNote: '',
+                                  serviceNote: '',
+                                  hasSignature: true,
+                                  photoUrl: null,
+                                  photoTimestamp: null,
+                                  postTripFleetStatus: 'available'
+                                })}
+                                className="w-full py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-sm cursor-pointer"
                               >
-                                <Truck className="w-3.5 h-3.5" />
-                                <span>Lanjutkan Perjalanan</span>
+                                <CheckCircle2 className="w-4 h-4" />
+                                <span>Konfirmasi Tiba di Gudang</span>
                               </button>
-                              {activeTab === 'active' && (
-                                <button
-                                  onClick={() => setPodModal({
-                                    isOpen: true,
-                                    delivery,
-                                    conditionNote: '',
-                                    serviceNote: '',
-                                    hasSignature: true,
-                                    photoUrl: delivery.podPhotoUrl || null,
-                                    photoTimestamp: delivery.podPhotoTimestamp || null,
-                                    postTripFleetStatus: 'available'
-                                  })}
-                                  className="flex-1 py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer"
-                                >
-                                  <CheckCircle2 className="w-3.5 h-3.5" />
-                                  <span>Konfirmasi Tiba di Gudang</span>
-                                </button>
-                              )}
-                            </div>
-                            <span className="text-[10px] text-rose-300/80 block text-center">
+                            )}
+                            <span className="text-[10px] text-slate-400 block text-center">
                               Status saat ini: Terlaporkan Kendala ke SPV Logistik.
                             </span>
                           </div>
@@ -4042,16 +4073,16 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           <div className="space-y-4">
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
               <div className="flex items-center gap-3">
-                <div className="w-14 h-14 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 font-bold text-xl">
+                <div className="w-14 h-14 rounded-2xl bg-blue-600/15 border border-blue-500/30 flex items-center justify-center text-blue-400 font-bold text-xl">
                   {portalInitials}
                 </div>
                 <div>
                   <h2 className="text-base font-black text-white">{portalDisplayName}</h2>
                   <div className="text-xs text-slate-400 mt-0.5">
-                    Role User Manajemen: <strong className="text-amber-400">{syncedUserRoleInfo.roleLabel}</strong> · Dept: {syncedUserRoleInfo.department}
+                    Role User Manajemen: <strong className="text-blue-400">{syncedUserRoleInfo.roleLabel}</strong> · Dept: {syncedUserRoleInfo.department}
                   </div>
-                  <div className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                    <CheckCircle2 className="w-3 h-3" />
+                  <div className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-200 border border-slate-700">
+                    <CheckCircle2 className="w-3 h-3 text-blue-400" />
                     <span>Status: {currentDriver?.status === 'on-duty' ? 'On-Duty' : 'Available'}</span>
                   </div>
                 </div>
@@ -4062,12 +4093,10 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3 text-xs">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <KeyRound className="w-4 h-4 text-amber-400" />
+                  <KeyRound className="w-4 h-4 text-blue-400" />
                   <span className="font-bold text-slate-200">Presensi Shift &amp; PIN Keamanan</span>
                 </div>
-                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                  activeShift ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                }`}>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-600/15 text-blue-300 border border-blue-500/30">
                   {activeShift ? 'Shift Aktif' : 'Belum Check-In'}
                 </span>
               </div>
@@ -4075,7 +4104,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
                 <div className="flex items-center justify-between text-[11px]">
                   <span className="text-slate-400">Status Dinas Hari Ini:</span>
-                  <span className={`font-bold ${activeShift ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  <span className="font-bold text-slate-200">
                     {activeShift ? `Masuk: ${activeShift.checkinTimeFormatted}` : 'Belum Check-In'}
                   </span>
                 </div>
@@ -4087,7 +4116,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                 </div>
                 <div className="flex items-center justify-between text-[11px]">
                   <span className="text-slate-400">Integrasi Data PIN &amp; Shift:</span>
-                  <span className="text-emerald-400 font-bold">Tersinkron ke Laporan Kiriman Kru</span>
+                  <span className="text-blue-400 font-bold">Tersinkron ke Laporan Kiriman Kru</span>
                 </div>
               </div>
 
@@ -4098,7 +4127,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                     setCheckinModalMode('checkin');
                     setIsCheckinModalOpen(true);
                   }}
-                  className="py-2.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black transition cursor-pointer flex items-center justify-center gap-1.5 active:scale-95"
+                  className="py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 active:scale-95"
                 >
                   <KeyRound className="w-3.5 h-3.5" />
                   <span>{activeShift ? 'Lihat / Perbarui Shift' : 'Check-In Shift'}</span>
@@ -4110,7 +4139,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                     setCheckinModalMode('change_pin');
                     setIsCheckinModalOpen(true);
                   }}
-                  className="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-400 text-xs font-bold border border-amber-500/30 transition cursor-pointer flex items-center justify-center gap-1.5 active:scale-95"
+                  className="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 transition cursor-pointer flex items-center justify-center gap-1.5 active:scale-95"
                 >
                   <Lock className="w-3.5 h-3.5" />
                   <span>Ubah / Buat PIN Baru (2x)</span>
@@ -4121,7 +4150,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsCheckoutModalOpen(true)}
-                  className="w-full py-2.5 px-3 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 text-xs font-bold border border-rose-500/30 transition cursor-pointer flex items-center justify-center gap-1.5 active:scale-95"
+                  className="w-full py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold border border-slate-700 transition cursor-pointer flex items-center justify-center gap-1.5 active:scale-95"
                 >
                   <Clock className="w-3.5 h-3.5" />
                   <span>Check-Out Shift (Gabung ke Laporan Kiriman Kru)</span>
@@ -4134,9 +4163,9 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               <button
                 type="button"
                 onClick={handleDriverLogout}
-                className="w-full py-2.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer active:scale-95"
+                className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer active:scale-95"
               >
-                <X className="w-4 h-4 text-rose-400" />
+                <X className="w-4 h-4 text-slate-400" />
                 <span>Keluar</span>
               </button>
             </div>
@@ -4144,20 +4173,16 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         )}
       </main>
 
-      {/* Floating Action Button (+) di Pojok Kanan Bawah for Berbagi Foto Gmaps & Lapor Kendala / Akhir Kirim */}
+      {/* Floating Action Button (+) di Pojok Kanan Bawah for Lapor Kendala & Absen Kiriman Pelanggan */}
       <div className="fixed bottom-20 right-4 sm:right-6 z-40">
         <button
           type="button"
           onClick={() => setIsGmapsShareModalOpen(true)}
-          className="w-14 h-14 rounded-full bg-gradient-to-tr from-amber-500 via-amber-400 to-yellow-400 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-black shadow-xl shadow-amber-500/40 flex items-center justify-center transition-all duration-200 active:scale-95 hover:scale-105 border-2 border-slate-950 cursor-pointer group"
-          title="Berbagi Foto Gmaps & Lapor Kendala / Akhir Kirim (+)"
-          aria-label="Berbagi Foto Gmaps"
+          className="w-14 h-14 rounded-full bg-blue-600 hover:bg-blue-500 text-white font-black shadow-lg flex items-center justify-center transition-all duration-200 active:scale-95 hover:scale-105 border-2 border-slate-950 cursor-pointer group"
+          title="Lapor Kendala & Absen Kiriman Pelanggan (+)"
+          aria-label="Lapor Kendala & Absen Kiriman Pelanggan"
         >
-          <Plus className="w-7 h-7 stroke-[3] transition-transform duration-200 group-hover:rotate-90 text-slate-950" />
-          <span className="absolute -top-1 -right-1 flex h-4 w-4">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-4 w-4 bg-emerald-500 border-2 border-slate-950"></span>
-          </span>
+          <Plus className="w-7 h-7 stroke-[2.5] transition-transform duration-200 group-hover:rotate-90 text-white" />
         </button>
       </div>
 
@@ -4166,28 +4191,28 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         <div className="grid grid-cols-4 gap-1">
           <button
             onClick={() => setBottomNav('deliveries')}
-            className={`flex flex-col items-center justify-center py-1.5 rounded-xl transition cursor-pointer ${bottomNav === 'deliveries' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-slate-200'}`}
+            className={`flex flex-col items-center justify-center py-1.5 rounded-xl transition cursor-pointer ${bottomNav === 'deliveries' ? 'text-blue-400 font-bold' : 'text-slate-400 hover:text-slate-200'}`}
           >
             <Calendar className="w-4 h-4 mb-0.5" />
             <span className="text-[10px]">Jadwal</span>
           </button>
           <button
             onClick={() => setBottomNav('checklist')}
-            className={`flex flex-col items-center justify-center py-1.5 rounded-xl transition cursor-pointer ${bottomNav === 'checklist' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-slate-200'}`}
+            className={`flex flex-col items-center justify-center py-1.5 rounded-xl transition cursor-pointer ${bottomNav === 'checklist' ? 'text-blue-400 font-bold' : 'text-slate-400 hover:text-slate-200'}`}
           >
             <ShieldCheck className="w-4 h-4 mb-0.5" />
             <span className="text-[10px]">Checklist</span>
           </button>
           <button
             onClick={() => setBottomNav('surat_jalan')}
-            className={`flex flex-col items-center justify-center py-1.5 rounded-xl transition cursor-pointer ${bottomNav === 'surat_jalan' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-slate-200'}`}
+            className={`flex flex-col items-center justify-center py-1.5 rounded-xl transition cursor-pointer ${bottomNav === 'surat_jalan' ? 'text-blue-400 font-bold' : 'text-slate-400 hover:text-slate-200'}`}
           >
             <FileText className="w-4 h-4 mb-0.5" />
             <span className="text-[10px]">SJ Keluar</span>
           </button>
           <button
             onClick={() => setBottomNav('profile')}
-            className={`flex flex-col items-center justify-center py-1.5 rounded-xl transition cursor-pointer ${bottomNav === 'profile' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-slate-200'}`}
+            className={`flex flex-col items-center justify-center py-1.5 rounded-xl transition cursor-pointer ${bottomNav === 'profile' ? 'text-blue-400 font-bold' : 'text-slate-400 hover:text-slate-200'}`}
           >
             <User className="w-4 h-4 mb-0.5" />
             <span className="text-[10px]">Profil</span>
@@ -5288,31 +5313,45 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               <div className="max-h-52 overflow-y-auto space-y-1.5 pr-1">
                 {fleets.map(f => {
                   const isSelected = (selectedFleetId || assignedFleet?.id) === f.id;
+                  const liveInfo = logisticsStore.getFleetLiveOperationalInfo(f);
+                  const isMaintenance = liveInfo.effectiveStatus === 'maintenance';
                   return (
                     <button
                       key={f.id}
                       type="button"
-                      onClick={() => setSelectedFleetId(f.id)}
-                      className={`w-full p-3 rounded-xl border text-left flex items-center justify-between transition cursor-pointer ${
-                        isSelected
-                          ? 'bg-emerald-500/20 border-emerald-500 text-white shadow-sm'
-                          : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+                      disabled={isMaintenance}
+                      onClick={() => {
+                        if (!isMaintenance) {
+                          setSelectedFleetId(f.id);
+                        }
+                      }}
+                      className={`w-full p-3 rounded-xl border text-left flex items-center justify-between transition ${
+                        isMaintenance
+                          ? 'bg-rose-950/20 border-rose-500/30 text-slate-500 opacity-60 cursor-not-allowed'
+                          : isSelected
+                          ? 'bg-emerald-500/20 border-emerald-500 text-white shadow-sm cursor-pointer'
+                          : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700 cursor-pointer'
                       }`}
                     >
-                      <div className="flex items-center gap-2.5">
-                        <Truck className={`w-4 h-4 ${isSelected ? 'text-emerald-400' : 'text-amber-400'}`} />
-                        <div>
-                          <div className="font-mono font-black text-xs text-white">
-                            {f.plateNumber}{' '}
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className={`w-3.5 h-3.5 rounded-full shrink-0 ${liveInfo.dotColorClass}`} />
+                        <div className="min-w-0">
+                          <div className="font-mono font-black text-xs text-white flex items-center gap-1.5 flex-wrap">
+                            <span>{f.plateNumber}</span>
                             {f.initialCode && (
                               <span className="text-amber-400 font-bold">({f.initialCode})</span>
                             )}
+                            <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold border ${liveInfo.badgeColorClass}`}>
+                              {liveInfo.statusLabel}
+                            </span>
                           </div>
-                          <div className="text-[10px] text-slate-400">{f.vehicleType}</div>
+                          <div className="text-[10px] text-slate-400 truncate mt-0.5">
+                            {f.vehicleType} • {liveInfo.statusDescription}
+                          </div>
                         </div>
                       </div>
-                      {isSelected && (
-                        <span className="px-2 py-0.5 rounded-md bg-emerald-500 text-slate-950 font-black text-[10px]">
+                      {isSelected && !isMaintenance && (
+                        <span className="px-2 py-0.5 rounded-md bg-emerald-500 text-slate-950 font-black text-[10px] shrink-0">
                           Dipilih
                         </span>
                       )}
@@ -5449,10 +5488,15 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                       areaName: activeDeliveries[0]?.areaName || deliveries[0]?.areaName || 'Area Distribusi AKK'
                     }
                   );
+                  // Saat Check-Out shift selesai dan kru sudah di gudang, bila armada tidak sedang Servis maka kembalikan ke Ready
+                  if (assignedFleet && assignedFleet.status !== 'maintenance') {
+                    logisticsStore.updateFleetStatus(assignedFleet.id, 'available', 0);
+                    setFleets(logisticsStore.getFleets());
+                  }
                   addNotification(
                     'schedule',
-                    'Check-Out Berhasil & Digabung ke Laporan Kru',
-                    res.message || 'Shift dinas resmi diakhiri dan digabungkan dengan Check-In pada Laporan Kiriman Kru.'
+                    'Check-Out Berhasil • Armada Ready',
+                    res.message || 'Shift dinas resmi diakhiri dan armada kembali berstatus Ready.'
                   );
                   setActiveShift(null);
                   setIsCheckoutModalOpen(false);
@@ -5467,7 +5511,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         </div>
       )}
 
-      {/* MODAL 11: Berbagi Foto Gmaps & Lapor Kendala / Istirahat */}
+      {/* MODAL 11: Lapor Kendala & Absen Kiriman Pelanggan */}
       <DriverGmapsShareModal
         isOpen={isGmapsShareModalOpen}
         onClose={() => setIsGmapsShareModalOpen(false)}
@@ -5492,7 +5536,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           }
           addNotification(
             'delivery',
-            'Laporan Kendala / Istirahat Terkirim',
+            'Laporan Kru Terkirim',
             `Laporan kru (${assignedFleet?.plateNumber || report.plateNumber}) berhasil dikirim ke sistem operasional DC.`
           );
         }}

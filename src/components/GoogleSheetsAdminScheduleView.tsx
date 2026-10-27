@@ -224,6 +224,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     area: string;
     armada: string;
     target: string;
+    departureTime: string;
+    targetReturnTime: string;
   }>(() => {
     const initDrivers = logisticsStore.getUsers().filter(u => u.role === 'driver' && u.status !== 'rejected');
     const initHelpers = logisticsStore.getUsers().filter(u => u.role === 'crew_helper' && u.status !== 'rejected');
@@ -234,7 +236,9 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       helper2: '',
       area: 'Denpasar 1',
       armada: 'DS3',
-      target: 'Gudang Pusat AKK Banyuwangi DC'
+      target: '',
+      departureTime: '07:30',
+      targetReturnTime: '17:00'
     };
   });
   const [areaSearchFilter, setAreaSearchFilter] = useState<string>('');
@@ -321,6 +325,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     area: string;
     armada: string;
     target: string;
+    departureTime: string;
+    targetReturnTime: string;
     isNew?: boolean;
   } | null>(null);
 
@@ -352,6 +358,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       area: p.area,
       armada: p.armada,
       target: p.target || '',
+      departureTime: p.departureTime || '07:30',
+      targetReturnTime: p.targetReturnTime || '17:00',
       isNew: false
     });
   };
@@ -370,7 +378,9 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       helper2: '',
       area: 'DENPASAR 1',
       armada: 'DS3',
-      target: 'Gudang Pusat AKK Banyuwangi DC',
+      target: '',
+      departureTime: '07:30',
+      targetReturnTime: '17:00',
       isNew: true
     });
   };
@@ -789,8 +799,10 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
       const monthPadded = String(mo + 1).padStart(2, '0');
       const dayPadded = String(dayNum).padStart(2, '0');
-      const departureIso = `${yr}-${monthPadded}-${dayPadded}T07:30:00.000Z`;
-      const estArrivalIso = `${yr}-${monthPadded}-${dayPadded}T18:00:00.000Z`;
+      const depTime = (t.departureTime || '07:30').trim();
+      const retTime = (t.targetReturnTime || '17:00').trim();
+      const departureIso = `${yr}-${monthPadded}-${dayPadded}T${depTime}:00.000Z`;
+      const estArrivalIso = `${yr}-${monthPadded}-${dayPadded}T${retTime}:00.000Z`;
 
       const matchedFleet = fleets.find(f =>
         f.initialCode?.toUpperCase() === armadaCode ||
@@ -833,7 +845,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
           longitude: isBali ? 115.2126 : 114.369,
           contactPerson: 'PIC Distribusi Area',
           phone: '-',
-          deliveryWindow: '08:00 - 17:00',
+          deliveryWindow: `${depTime} - ${retTime}`,
           storeCategory: 'Distribution Hub'
         },
         areaName: stdArea,
@@ -853,7 +865,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         isInterIsland: isBali,
         ferryBookingCode: isBali ? `ASDP-KTP-GLM-${Math.floor(Math.random() * 9000 + 1000)}` : undefined,
         transitPort: isBali ? 'Pelabuhan Ketapang Banyuwangi -> Gilimanuk Bali' : undefined,
-        notes: t.target || `Rute ${stdArea}`,
+        notes: t.target || `Rute ${stdArea} (Berangkat ${depTime} • Target Pulang ${retTime})`,
         createdAt: new Date().toISOString(),
         isManuallyEdited: t.source === 'manual'
       };
@@ -881,12 +893,14 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         area: stdArea,
         armada: armadaCode,
         target: t.target || 'Gudang Pusat AKK Banyuwangi DC',
+        departureTime: depTime,
+        targetReturnTime: retTime,
         isManuallyEdited: t.source === 'manual'
       });
 
       if (changeDetails.length < 6) {
         changeDetails.push(
-          `[${t.source === 'excel' ? 'Excel' : 'Input Baru'}] ${dateString}: Driver ${driverName} | Helper ${helperName} | Area ${stdArea} | Armada ${armadaCode}`
+          `[${t.source === 'excel' ? 'Excel' : 'Input Baru'}] ${dateString}: Driver ${driverName} | Area ${stdArea} | Armada ${armadaCode} | Jam ${depTime}-${retTime}`
         );
       }
     });
@@ -936,13 +950,15 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
   const handleSaveTripModal = () => {
     if (!editingTripModal) return;
-    const { dayNumber, dateString, tripIndex, scheduleId, driver, helper, helper2, area, armada, target, isNew } = editingTripModal;
+    const { dayNumber, dateString, tripIndex, scheduleId, driver, helper, helper2, area, armada, target, departureTime, targetReturnTime, isNew } = editingTripModal;
 
     const effectiveMonth = selectedMonth === -1 ? 0 : selectedMonth;
     const monthPadded = String(effectiveMonth + 1).padStart(2, '0');
     const dayPadded = String(dayNumber).padStart(2, '0');
-    const departureIso = `${selectedYear}-${monthPadded}-${dayPadded}T07:30:00.000Z`;
-    const estArrivalIso = `${selectedYear}-${monthPadded}-${dayPadded}T18:00:00.000Z`;
+    const depTime = (departureTime || '07:30').trim();
+    const retTime = (targetReturnTime || '17:00').trim();
+    const departureIso = `${selectedYear}-${monthPadded}-${dayPadded}T${depTime}:00.000Z`;
+    const estArrivalIso = `${selectedYear}-${monthPadded}-${dayPadded}T${retTime}:00.000Z`;
 
     const fleets = logisticsStore.getFleets();
     const crews = logisticsStore.getCrews();
@@ -990,7 +1006,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
           longitude: isBali ? 115.2126 : 114.369,
           contactPerson: 'PIC Distribusi Area',
           phone: '-',
-          deliveryWindow: '08:00 - 17:00',
+          deliveryWindow: `${depTime} - ${retTime}`,
           storeCategory: 'Distribution Hub'
         },
         areaName: stdArea,
@@ -1010,7 +1026,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         isInterIsland: isBali,
         ferryBookingCode: isBali ? `ASDP-KTP-GLM-${Math.floor(Math.random() * 9000 + 1000)}` : undefined,
         transitPort: isBali ? 'Pelabuhan Ketapang Banyuwangi -> Gilimanuk Bali' : undefined,
-        notes: target || `Rute ${stdArea}`,
+        notes: target || `Rute ${stdArea} (Berangkat ${depTime} • Target Pulang ${retTime})`,
         createdAt: new Date().toISOString(),
         isManuallyEdited: true
       };
@@ -1020,10 +1036,10 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       logisticsStore.addScheduleChangeLog({
         fileName: `Tambah Ritase (${dateString})`,
         actionType: 'manual_create',
-        summary: `Penambahan ritase baru pada ${dateString}: ${driver} menuju ${stdArea}`,
+        summary: `Penambahan ritase baru pada ${dateString}: ${driver} menuju ${stdArea} (${depTime} - ${retTime})`,
         rowCount: 1,
         changes: [
-          `Tanggal Kirim: ${dateString}`,
+          `Tanggal Kirim: ${dateString} | Jam: ${depTime} - ${retTime}`,
           `Driver: ${driver} | Helper 1: ${helper || '-'} | Helper 2: ${helper2 || '-'}`,
           `Area Kirim: ${stdArea} | Armada: ${armada}`
         ]
@@ -1041,6 +1057,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         area: stdArea,
         armada,
         target,
+        departureTime: depTime,
+        targetReturnTime: retTime,
         isManuallyEdited: true
       };
 
@@ -1121,6 +1139,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
           crewHelper2Id: matchedHelper2 ? matchedHelper2.id : undefined,
           crewHelper2: matchedHelper2,
           areaName: stdArea,
+          departureDate: departureIso,
+          estimatedArrival: estArrivalIso,
           notes: target,
           isManuallyEdited: true
         });
@@ -1145,7 +1165,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             longitude: isBali ? 115.2126 : 114.369,
             contactPerson: 'PIC Distribusi Area',
             phone: '-',
-            deliveryWindow: '08:00 - 17:00',
+            deliveryWindow: `${depTime} - ${retTime}`,
             storeCategory: 'Distribution Hub'
           },
           areaName: stdArea,
@@ -1165,7 +1185,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
           isInterIsland: isBali,
           ferryBookingCode: isBali ? `ASDP-KTP-GLM-${Math.floor(Math.random() * 9000 + 1000)}` : undefined,
           transitPort: isBali ? 'Pelabuhan Ketapang Banyuwangi -> Gilimanuk Bali' : undefined,
-          notes: target || `Rute ${stdArea}`,
+          notes: target || `Rute ${stdArea} (Berangkat ${depTime} • Target Pulang ${retTime})`,
           createdAt: new Date().toISOString(),
           isManuallyEdited: true
         };
@@ -1183,7 +1203,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
         if (prevTrip.armada !== armada) editDiffs.push(`Armada: ${prevTrip.armada} → ${armada}`);
       }
       if (editDiffs.length === 0) {
-        editDiffs.push(`Pembaruan ritase ${dateString}: Driver ${driver}, Area ${stdArea}, Armada ${armada}`);
+        editDiffs.push(`Pembaruan ritase ${dateString}: Driver ${driver}, Area ${stdArea}, Armada ${armada} (${depTime}-${retTime})`);
       }
 
       logisticsStore.addScheduleChangeLog({
@@ -1210,6 +1230,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 area: stdArea,
                 armada,
                 target,
+                departureTime: depTime,
+                targetReturnTime: retTime,
                 isManuallyEdited: true
               };
             }
@@ -2812,20 +2834,22 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
                                 {/* Kirim Area */}
                                 <td className="py-2 px-3 border-r border-slate-200 dark:border-slate-800">
-                                  <span className={`text-[11px] font-black uppercase px-2 py-0.5 rounded-md border ${
-                                    isKanvasLkt
-                                      ? 'bg-purple-100 text-purple-900 dark:bg-purple-950 dark:text-purple-200 border-purple-300 dark:border-purple-700'
-                                      : isLuarPulau 
-                                      ? 'bg-blue-100 text-blue-900 dark:bg-blue-950 dark:text-blue-200 border-blue-300 dark:border-blue-700' 
-                                      : 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200 border-emerald-300 dark:border-emerald-700'
-                                  }`}>
-                                    {standardArea}
-                                  </span>
+                                  <div className="flex flex-col items-start gap-1">
+                                    <span className="text-[11px] font-bold uppercase px-2 py-0.5 rounded-md border bg-blue-50 text-blue-800 dark:bg-blue-950/60 dark:text-blue-200 border-blue-200 dark:border-blue-800">
+                                      {standardArea}
+                                    </span>
+                                    {(p.departureTime || p.targetReturnTime) && (
+                                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+                                        <Clock className="w-3 h-3 text-blue-500 shrink-0" />
+                                        <span>{p.departureTime || '07:30'} - {p.targetReturnTime || '17:00'} WIB</span>
+                                      </span>
+                                    )}
+                                  </div>
                                 </td>
 
                                 {/* Armada */}
                                 <td className="py-2 px-3 border-r border-slate-200 dark:border-slate-800">
-                                  <span className="px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950/80 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 font-mono font-black text-xs">
+                                  <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 font-mono font-bold text-xs">
                                     {p.armada}
                                   </span>
                                 </td>
@@ -3431,24 +3455,83 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   onChange={(e) => setEditingTripModal({ ...editingTripModal, armada: e.target.value })}
                   className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-bold focus:outline-none focus:border-emerald-500"
                 >
-                  {logisticsStore.getFleets().map(f => (
-                    <option key={f.id} value={f.initialCode || f.plateNumber}>
-                      {f.initialCode ? `[${f.initialCode}] ` : ''}{f.plateNumber}
-                    </option>
-                  ))}
+                  {logisticsStore.getFleets().map(f => {
+                    const liveInfo = logisticsStore.getFleetLiveOperationalInfo(f);
+                    const isServis = !liveInfo.canBeScheduled;
+                    return (
+                      <option
+                        key={f.id}
+                        value={f.initialCode || f.plateNumber}
+                        disabled={isServis}
+                      >
+                        {f.initialCode ? `[${f.initialCode}] ` : ''}{f.plateNumber} — {liveInfo.statusLabel}
+                        {liveInfo.effectiveStatus === 'on-duty' && liveInfo.areaName ? ` (Kirim: ${liveInfo.areaName})` : ''}
+                        {isServis ? ' [Servis - Tidak Bisa Dijadwalkan]' : ''}
+                      </option>
+                    );
+                  })}
                 </select>
+                {(() => {
+                  const selFleet = logisticsStore.getFleets().find(
+                    f => (f.initialCode || f.plateNumber) === editingTripModal.armada || f.plateNumber === editingTripModal.armada
+                  );
+                  if (!selFleet) return null;
+                  const liveInfo = logisticsStore.getFleetLiveOperationalInfo(selFleet);
+                  return (
+                    <div className="mt-1.5 flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-[11px]">
+                      <div className="flex items-center gap-2">
+                        <span className={`w-3 h-3 rounded-full shrink-0 ${liveInfo.dotColorClass}`} />
+                        <span className="font-black text-slate-800 dark:text-slate-200">
+                          Status Armada: {liveInfo.statusLabel}
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-400 truncate">
+                        {liveInfo.effectiveStatus === 'on-duty' && liveInfo.areaName
+                          ? `Sedang Kirim: ${liveInfo.areaName}`
+                          : liveInfo.effectiveStatus === 'maintenance'
+                          ? 'Sedang Perbaikan (Tidak Bisa Kirim)'
+                          : 'Siap Digunakan Jadwal Kirim'}
+                      </span>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
+                    Jam Keberangkatan *
+                  </label>
+                  <input
+                    type="time"
+                    value={editingTripModal.departureTime}
+                    onChange={(e) => setEditingTripModal({ ...editingTripModal, departureTime: e.target.value })}
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-bold focus:outline-none focus:border-blue-600"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
+                    Target Jam Kepulangan *
+                  </label>
+                  <input
+                    type="time"
+                    value={editingTripModal.targetReturnTime}
+                    onChange={(e) => setEditingTripModal({ ...editingTripModal, targetReturnTime: e.target.value })}
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-bold focus:outline-none focus:border-blue-600"
+                  />
+                </div>
               </div>
 
               <div>
                 <label className="block text-slate-700 dark:text-slate-300 font-bold mb-1">
-                  Target / Catatan PO
+                  Target / Catatan PO (Opsional)
                 </label>
                 <input
                   type="text"
                   value={editingTripModal.target}
                   onChange={(e) => setEditingTripModal({ ...editingTripModal, target: e.target.value })}
                   placeholder="Gudang Pusat AKK Banyuwangi DC"
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-emerald-500"
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 rounded-xl px-3 py-2 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-blue-600"
                 />
               </div>
             </div>
@@ -3559,14 +3642,76 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   <select
                     value={manualScheduleForm.armada}
                     onChange={(e) => setManualScheduleForm({ ...manualScheduleForm, armada: e.target.value })}
-                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-emerald-500 cursor-pointer"
+                    className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-blue-600 cursor-pointer"
                   >
-                    {logisticsStore.getFleets().map(f => (
-                      <option key={f.id} value={f.initialCode || f.plateNumber}>
-                        {f.initialCode ? `[${f.initialCode}] ` : ''}{f.plateNumber}
-                      </option>
-                    ))}
+                    {logisticsStore.getFleets().map(f => {
+                      const liveInfo = logisticsStore.getFleetLiveOperationalInfo(f, manualScheduleForm.dateIso);
+                      const isServis = !liveInfo.canBeScheduled;
+                      return (
+                        <option
+                          key={f.id}
+                          value={f.initialCode || f.plateNumber}
+                          disabled={isServis}
+                        >
+                          {f.initialCode ? `[${f.initialCode}] ` : ''}{f.plateNumber} — {liveInfo.statusLabel}
+                          {liveInfo.effectiveStatus === 'on-duty' && liveInfo.areaName ? ` (Kirim: ${liveInfo.areaName})` : ''}
+                          {isServis ? ' [Servis - Tidak Bisa Dijadwalkan]' : ''}
+                        </option>
+                      );
+                    })}
                   </select>
+                  {(() => {
+                    const selFleet = logisticsStore.getFleets().find(
+                      f => (f.initialCode || f.plateNumber) === manualScheduleForm.armada || f.plateNumber === manualScheduleForm.armada
+                    );
+                    if (!selFleet) return null;
+                    const liveInfo = logisticsStore.getFleetLiveOperationalInfo(selFleet, manualScheduleForm.dateIso);
+                    return (
+                      <div className="mt-2 flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-[11px]">
+                        <div className="flex items-center gap-2">
+                          <span className={`w-3 h-3 rounded-full shrink-0 ${liveInfo.dotColorClass}`} />
+                          <span className="font-black text-slate-800 dark:text-slate-200">
+                            {liveInfo.statusLabel}
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-400 truncate">
+                          {liveInfo.effectiveStatus === 'on-duty' && liveInfo.areaName
+                            ? `Area Hari Ini: ${liveInfo.areaName}`
+                            : liveInfo.effectiveStatus === 'maintenance'
+                            ? 'Dalam Perbaikan (Servis)'
+                            : 'Siap Digunakan Kirim'}
+                        </span>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              {/* Jam Keberangkatan & Target Jam Kepulangan */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
+                <div>
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 mb-1.5">
+                    <Clock className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                    <span>Jam Keberangkatan *</span>
+                  </label>
+                  <input
+                    type="time"
+                    value={manualScheduleForm.departureTime}
+                    onChange={(e) => setManualScheduleForm({ ...manualScheduleForm, departureTime: e.target.value })}
+                    className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold rounded-xl px-3.5 py-2 focus:outline-none focus:border-blue-600 cursor-pointer"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5 mb-1.5">
+                    <Clock className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                    <span>Target Jam Kepulangan *</span>
+                  </label>
+                  <input
+                    type="time"
+                    value={manualScheduleForm.targetReturnTime}
+                    onChange={(e) => setManualScheduleForm({ ...manualScheduleForm, targetReturnTime: e.target.value })}
+                    className="w-full bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold rounded-xl px-3.5 py-2 focus:outline-none focus:border-blue-600 cursor-pointer"
+                  />
                 </div>
               </div>
 
@@ -3796,16 +3941,34 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                     helper2: manualScheduleForm.helper2.trim() || '-',
                     area: standardizeAreaName(manualScheduleForm.area.trim()),
                     armada: manualScheduleForm.armada.trim() || 'DS3',
-                    target: manualScheduleForm.target.trim() || 'Gudang Pusat AKK Banyuwangi DC'
+                    target: manualScheduleForm.target.trim() || 'Gudang Pusat AKK Banyuwangi DC',
+                    departureTime: manualScheduleForm.departureTime || '07:30',
+                    targetReturnTime: manualScheduleForm.targetReturnTime || '17:00'
                   };
                   mergeAndSaveCombinedTrips(
                     [manualEntry],
                     'tambahkan',
                     'Form Tambah Jadwal Baru'
                   );
+                  // Reset form after submitting so old data never sticks
+                  const initDrivers = getIntegratedDrivers();
+                  const initHelpers = getIntegratedHelpers();
+                  setManualScheduleForm({
+                    dateIso: getTodayIso(),
+                    driver: initDrivers[0]?.name || 'Budiono',
+                    helper: initHelpers[0]?.name || 'Saifur Rizal',
+                    helper2: '',
+                    area: 'Denpasar 1',
+                    armada: 'DS3',
+                    target: '',
+                    departureTime: '07:30',
+                    targetReturnTime: '17:00'
+                  });
+                  setAreaSearchFilter('');
+                  setIsAreaPickerExpanded(false);
                   setIsUploadConfigModalOpen(false);
                 }}
-                className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black transition flex items-center gap-2 cursor-pointer shadow-md"
+                className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-black transition flex items-center gap-2 cursor-pointer shadow-sm"
               >
                 <Save className="w-4 h-4" />
                 <span>Simpan Jadwal Baru</span>

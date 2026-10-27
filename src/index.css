@@ -7,43 +7,47 @@
 }
 
 /* =========================================================================
-   NEUMORPHISM DESIGN SYSTEM & NEON UI EXPERIENCE V2 TOKENS
+   PROFESSIONAL SLATE-BLUE ARCHITECTURE & SOPHISTICATED NEUMORPHIC TOKENS
    ========================================================================= */
 
 :root {
   color-scheme: dark;
 
-  /* Dark Neumorphic Tokens (Default Obsidian Palette) */
-  --neu-bg: #0d131f;
-  --neu-surface: #111827;
-  --neu-surface-hover: #141e30;
-  --neu-surface-raised: #151f33;
-  --neu-shadow-dark: #060910;
-  --neu-shadow-light: #192338;
-  --neu-inset-dark: rgba(4, 7, 12, 0.85);
-  --neu-inset-light: rgba(28, 40, 62, 0.75);
-  --neu-border: rgba(255, 255, 255, 0.05);
+  /* Dark Professional Slate Palette (Calm, non-neon, eye-pleasing) */
+  --neu-bg: #090e17;
+  --neu-surface: #0f172a;
+  --neu-surface-hover: #162032;
+  --neu-surface-raised: #1e293b;
+  --neu-shadow-dark: rgba(0, 0, 0, 0.4);
+  --neu-shadow-light: rgba(255, 255, 255, 0.03);
+  --neu-inset-dark: rgba(0, 0, 0, 0.35);
+  --neu-inset-light: rgba(255, 255, 255, 0.04);
+  --neu-border: #1e293b;
 
-  /* Neon UI Experience V2 Color Matrix */
-  --neon-cyan: #00f2fe;
-  --neon-cyan-glow: rgba(0, 242, 254, 0.45);
-  --neon-cyan-dim: rgba(0, 242, 254, 0.15);
+  /* Sophisticated Slate Blue Primary & Functional Muted Accents (Non-Neon) */
+  --color-primary: #2563eb;
+  --color-primary-hover: #1d4ed8;
+  --color-primary-subtle: rgba(37, 99, 235, 0.12);
 
-  --neon-amber: #f59e0b;
-  --neon-amber-glow: rgba(245, 158, 11, 0.45);
-  --neon-amber-dim: rgba(245, 158, 11, 0.15);
+  --neon-cyan: #38bdf8;
+  --neon-cyan-glow: rgba(56, 189, 248, 0.12);
+  --neon-cyan-dim: rgba(56, 189, 248, 0.05);
 
-  --neon-emerald: #10b981;
-  --neon-emerald-glow: rgba(16, 185, 129, 0.45);
-  --neon-emerald-dim: rgba(16, 185, 129, 0.15);
+  --neon-amber: #d97706;
+  --neon-amber-glow: rgba(217, 119, 6, 0.12);
+  --neon-amber-dim: rgba(217, 119, 6, 0.05);
 
-  --neon-purple: #a855f7;
-  --neon-purple-glow: rgba(168, 85, 247, 0.45);
-  --neon-purple-dim: rgba(168, 85, 247, 0.15);
+  --neon-emerald: #059669;
+  --neon-emerald-glow: rgba(5, 150, 105, 0.12);
+  --neon-emerald-dim: rgba(5, 150, 105, 0.05);
 
-  --neon-rose: #f43f5e;
-  --neon-rose-glow: rgba(244, 63, 94, 0.45);
-  --neon-rose-dim: rgba(244, 63, 94, 0.15);
+  --neon-purple: #7c3aed;
+  --neon-purple-glow: rgba(124, 58, 237, 0.12);
+  --neon-purple-dim: rgba(124, 58, 237, 0.05);
+
+  --neon-rose: #e11d48;
+  --neon-rose-glow: rgba(225, 29, 72, 0.12);
+  --neon-rose-dim: rgba(225, 29, 72, 0.05);
 }
 
 html.dark {
@@ -57,7 +61,7 @@ body {
   background-color: var(--neu-bg);
   color: #f1f5f9;
   min-height: 100vh;
-  transition: background-color 0.3s ease, color 0.3s ease;
+  transition: background-color 0.25s ease, color 0.25s ease;
 }
 
 /* =========================================================================
@@ -74,32 +78,32 @@ html.light {
   --neu-surface: #ffffff;
   --neu-surface-hover: #f1f5f9;
   --neu-surface-raised: #ffffff;
-  --neu-shadow-dark: rgba(0, 0, 0, 0.05);
+  --neu-shadow-dark: rgba(0, 0, 0, 0.04);
   --neu-shadow-light: transparent;
   --neu-inset-dark: rgba(0, 0, 0, 0.03);
   --neu-inset-light: transparent;
   --neu-border: #e2e8f0;
 
-  /* Accent Colors */
+  /* Soft Functional Accents */
   --neon-cyan: #0284c7;
-  --neon-cyan-glow: rgba(2, 132, 199, 0.2);
-  --neon-cyan-dim: rgba(2, 132, 199, 0.06);
+  --neon-cyan-glow: rgba(2, 132, 199, 0.1);
+  --neon-cyan-dim: rgba(2, 132, 199, 0.04);
 
-  --neon-amber: #d97706;
-  --neon-amber-glow: rgba(217, 119, 6, 0.2);
-  --neon-amber-dim: rgba(217, 119, 6, 0.06);
+  --neon-amber: #b45309;
+  --neon-amber-glow: rgba(180, 83, 9, 0.1);
+  --neon-amber-dim: rgba(180, 83, 9, 0.04);
 
-  --neon-emerald: #059669;
-  --neon-emerald-glow: rgba(5, 150, 105, 0.2);
-  --neon-emerald-dim: rgba(5, 150, 105, 0.06);
+  --neon-emerald: #047857;
+  --neon-emerald-glow: rgba(4, 120, 87, 0.1);
+  --neon-emerald-dim: rgba(4, 120, 87, 0.04);
 
-  --neon-purple: #7c3aed;
-  --neon-purple-glow: rgba(124, 58, 237, 0.2);
-  --neon-purple-dim: rgba(124, 58, 237, 0.06);
+  --neon-purple: #6d28d9;
+  --neon-purple-glow: rgba(109, 40, 217, 0.1);
+  --neon-purple-dim: rgba(109, 40, 217, 0.04);
 
-  --neon-rose: #e11d48;
-  --neon-rose-glow: rgba(225, 29, 72, 0.2);
-  --neon-rose-dim: rgba(225, 29, 72, 0.06);
+  --neon-rose: #be123c;
+  --neon-rose-glow: rgba(190, 18, 60, 0.1);
+  --neon-rose-dim: rgba(190, 18, 60, 0.04);
 }
 
 html.light body {
@@ -108,45 +112,45 @@ html.light body {
 }
 
 /* =========================================================================
-   KEYFRAMES: NEON UI EXPERIENCE V2 ANIMATIONS
+   KEYFRAMES: SUBTLE & PROFESSIONAL ANIMATIONS (NO NEON GLARE)
    ========================================================================= */
 
 @keyframes neonPulseGlow {
   0%, 100% {
-    filter: drop-shadow(0 0 6px var(--neon-cyan-glow)) drop-shadow(0 0 12px var(--neon-cyan-dim));
+    opacity: 0.88;
   }
   50% {
-    filter: drop-shadow(0 0 12px var(--neon-cyan-glow)) drop-shadow(0 0 20px var(--neon-cyan-glow));
+    opacity: 1;
   }
 }
 
 @keyframes neonAmberPulse {
   0%, 100% {
-    box-shadow: 0 0 10px rgba(245, 158, 11, 0.35), inset 0 0 6px rgba(245, 158, 11, 0.15);
+    border-color: rgba(217, 119, 6, 0.4);
   }
   50% {
-    box-shadow: 0 0 18px rgba(245, 158, 11, 0.65), inset 0 0 12px rgba(245, 158, 11, 0.3);
+    border-color: rgba(217, 119, 6, 0.85);
   }
 }
 
 @keyframes neonCyanPulse {
   0%, 100% {
-    box-shadow: 0 0 10px rgba(0, 242, 254, 0.35), inset 0 0 6px rgba(0, 242, 254, 0.15);
+    border-color: rgba(56, 189, 248, 0.35);
   }
   50% {
-    box-shadow: 0 0 18px rgba(0, 242, 254, 0.65), inset 0 0 12px rgba(0, 242, 254, 0.3);
+    border-color: rgba(56, 189, 248, 0.75);
   }
 }
 
 @keyframes neonBorderBeam {
   0% {
-    background-position: 0% 50%;
+    opacity: 0.85;
   }
   50% {
-    background-position: 100% 50%;
+    opacity: 1;
   }
   100% {
-    background-position: 0% 50%;
+    opacity: 0.85;
   }
 }
 
@@ -156,7 +160,7 @@ html.light body {
     opacity: 0;
   }
   50% {
-    opacity: 0.6;
+    opacity: 0.12;
   }
   100% {
     transform: translateX(100%);
@@ -265,52 +269,33 @@ html.dark .neu-button:hover {
 }
 
 /* =========================================================================
-   NEON UI EXPERIENCE V2: GLOW & ANIMATION UTILITIES
+   CLEAN PROFESSIONAL UI UTILITIES (NO NEON GLOW, COHESIVE SLATE & BLUE)
    ========================================================================= */
 
-.neon-v2-glow-amber {
-  box-shadow: 0 0 15px rgba(245, 158, 11, 0.45), inset 0 0 10px rgba(245, 158, 11, 0.2);
-  border-color: rgba(245, 158, 11, 0.6) !important;
-}
-
-.neon-v2-glow-cyan {
-  box-shadow: 0 0 15px rgba(0, 242, 254, 0.45), inset 0 0 10px rgba(0, 242, 254, 0.2);
-  border-color: rgba(0, 242, 254, 0.6) !important;
-}
-
+.neon-v2-glow-amber,
+.neon-v2-glow-cyan,
 .neon-v2-glow-emerald {
-  box-shadow: 0 0 15px rgba(16, 185, 129, 0.45), inset 0 0 10px rgba(16, 185, 129, 0.2);
-  border-color: rgba(16, 185, 129, 0.6) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  border-color: rgba(37, 99, 235, 0.35) !important;
 }
 
-.neon-text-amber {
-  text-shadow: 0 0 8px rgba(245, 158, 11, 0.7), 0 0 16px rgba(245, 158, 11, 0.35);
-}
-
-.neon-text-cyan {
-  text-shadow: 0 0 8px rgba(0, 242, 254, 0.7), 0 0 16px rgba(0, 242, 254, 0.35);
-}
-
+.neon-text-amber,
+.neon-text-cyan,
 .neon-text-emerald {
-  text-shadow: 0 0 8px rgba(16, 185, 129, 0.7), 0 0 16px rgba(16, 185, 129, 0.35);
+  text-shadow: none;
 }
 
-.neon-pulse-active {
-  animation: neonAmberPulse 2.4s infinite ease-in-out;
-}
-
+.neon-pulse-active,
 .neon-pulse-cyan {
-  animation: neonCyanPulse 2.4s infinite ease-in-out;
+  animation: none;
 }
 
-/* Neon Beam Moving Border */
 .neon-border-beam {
-  background: linear-gradient(90deg, #f59e0b, #00f2fe, #10b981, #f59e0b);
-  background-size: 300% 300%;
-  animation: neonBorderBeam 4s linear infinite;
+  background: #2563eb;
+  animation: none;
 }
 
-/* Sidebar Custom Scrollbar in Neon Style */
+/* Sidebar Custom Scrollbar in Clean Minimal Style */
 .sidebar-neon-v2::-webkit-scrollbar {
   width: 5px;
 }
@@ -318,13 +303,11 @@ html.dark .neu-button:hover {
   background: transparent;
 }
 .sidebar-neon-v2::-webkit-scrollbar-thumb {
-  background: rgba(6, 182, 212, 0.25);
+  background: rgba(148, 163, 184, 0.25);
   border-radius: 9999px;
-  box-shadow: 0 0 8px rgba(6, 182, 212, 0.4);
 }
 .sidebar-neon-v2::-webkit-scrollbar-thumb:hover {
-  background: rgba(245, 158, 11, 0.6);
-  box-shadow: 0 0 10px rgba(245, 158, 11, 0.8);
+  background: rgba(37, 99, 235, 0.5);
 }
 
 /* =========================================================================
@@ -362,6 +345,34 @@ html.dark .bg-slate-800\/60,
 html.dark .bg-slate-800\/40 {
   background-color: rgba(30, 41, 59, 0.8) !important;
   border-color: #334155 !important;
+}
+
+/* Calm Slate Blue adjustments for legacy cyan classes (Non-Neon) */
+html.dark .text-cyan-400 {
+  color: #60a5fa !important;
+}
+html.dark .text-cyan-300 {
+  color: #93c5fd !important;
+}
+html.dark .text-cyan-200 {
+  color: #bfdbfe !important;
+}
+html.dark .border-cyan-500\/20,
+html.dark .border-cyan-500\/30,
+html.dark .border-cyan-500\/40,
+html.dark .border-cyan-500\/50,
+html.dark .border-cyan-500\/60 {
+  border-color: rgba(59, 130, 246, 0.25) !important;
+}
+html.dark .bg-cyan-500\/10,
+html.dark .bg-cyan-500\/15,
+html.dark .bg-cyan-500\/20,
+html.dark .bg-cyan-500\/30 {
+  background-color: rgba(37, 99, 235, 0.12) !important;
+}
+html.dark .bg-cyan-950\/40,
+html.dark .bg-cyan-950\/50 {
+  background-color: rgba(15, 23, 42, 0.8) !important;
 }
 
 /* =========================================================================

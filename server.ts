@@ -217,6 +217,7 @@ async function startServer() {
 
     const cleanEmail = String(email).trim().toLowerCase();
     const cleanPass = String(password).trim();
+    const isProductionOrDbConfigured = process.env.NODE_ENV === 'production' || Boolean(process.env.DB_PASSWORD);
 
     // 1. Try Hostinger MySQL query if database connection is active
     try {
@@ -242,10 +243,18 @@ async function startServer() {
         });
       }
     } catch (mysqlErr) {
-      console.warn("Hostinger MySQL auth query fallback:", mysqlErr);
+      console.warn("Hostinger MySQL auth query error:", mysqlErr);
     }
 
-    // 2. Fallback User Verification for local/offline testing
+    // 2. In Production / DB Configured mode, strict MySQL verification is required (NO HARDCODED FALLBACK)
+    if (isProductionOrDbConfigured) {
+      return res.status(401).json({
+        success: false,
+        error: "Email atau password tidak terdaftar di database Hostinger MySQL."
+      });
+    }
+
+    // 3. Fallback User Verification ONLY for local/offline development mode (NODE_ENV !== 'production' && !DB_PASSWORD)
     const defaultAccounts = [
       { id: 'usr-001', email: 'bayun791@gmail.com', name: 'Bayu Novianto Dimas Permana, S.Si', pass: 'Bayu1509', role: 'super_admin' },
       { id: 'usr-002', email: 'hendri@akk.co.id', name: 'Hendri ST', pass: 'Hendri', role: 'spv_logistik' },
@@ -673,33 +682,98 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   });
 
-  // Persistent Server-side Schedules Database Storage
+  // Persistent Server-side Schedules Database Storage (Hostinger MySQL + JSON Fallback)
   const SCHEDULES_DB_FILE = path.join(process.cwd(), 'data', 'schedules_database.json');
 
-  app.post("/api/schedules/persist", express.json({ limit: '50mb' }), (req, res) => {
+  app.post("/api/schedules/persist", express.json({ limit: '50mb' }), async (req, res) => {
     try {
       const { schedules, weeks, month, year, source } = req.body || {};
-      const count = Array.isArray(schedules) ? schedules.length : 0;
+      const items = Array.isArray(schedules) ? schedules : [];
+      const count = items.length;
       const weeksCount = Array.isArray(weeks) ? weeks.length : 0;
 
+      // 1. Upsert schedules into Hostinger MySQL if connected
+      let mysqlSavedCount = 0;
+      if (count > 0) {
+        try {
+          for (const s of items) {
+            const schId = s.id || `sch-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+            const trackingNum = s.trackingNumber || s.tracking_number || `TRK-${Date.now()}`;
+            const originName = s.originName || 'Gudang Pusat Banyuwangi DC';
+            const originLat = Number(s.originLatitude || -8.1906);
+            const originLng = Number(s.originLongitude || 114.3708);
+            const storeId = s.storeId || s.store_id || null;
+            const fleetId = s.fleetId || s.fleet_id || null;
+            const crewId = s.crewId || s.crew_id || null;
+            const status = s.status || 'scheduled';
+            const depDate = s.departureDate ? new Date(s.departureDate) : new Date();
+            const estArr = s.estimatedArrival ? new Date(s.estimatedArrival) : new Date(depDate.getTime() + 8 * 3600 * 1000);
+            const actArr = s.actualArrival ? new Date(s.actualArrival) : null;
+            const cargoDesc = s.cargoDescription || 'Pengiriman Kemasan AKK';
+            const cargoWeight = Number(s.cargoWeightTon || 0);
+            const isInterIsland = s.isInterIsland ? 1 : 0;
+            const ferryCode = s.ferryBookingCode || null;
+            const transitPort = s.transitPort || null;
+            const notes = s.notes || null;
+
+            await mysqlQuery(
+              `INSERT INTO schedules (
+                id, tracking_number, origin_name, origin_latitude, origin_longitude,
+                store_id, fleet_id, crew_id, status, departure_date, estimated_arrival,
+                actual_arrival, cargo_description, cargo_weight_ton, is_inter_island,
+                ferry_booking_code, transit_port, notes
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ON DUPLICATE KEY UPDATE
+                tracking_number=VALUES(tracking_number),
+                origin_name=VALUES(origin_name),
+                store_id=VALUES(store_id),
+                fleet_id=VALUES(fleet_id),
+                crew_id=VALUES(crew_id),
+                status=VALUES(status),
+                departure_date=VALUES(departure_date),
+                estimated_arrival=VALUES(estimated_arrival),
+                actual_arrival=VALUES(actual_arrival),
+                cargo_description=VALUES(cargo_description),
+                cargo_weight_ton=VALUES(cargo_weight_ton),
+                is_inter_island=VALUES(is_inter_island),
+                ferry_booking_code=VALUES(ferry_booking_code),
+                transit_port=VALUES(transit_port),
+                notes=VALUES(notes)`,
+              [
+                schId, trackingNum, originName, originLat, originLng,
+                storeId, fleetId, crewId, status, depDate, estArr,
+                actArr, cargoDesc, cargoWeight, isInterIsland,
+                ferryCode, transitPort, notes
+              ]
+            );
+            mysqlSavedCount++;
+          }
+        } catch (mysqlErr) {
+          console.warn("[Hostinger MySQL Schedules Persist Error]:", mysqlErr);
+        }
+      }
+
+      // 2. Mirror to local JSON file for offline fallback
       const payload = {
         updatedAt: new Date().toISOString(),
         source: source || 'upload',
         month: month || 'Januari',
         year: year || 2026,
         count,
-        schedules: Array.isArray(schedules) ? schedules : [],
+        schedules: items,
         weeks: Array.isArray(weeks) ? weeks : []
       };
 
       fs.mkdirSync(path.dirname(SCHEDULES_DB_FILE), { recursive: true });
       fs.writeFileSync(SCHEDULES_DB_FILE, JSON.stringify(payload, null, 2), 'utf-8');
 
-      console.info(`[Database Persistence] Successfully saved ${count} schedules & ${weeksCount} weeks to disk (${SCHEDULES_DB_FILE})`);
+      console.info(`[Database Persistence] Saved ${count} schedules to MySQL (${mysqlSavedCount} synced) & JSON disk (${SCHEDULES_DB_FILE})`);
       res.json({
         success: true,
-        message: `${count} jadwal pengiriman berhasil disimpan permanen di database server`,
+        source: mysqlSavedCount > 0 ? "hostinger_mysql" : "local_file",
+        message: `${count} jadwal pengiriman berhasil disimpan permanen di database Hostinger MySQL & server`,
         count,
+        mysqlSavedCount,
         weeksCount,
         timestamp: payload.updatedAt
       });
@@ -709,13 +783,52 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   });
 
-  app.get("/api/schedules/persisted", (req, res) => {
+  app.get("/api/schedules/persisted", async (req, res) => {
+    // 1. Try querying Hostinger MySQL schedules table first
+    try {
+      const mysqlRows = await mysqlQuery<any[]>("SELECT * FROM schedules ORDER BY departure_date DESC");
+      if (Array.isArray(mysqlRows) && mysqlRows.length > 0) {
+        const mappedSchedules = mysqlRows.map(s => ({
+          id: s.id,
+          trackingNumber: s.tracking_number,
+          originName: s.origin_name,
+          originLatitude: Number(s.origin_latitude || -8.1906),
+          originLongitude: Number(s.origin_longitude || 114.3708),
+          storeId: s.store_id,
+          fleetId: s.fleet_id,
+          crewId: s.crew_id,
+          status: s.status,
+          departureDate: s.departure_date ? new Date(s.departure_date).toISOString() : new Date().toISOString(),
+          estimatedArrival: s.estimated_arrival ? new Date(s.estimated_arrival).toISOString() : new Date().toISOString(),
+          actualArrival: s.actual_arrival ? new Date(s.actual_arrival).toISOString() : undefined,
+          cargoDescription: s.cargo_description,
+          cargoWeightTon: Number(s.cargo_weight_ton || 0),
+          isInterIsland: Boolean(s.is_inter_island),
+          ferryBookingCode: s.ferry_booking_code || undefined,
+          transitPort: s.transit_port || undefined,
+          notes: s.notes || undefined
+        }));
+
+        return res.json({
+          success: true,
+          source: "hostinger_mysql",
+          exists: true,
+          schedules: mappedSchedules,
+          count: mappedSchedules.length
+        });
+      }
+    } catch (mysqlErr) {
+      console.warn("Hostinger MySQL schedules read fallback:", mysqlErr);
+    }
+
+    // 2. Local JSON disk fallback
     try {
       if (fs.existsSync(SCHEDULES_DB_FILE)) {
         const raw = fs.readFileSync(SCHEDULES_DB_FILE, 'utf-8');
         const data = JSON.parse(raw);
         return res.json({
           success: true,
+          source: "local_file_fallback",
           exists: true,
           ...data
         });

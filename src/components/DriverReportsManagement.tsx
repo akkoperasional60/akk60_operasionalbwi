@@ -32,12 +32,14 @@ import {
   ArrowRight,
   WifiOff,
   Wifi,
-  Edit
+  Edit,
+  UserCheck
 } from 'lucide-react';
 import { driverReportService, DriverHelperReport, getLocalDateStr } from '../services/driverReportService';
 import { useToast } from '../context/ToastContext';
 import { logisticsStore } from '../services/store';
 import { FleetChecklistReportView } from './FleetChecklistReportView';
+import { CrewAttendanceReportView } from './CrewAttendanceReportView';
 
 export type DateFilterMode = 'single_date' | 'this_week' | 'this_month' | 'all';
 
@@ -60,8 +62,8 @@ export const DriverReportsManagement: React.FC = () => {
     );
   }, [currentUser]);
 
-  // Sub-menu switcher: Laporan Kendala Lapangan vs Laporan Checklist Armada vs Laporan Peringatan Mode Offline
-  const [activeSubMenu, setActiveSubMenu] = useState<'operasional' | 'checklist_armada' | 'peringatan_offline'>('operasional');
+  // Sub-menu switcher: Laporan Kendala Lapangan | Laporan Absen Tim Kiriman | Laporan Checklist Armada | Laporan Peringatan Mode Offline
+  const [activeSubMenu, setActiveSubMenu] = useState<'operasional' | 'absen_tim_kiriman' | 'checklist_armada' | 'peringatan_offline'>('operasional');
   const [offlineStatusFilter, setOfflineStatusFilter] = useState<'all' | 'masih_offline' | 'sudah_online'>('all');
   const [offlineSearchQuery, setOfflineSearchQuery] = useState<string>('');
 
@@ -431,6 +433,9 @@ export const DriverReportsManagement: React.FC = () => {
   const kendalaCount = reports.filter((r) => r.category === 'kendala_jalan').length;
   const akhirCount = reports.filter((r) => r.category === 'akhir_kiriman').length;
   const pendingCount = reports.filter((r) => r.status === 'pending').length;
+  const absenTimKirimanCount = reports.filter(
+    (r) => r.category === 'istirahat'
+  ).length;
 
   const inScopeTotal = filteredReports.length;
   const inScopeKendala = filteredReports.filter((r) => r.category === 'kendala_jalan').length;
@@ -501,12 +506,12 @@ export const DriverReportsManagement: React.FC = () => {
         : r.category === 'pin_keamanan'
         ? 'PIN Keamanan (2x Verifikasi)'
         : r.category === 'istirahat'
-        ? 'Istirahat Kru'
+        ? 'Absen Kiriman Pelanggan'
         : 'Update Lokasi',
       `"${r.driverName} (${r.userRole || 'Driver'})"`,
       `"${r.helperName || '-'}"`,
       r.plateNumber,
-      `"${r.areaName}"`,
+      `"${r.customerOutletName ? `${r.areaName} (Pelanggan: ${r.customerOutletName})` : r.areaName}"`,
       `"${r.notes.replace(/"/g, '""')}"`,
       `"${(r.solution || '-').replace(/"/g, '""')}"`,
       `"${r.solutionBy || '-'}"`,
@@ -544,7 +549,7 @@ export const DriverReportsManagement: React.FC = () => {
   return (
     <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-200">
       
-      {/* 🌟 SUB-MENU SELECTOR: Laporan & Kendala Lapangan | Laporan Checklist Armada | Laporan Peringatan Mode Offline */}
+      {/* 🌟 SUB-MENU SELECTOR: Laporan & Kendala Lapangan | Laporan Absen Tim Kiriman | Laporan Checklist Armada | Laporan Peringatan Mode Offline */}
       <div className="flex flex-wrap items-center justify-between gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-2 rounded-2xl shadow-xs">
         <div className="flex items-center gap-2 flex-wrap">
           <button
@@ -559,6 +564,21 @@ export const DriverReportsManagement: React.FC = () => {
             <span>Laporan &amp; Kendala Lapangan</span>
             <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${activeSubMenu === 'operasional' ? 'bg-white/20 text-white font-bold' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>
               {totalCount}
+            </span>
+          </button>
+
+          <button
+            onClick={() => setActiveSubMenu('absen_tim_kiriman')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
+              activeSubMenu === 'absen_tim_kiriman'
+                ? 'bg-blue-600 text-white font-black shadow-sm'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60'
+            }`}
+          >
+            <UserCheck className="w-4 h-4" />
+            <span>Laporan Absen Tim Kiriman</span>
+            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${activeSubMenu === 'absen_tim_kiriman' ? 'bg-white/20 text-white font-bold' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>
+              {absenTimKirimanCount}
             </span>
           </button>
 
@@ -579,14 +599,14 @@ export const DriverReportsManagement: React.FC = () => {
             onClick={() => setActiveSubMenu('peringatan_offline')}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer ${
               activeSubMenu === 'peringatan_offline'
-                ? 'bg-rose-600 text-white font-black shadow-sm'
+                ? 'bg-blue-600 text-white font-black shadow-sm'
                 : activeOfflineCrewReports.length > 0
                 ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-300 border border-rose-300 dark:border-rose-500/40 hover:bg-rose-100 dark:hover:bg-rose-950/70'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/60'
             }`}
           >
             {activeOfflineCrewReports.length > 0 ? (
-              <WifiOff className="w-4 h-4 animate-pulse" />
+              <WifiOff className="w-4 h-4" />
             ) : (
               <Wifi className="w-4 h-4" />
             )}
@@ -596,7 +616,7 @@ export const DriverReportsManagement: React.FC = () => {
                 activeSubMenu === 'peringatan_offline'
                   ? 'bg-white/20 text-white font-bold'
                   : activeOfflineCrewReports.length > 0
-                  ? 'bg-rose-600 text-white font-black animate-pulse'
+                  ? 'bg-rose-600 text-white font-black'
                   : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
               }`}
             >
@@ -608,12 +628,12 @@ export const DriverReportsManagement: React.FC = () => {
         {/* Security Role Access Badge */}
         <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-[11px]">
           {isAuthorizedSpvOrAdmin ? (
-            <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-bold">
+            <div className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400 font-bold">
               <ShieldCheck className="w-3.5 h-3.5" />
               <span>Otorisasi SPV Logistik / Super Admin Aktif</span>
             </div>
           ) : (
-            <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
+            <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400">
               <Lock className="w-3.5 h-3.5" />
               <span>Mode Lihat (Akses Status Khusus SPV/Admin)</span>
             </div>
@@ -622,7 +642,9 @@ export const DriverReportsManagement: React.FC = () => {
       </div>
 
       {/* RENDER VIEW BERDASARKAN SUB-MENU AKTIF */}
-      {activeSubMenu === 'checklist_armada' ? (
+      {activeSubMenu === 'absen_tim_kiriman' ? (
+        <CrewAttendanceReportView onBackToOperationalReports={() => setActiveSubMenu('operasional')} />
+      ) : activeSubMenu === 'checklist_armada' ? (
         <FleetChecklistReportView onBackToOperationalReports={() => setActiveSubMenu('operasional')} />
       ) : activeSubMenu === 'peringatan_offline' ? (
         /* 🚨 DESAIN BARU UI/UX: LAPORAN PERINGATAN AKTIVASI MODE OFFLINE TIM PENGIRIMAN */
@@ -1281,7 +1303,7 @@ export const DriverReportsManagement: React.FC = () => {
                 <option value="pin_keamanan">🔐 Data PIN Keamanan (2x Verifikasi)</option>
                 <option value="kendala_jalan">⚠️ Kendala di Jalan &amp; Antri Customer</option>
                 <option value="akhir_kiriman">📦 Tiba di Gudang (POD &amp; Argo)</option>
-                <option value="istirahat">☕ Istirahat Kru</option>
+                <option value="istirahat">✅ Absen Kiriman Pelanggan</option>
                 <option value="update_lokasi">📍 Update Titik GMaps</option>
               </select>
 
@@ -1456,9 +1478,9 @@ export const DriverReportsManagement: React.FC = () => {
                               </span>
                             )}
                             {item.category === 'istirahat' && (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                                <Clock className="w-3 h-3 text-amber-400" />
-                                <span>Istirahat Kru</span>
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-500/15 text-blue-300 border border-blue-500/30">
+                                <CheckCircle2 className="w-3 h-3 text-blue-400" />
+                                <span>Absen Kiriman Pelanggan</span>
                               </span>
                             )}
                             {item.category === 'update_lokasi' && (
@@ -1483,11 +1505,16 @@ export const DriverReportsManagement: React.FC = () => {
                             )}
                           </td>
 
-                          {/* 5. Nama Area Kirim */}
+                          {/* 5. Nama Area Kirim & Pelanggan */}
                           <td className="py-2.5 px-3 align-middle">
-                            <div className="font-bold text-white text-xs max-w-[150px] truncate" title={item.areaName}>
+                            <div className="font-bold text-white text-xs max-w-[160px] truncate" title={item.areaName}>
                               {item.areaName}
                             </div>
+                            {item.customerOutletName && (
+                              <div className="text-[10px] text-blue-400 font-semibold mt-0.5 truncate max-w-[160px]" title={item.customerOutletName}>
+                                Pelanggan: {item.customerOutletName}
+                              </div>
+                            )}
                           </td>
 
                           {/* 6. Foto Bukti */}
