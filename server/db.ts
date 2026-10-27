@@ -27,7 +27,7 @@ export function getDbPool(): mysql.Pool {
   if (pool) return pool;
   assertDatabaseConfig();
 
-  const host = process.env.DB_HOST || '127.0.0.1';
+  const host = process.env.DB_HOST || 'localhost';
   const port = Number(process.env.DB_PORT) || 3306;
   const database = String(process.env.DB_NAME || '').trim();
   const user = String(process.env.DB_USER || '').trim();
@@ -71,7 +71,7 @@ export async function testConnection(): Promise<{ success: boolean; configured: 
     const connection = await p.getConnection();
     await connection.ping();
     connection.release();
-    const host = process.env.DB_HOST || '127.0.0.1';
+    const host = process.env.DB_HOST || 'localhost';
     const port = Number(process.env.DB_PORT) || 3306;
     return {
       success: true,

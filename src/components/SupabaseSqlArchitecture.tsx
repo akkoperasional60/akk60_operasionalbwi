@@ -11,7 +11,7 @@ export const SupabaseSqlArchitecture: React.FC = () => {
   const activeEnvVars = [
     'NODE_ENV=production',
     'APP_URL=https://akkoperasional.com',
-    'DB_HOST=127.0.0.1',
+    'DB_HOST=localhost',
     'DB_PORT=3306',
     'DB_NAME=u194997008_akk_operasional',
     'DB_USER=u194997008_akk_app',

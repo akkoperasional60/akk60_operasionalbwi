@@ -124,6 +124,34 @@ async function startServer() {
     ...normalized
   });
 
+  const normalizeIdentity = (value: any): string => String(value || '').trim().toLowerCase();
+
+  const isScheduleAssignedToAuthUser = (schedule: any, user: any): boolean => {
+    if (!schedule || !user) return false;
+    const userId = normalizeIdentity(user.id);
+    const userName = normalizeIdentity(user.full_name);
+    const strippedUserId = userId.replace(/^(usr-|crw-)/, '');
+
+    const candidateIds = [
+      schedule.crewId, schedule.crew_id, schedule.crew?.id,
+      schedule.crewHelperId, schedule.crew_helper_id, schedule.crewHelper?.id,
+      schedule.crewHelper2Id, schedule.crew_helper2_id, schedule.crewHelper2?.id
+    ].map(normalizeIdentity).filter(Boolean);
+
+    const candidateNames = [
+      schedule.crew?.name, schedule.crewName, schedule.crew_name,
+      schedule.crewHelper?.name, schedule.crewHelperName, schedule.crew_helper_name,
+      schedule.crewHelper2?.name, schedule.crewHelper2Name, schedule.crew_helper2_name
+    ].map(normalizeIdentity).filter(Boolean);
+
+    if (userId && candidateIds.some((id: string) => {
+      const stripped = id.replace(/^(usr-|crw-)/, '');
+      return id === userId || (strippedUserId.length >= 3 && stripped === strippedUserId);
+    })) return true;
+
+    return Boolean(userName && candidateNames.includes(userName));
+  };
+
   const toMysqlDateTime = (value: any, fallback?: Date): string => {
     const d = value ? new Date(value) : (fallback || new Date());
     const safe = Number.isNaN(d.getTime()) ? (fallback || new Date()) : d;
@@ -267,6 +295,23 @@ async function startServer() {
       next();
     });
   };
+
+  const requireAnyRole = (...allowedRoles: string[]) => async (req: any, res: any, next: any) => {
+    await requireAuth(req, res, () => {
+      const role = String(req.authUser?.role || '');
+      if (!allowedRoles.includes(role)) {
+        return res.status(403).json({ success: false, error: 'Role akun tidak memiliki izin untuk melakukan perubahan ini' });
+      }
+      next();
+    });
+  };
+
+  // Server-side RBAC: UI permissions alone are not a security boundary.
+  const requireLogisticsWrite = requireAnyRole('super_admin', 'dispatcher', 'spv_logistik', 'operasional');
+  const requireScheduleWrite = requireAnyRole('super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'sales_admin');
+  const requireScheduleStatusWrite = requireAnyRole('super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'driver', 'crew_helper');
+  const requireStoreWrite = requireAnyRole('super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'sales_admin', 'marketing_offline');
+  const requireWarehouseAccess = requireAnyRole('super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'warehouse_admin');
 
   const ensureBootstrapAdmin = async (): Promise<void> => {
     if (!isDatabaseConfigured()) return;
@@ -499,7 +544,7 @@ async function startServer() {
   });
 
   // API route for Warehouse Gemini AI Vision Scan
-  app.post("/api/warehouse/ai-vision-scan", requireAuth, async (req, res) => {
+  app.post("/api/warehouse/ai-vision-scan", requireWarehouseAccess, async (req, res) => {
     const { photoDataUrl, mode } = req.body || {};
     try {
       if (!genAI) {
@@ -579,7 +624,7 @@ Kembalikan respon DALAM FORMAT JSON MURNI TANPA MARKDOWN BACKTICKS:
   });
 
   // API route for Warehouse Gemini AI Slotting Advisor
-  app.post("/api/warehouse/ai-slotting-advisor", requireAuth, async (req, res) => {
+  app.post("/api/warehouse/ai-slotting-advisor", requireWarehouseAccess, async (req, res) => {
     const { currentFloor } = req.body || {};
     try {
       if (!genAI) {
@@ -757,7 +802,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
   });
 
   // API route for automated backend entity sync & audit logging
-  app.post("/api/sync-entity", requireAuth, async (req, res) => {
+  app.post("/api/sync-entity", requireScheduleWrite, async (req, res) => {
     try {
       const payload = req.body;
       const entityType = payload?.entityType || payload?.type || 'unknown';
@@ -846,7 +891,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
   });
 
   // Persistent schedules snapshot in Hostinger MySQL (no local JSON files)
-  app.post("/api/schedules/persist", requireAuth, express.json({ limit: '50mb' }), async (req, res) => {
+  app.post("/api/schedules/persist", requireScheduleWrite, express.json({ limit: '50mb' }), async (req, res) => {
     try {
       const { schedules, weeks, month, year, source } = req.body || {};
       const count = Array.isArray(schedules) ? schedules.length : 0;
@@ -888,7 +933,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   });
 
-  app.get("/api/schedules/persisted", requireAuth, async (_req, res) => {
+  app.get("/api/schedules/persisted", requireAuth, async (req: any, res) => {
     try {
       const rows = await mysqlQuery<any[]>("SELECT state_json, updated_at FROM app_state WHERE state_key = ? LIMIT 1", ['schedules_payload']);
       if (!Array.isArray(rows) || rows.length === 0) {
@@ -896,14 +941,30 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       }
       const raw = rows[0].state_json;
       const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
-      return res.json({ success: true, exists: true, source: 'hostinger_mysql', ...data });
+      const role = String(req.authUser?.role || '');
+      let schedules = Array.isArray(data?.schedules) ? data.schedules : [];
+
+      // Driver/helper hanya menerima jadwal yang memang ditugaskan kepadanya.
+      // Filtering dilakukan di server, bukan hanya di UI/browser.
+      if (role === 'driver' || role === 'crew_helper') {
+        schedules = schedules.filter((sch: any) => isScheduleAssignedToAuthUser(sch, req.authUser));
+      }
+
+      return res.json({
+        success: true,
+        exists: true,
+        source: 'hostinger_mysql',
+        ...data,
+        schedules,
+        count: schedules.length
+      });
     } catch (err: any) {
       console.error("[Schedule MySQL Fetch Error]", err);
       return res.status(503).json({ success: false, error: err?.message || "Gagal membaca jadwal dari Hostinger MySQL" });
     }
   });
 
-  app.patch("/api/schedules/:id/status", requireAuth, express.json(), async (req, res) => {
+  app.patch("/api/schedules/:id/status", requireScheduleStatusWrite, express.json(), async (req, res) => {
     try {
       const scheduleId = req.params.id;
       const { status, notes, trackingNumber, actualArrival } = req.body || {};
@@ -914,6 +975,22 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       const raw = rows[0].state_json;
       const payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
       const schedules = Array.isArray(payload?.schedules) ? payload.schedules : [];
+
+      const allowedStatuses = new Set(['scheduled', 'picked_up', 'in_transit', 'delivered', 'delayed']);
+      if (status && !allowedStatuses.has(String(status))) {
+        return res.status(400).json({ success: false, error: 'Status jadwal tidak valid' });
+      }
+
+      const role = String((req as any).authUser?.role || '');
+      if (role === 'driver' || role === 'crew_helper') {
+        const target = schedules.find((sch: any) =>
+          sch?.id === scheduleId || (trackingNumber && sch?.trackingNumber === trackingNumber)
+        );
+        if (!target || !isScheduleAssignedToAuthUser(target, (req as any).authUser)) {
+          return res.status(403).json({ success: false, error: 'Jadwal ini bukan penugasan akun driver/helper yang sedang login' });
+        }
+      }
+
       let changed = false;
       payload.schedules = schedules.map((sch: any) => {
         if (sch?.id === scheduleId || (trackingNumber && sch?.trackingNumber === trackingNumber)) {
@@ -958,7 +1035,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   });
 
-  app.post("/api/fleets", requireAuth, express.json(), async (req, res) => {
+  app.post("/api/fleets", requireLogisticsWrite, express.json(), async (req, res) => {
     const f = req.body || {};
     if (!f.plateNumber) return res.status(400).json({ success: false, error: "Nomor plat armada wajib diisi" });
     const id = f.id || `flt-${Date.now()}`;
@@ -975,7 +1052,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   });
 
-  app.put("/api/fleets/:id", requireAuth, express.json(), async (req, res) => {
+  app.put("/api/fleets/:id", requireLogisticsWrite, express.json(), async (req, res) => {
     const id = req.params.id;
     const f = req.body || {};
     try {
@@ -989,7 +1066,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   });
 
-  app.delete("/api/fleets/:id", requireAuth, async (req, res) => {
+  app.delete("/api/fleets/:id", requireLogisticsWrite, async (req, res) => {
     try {
       const result: any = await mysqlQuery("DELETE FROM fleets WHERE id = ?", [req.params.id]);
       return res.json({ success: true, source: 'hostinger_mysql', removed: Number(result?.affectedRows || 0) });
@@ -1012,7 +1089,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   });
 
-  app.post("/api/crews", requireAuth, express.json(), async (req, res) => {
+  app.post("/api/crews", requireLogisticsWrite, express.json(), async (req, res) => {
     const c = req.body || {};
     if (!c.name) return res.status(400).json({ success: false, error: "Nama kru wajib diisi" });
     const id = c.id || `crw-${Date.now()}`;
@@ -1028,7 +1105,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   });
 
-  app.put("/api/crews/:id", requireAuth, express.json(), async (req, res) => {
+  app.put("/api/crews/:id", requireLogisticsWrite, express.json(), async (req, res) => {
     const id = req.params.id;
     const c = req.body || {};
     try {
@@ -1042,7 +1119,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   });
 
-  app.delete("/api/crews/:id", requireAuth, async (req, res) => {
+  app.delete("/api/crews/:id", requireLogisticsWrite, async (req, res) => {
     try {
       const result: any = await mysqlQuery("DELETE FROM crews WHERE id = ?", [req.params.id]);
       return res.json({ success: true, source: 'hostinger_mysql', removed: Number(result?.affectedRows || 0) });
@@ -1090,7 +1167,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   });
 
-  app.post("/api/stores", requireAuth, express.json(), async (req, res) => {
+  app.post("/api/stores", requireStoreWrite, express.json(), async (req, res) => {
     const store = req.body || {};
     if (!store.storeName) return res.status(400).json({ success: false, error: 'Nama toko wajib diisi' });
     const id = store.id || `str-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -1112,7 +1189,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   });
 
-  app.put("/api/stores/:id", requireAuth, express.json(), async (req, res) => {
+  app.put("/api/stores/:id", requireStoreWrite, express.json(), async (req, res) => {
     const store = req.body || {};
     const id = req.params.id;
     try {
@@ -1136,7 +1213,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   });
 
-  app.delete("/api/stores/:id", requireAuth, async (req, res) => {
+  app.delete("/api/stores/:id", requireStoreWrite, async (req, res) => {
     try {
       const result: any = await mysqlQuery("DELETE FROM stores WHERE id = ?", [req.params.id]);
       return res.json({ success: true, source: 'hostinger_mysql', removed: Number(result?.affectedRows || 0) });
@@ -1145,7 +1222,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   });
 
-  app.post("/api/stores/batch", requireAuth, express.json({ limit: '20mb' }), async (req, res) => {
+  app.post("/api/stores/batch", requireStoreWrite, express.json({ limit: '20mb' }), async (req, res) => {
     const stores = Array.isArray(req.body?.stores) ? req.body.stores : [];
     if (stores.length > 5000) return res.status(413).json({ success: false, error: 'Maksimal 5000 toko per batch' });
     let saved = 0;
@@ -1172,7 +1249,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   });
 
-  app.post("/api/databridge/log", requireAuth, express.json(), async (req, res) => {
+  app.post("/api/databridge/log", requireScheduleWrite, express.json(), async (req, res) => {
     try {
       const log = req.body || {};
       const id = log.id || `db-log-${Date.now()}`;
@@ -1346,7 +1423,7 @@ Tugas Anda:
   });
 
   // 🔍 Server-side Spreadsheet Schema Validation Endpoint
-  app.post('/api/validate-schedule-spreadsheet', express.json({ limit: '50mb' }), (req, res) => {
+  app.post('/api/validate-schedule-spreadsheet', requireAuth, express.json({ limit: '50mb' }), (req, res) => {
     try {
       const { fileBase64 } = req.body;
       if (!fileBase64) {

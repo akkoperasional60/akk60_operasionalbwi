@@ -222,8 +222,8 @@ export const RBAC_ROLE_MATRIX: RolePolicySummary[] = [
       'Finance, Tax, Sales KPI & Hostinger MySQL Architecture'
     ],
     databaseRlsSummary: [
-      'FOR ALL ON public.profiles, fleets, crews, stores, schedules, tracking_logs USING (public.get_my_role() = \'super_admin\')',
-      'Full read/write/delete authority across all tables and audit logs'
+      'Express API: user management endpoints memakai requireSuperAdmin di server',
+      'Super Admin memiliki otoritas penuh; validasi dilakukan server-side sebelum query MySQL'
     ]
   },
   {
@@ -237,8 +237,8 @@ export const RBAC_ROLE_MATRIX: RolePolicySummary[] = [
       'Driver Delivery Reports & Issue Resolution'
     ],
     databaseRlsSummary: [
-      'FOR ALL ON public.schedules, fleets, crews, stores USING (public.get_my_role() IN (\'super_admin\', \'dispatcher\', \'spv_logistik\'))',
-      'SELECT only on public.profiles (cannot modify user roles or system config)'
+      'Express API: perubahan jadwal/armada/kru/toko dibatasi role operasional pada server',
+      'Tidak dapat mengubah role/user karena endpoint User Management khusus Super Admin'
     ]
   },
   {
@@ -252,9 +252,9 @@ export const RBAC_ROLE_MATRIX: RolePolicySummary[] = [
       'Vehicle Pre/Post-Trip Checklist & Shift PIN Check-In'
     ],
     databaseRlsSummary: [
-      'SELECT ON public.schedules USING (driver_user_id = auth.uid() OR crew_id IN (SELECT id FROM public.crews WHERE user_id = auth.uid()))',
-      'UPDATE (status, actual_arrival, pod_photo_url, notes) ON public.schedules USING (driver_user_id = auth.uid())',
-      'INSERT ON public.tracking_logs WITH CHECK (driver_user_id = auth.uid())'
+      'GET jadwal driver difilter server-side berdasarkan penugasan driver/helper',
+      'PATCH status jadwal ditolak bila jadwal bukan penugasan akun yang sedang login',
+      'Cookie sesi HttpOnly diverifikasi Express sebelum akses data MySQL'
     ]
   }
 ];

@@ -20,7 +20,7 @@ export interface StatusUpdateResult {
 class DriverDeliveryService {
   /**
    * Fetch deliveries assigned to a driver.
-   * Pulls from Supabase PostgreSQL if online and available, with graceful fallback to local store.
+   * Pulls from Hostinger MySQL if online and available, with local cache only for offline continuity.
    */
   public async getDriverDeliveries(driverId?: string): Promise<{
     deliveries: Schedule[];
@@ -66,14 +66,15 @@ class DriverDeliveryService {
         )
       : localSchedules;
 
-    // If still empty (e.g. driver has no active assignment yet), provide relevant local schedules
-    const finalDeliveries = targetDeliveries.length > 0 ? targetDeliveries : localSchedules.slice(0, 5);
+    // Jika driver/helper tidak punya penugasan, kembalikan kosong.
+    // Jangan menampilkan jadwal user lain atau jadwal demo sebagai fallback.
+    const finalDeliveries = (targetDriverId || targetDriverName) ? targetDeliveries : localSchedules;
 
     return { deliveries: finalDeliveries, isSupabaseLive };
   }
 
   /**
-   * Update delivery status by Driver with notes, proof of delivery photo/data, and Supabase sync.
+   * Update delivery status by Driver with notes, proof of delivery photo/data, and Hostinger MySQL sync.
    */
   public async updateDeliveryStatus(
     scheduleId: string,

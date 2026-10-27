@@ -1,0 +1,9 @@
+FILE/FOLDER YANG HARUS DIHAPUS DARI REPOSITORY EXISTING
+
+- public/assets/aistudio/   (hapus seluruh folder)
+- src/supabaseClient.js
+- src/supabaseClient.d.ts
+
+Catatan:
+- PATCH ZIP hanya menimpa/menambah file. Folder/file di atas harus dihapus manual dari repo/GitHub.
+- public/assets/aistudio berisi artefak editor/screenshot internal dan tidak boleh dipublish ke dist.

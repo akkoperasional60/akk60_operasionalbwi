@@ -204,7 +204,7 @@ ALTER TABLE `schedules` ADD COLUMN IF NOT EXISTS `crew_helper2_id` VARCHAR(64) N
 ALTER TABLE `schedules` ADD COLUMN IF NOT EXISTS `payload_json` JSON NULL AFTER `notes`;
 
 -- ====================================================================
--- SEED DATA SETUP (Data Operasional Awal PT AKK Logistics)
+-- BOOTSTRAP USER POLICY (TANPA SEED DATA OPERASIONAL)
 -- ====================================================================
 
 -- USERS TIDAK DI-SEED DENGAN PASSWORD DEFAULT.
@@ -212,43 +212,12 @@ ALTER TABLE `schedules` ADD COLUMN IF NOT EXISTS `payload_json` JSON NULL AFTER 
 -- hanya jika BOOTSTRAP_ADMIN_EMAIL + BOOTSTRAP_ADMIN_PASSWORD diisi pada Environment Variables Hostinger.
 -- Setelah login pertama berhasil, hapus BOOTSTRAP_ADMIN_PASSWORD dari Environment Variables.
 
--- Default Fleets (12 Unit Utama PT AKK Logistics)
-INSERT IGNORE INTO `fleets` (`id`, `plate_number`, `vehicle_type`, `tonnage_capacity`, `current_tonnage`, `status`, `fuel_level_percent`, `odometer_km`, `year`) VALUES
-('flt-001', 'P 8125 VC', 'Pick Up Box L300', 1.50, 1.20, 'on-duty', 85, 125400, 2022),
-('flt-002', 'P 8509 VQ', 'Pick Up Box Traga', 1.80, 1.50, 'on-duty', 90, 98200, 2023),
-('flt-003', 'P 8848 U', 'Engkel STD Canter', 3.50, 0.00, 'available', 100, 142100, 2021),
-('flt-004', 'P 9677 VB', 'Engkel STD Canter', 3.50, 3.10, 'on-duty', 75, 115000, 2022),
-('flt-005', 'P 8801 UV', 'Engkel STD Canter', 3.50, 0.00, 'available', 100, 131400, 2021),
-('flt-006', 'P 8381 VE', 'Engkel Long Hino', 5.00, 0.00, 'maintenance', 50, 189000, 2020),
-('flt-007', 'P 8711 UW', 'Engkel Long Hino', 5.00, 0.00, 'available', 95, 162300, 2021),
-('flt-008', 'P 9281 VA', 'Double STD Hino', 8.00, 0.00, 'available', 90, 210500, 2019),
-('flt-009', 'P 8928 UR', 'Double STD Hino', 8.00, 0.00, 'available', 80, 198000, 2020),
-('flt-010', 'P 9194 SA', 'Double STD Hino', 8.00, 0.00, 'available', 85, 205000, 2019),
-('flt-011', 'W 8229 US', 'Double STD Isuzu NMR', 8.00, 0.00, 'available', 90, 175400, 2022),
-('flt-012', 'W 8603 PG', 'Double STD Isuzu NMR', 8.00, 0.00, 'available', 95, 168900, 2022);
-
--- Default Crews
-INSERT IGNORE INTO `crews` (`id`, `name`, `phone`, `role`, `license_number`, `license_type`, `status`, `trips_completed`) VALUES
-('crw-001', 'Zainul Agustiar', '0821-4455-6677', 'Driver Utama', 'B2U-99882211', 'SIM B2 Umum', 'on-duty', 142),
-('crw-002', 'Aan Adi Saputra', '0821-4455-6688', 'Kernet / Helper', 'HLP-10293847', 'SIM A', 'on-duty', 110),
-('crw-003', 'Ach Taufiq', '0813-8877-6655', 'Driver Utama', 'B2U-77665544', 'SIM B2 Umum', 'on-duty', 128),
-('crw-004', 'Bintang Wahyu Pratama', '0813-8877-6666', 'Kernet / Helper', 'HLP-20394857', 'SIM A', 'on-duty', 95),
-('crw-005', 'Aldi Wahyu Pradana', '0857-1122-3344', 'Driver Utama', 'B1U-55443322', 'SIM B1 Umum', 'available', 86),
-('crw-006', 'Alphian Bayu Nugraha', '0857-1122-3355', 'Kernet / Helper', 'HLP-30495867', 'SIM A', 'available', 78),
-('crw-007', 'Suwarno', '0812-9900-1122', 'Driver Cadangan', 'B2U-33221100', 'SIM B2 Umum', 'available', 65),
-('crw-008', 'Adit', '0812-9900-1133', 'Driver Cadangan', 'B1U-44332211', 'SIM B1 Umum', 'available', 52);
-
--- Default Stores
-INSERT IGNORE INTO `stores` (`id`, `store_code`, `store_name`, `island`, `province`, `city`, `address`, `latitude`, `longitude`, `contact_person`, `phone`, `store_category`) VALUES
-('str-001', 'STR-BALI-01', 'Hypermart Mall Bali Galleria', 'Bali & Nusa Tenggara', 'Bali', 'Badung', 'Jl. Bypass Ngurah Rai, Kuta, Badung, Bali', -8.71880000, 115.18340000, 'I Made Suardana', '0819-3344-5566', 'Hypermarket'),
-('str-002', 'STR-SBY-02', 'Lotte Grosir Surabaya', 'Jawa', 'Jawa Timur', 'Surabaya', 'Jl. Raya Mastrip No.5, Warugunung, Surabaya', -7.34120000, 112.69800000, 'Budi Santoso', '0812-8899-0011', 'Distribution Hub'),
-('str-003', 'STR-BPN-03', 'Transmart Balikpapan', 'Kalimantan', 'Kalimantan Timur', 'Balikpapan', 'Jl. MT Haryono No.18, Balikpapan', -1.24830000, 116.86120000, 'Eko Prasetyo', '0822-7766-5544', 'Hypermarket'),
-('str-004', 'STR-BWI-04', 'Abba Mart Sobo Banyuwangi', 'Jawa', 'Jawa Timur', 'Banyuwangi', 'Jl. S. Parman No.42, Sobo, Banyuwangi', -8.22510000, 114.36820000, 'Hj. Fatimah', '0813-1122-3344', 'Supermarket');
-
--- Default Schedules
-INSERT IGNORE INTO `schedules` (`id`, `tracking_number`, `origin_name`, `origin_latitude`, `origin_longitude`, `store_id`, `fleet_id`, `crew_id`, `status`, `departure_date`, `estimated_arrival`, `cargo_description`, `cargo_weight_ton`, `is_inter_island`, `ferry_booking_code`, `transit_port`) VALUES
-('sch-001', 'TRK-2026-09-082', 'Gudang Pusat Banyuwangi DC', -8.19060000, 114.37080000, 'str-001', 'flt-001', 'crw-001', 'in_transit', '2026-09-10 08:00:00', '2026-09-10 16:00:00', 'Karton Kemasan Makanan & Botol Plastik (120 Karton)', 1.20, 1, 'ASDP-KTG-GIL-882109', 'Pelabuhan Ketapang'),
-('sch-002', 'TRK-2026-09-083', 'Gudang Pusat Banyuwangi DC', -8.19060000, 114.37080000, 'str-002', 'flt-002', 'crw-003', 'in_transit', '2026-09-10 09:30:00', '2026-09-10 18:00:00', 'Kemasan Fleksibel Standup Pouch (150 Box)', 1.50, 0, NULL, NULL),
-('sch-003', 'TRK-2026-09-084', 'Gudang Pusat Banyuwangi DC', -8.19060000, 114.37080000, 'str-003', 'flt-004', 'crw-005', 'scheduled', '2026-09-11 06:00:00', '2026-09-13 12:00:00', 'Palet Kemasan Produk Industri Fast Moving Consumer Goods', 3.10, 1, 'PELNI-DF7-99201', 'Pelabuhan Tanjung Perak');
+-- ====================================================================
+-- PRODUCTION DATA POLICY
+-- ====================================================================
+-- Tidak ada seed Armada, Crew, Toko, atau Jadwal pada schema produksi.
+-- Data operasional harus berasal dari input/import yang benar di aplikasi.
+-- Ini mencegah data contoh/demo tampil seolah-olah data nyata setelah deploy.
+-- Super Admin pertama tetap dibuat oleh server melalui BOOTSTRAP_ADMIN_* ENV.
 
 SET FOREIGN_KEY_CHECKS = 1;

@@ -1,0 +1,49 @@
+AKK OPERASIONAL - AUDIT REVISI HOSTINGER + MYSQL
+Tanggal audit: 27 Oktober 2026
+Domain produksi: https://akkoperasional.com
+
+TEMUAN YANG DIREVISI
+1. public/assets/aistudio berisi 234 artefak publik (screenshot internal, SQL, checklist) dan akan ikut ke dist.
+   -> Folder dikeluarkan dari source deploy.
+2. DB_HOST memakai 127.0.0.1.
+   -> Diganti menjadi localhost pada .env.example, dokumentasi, dan default server/db.ts.
+3. schema.sql memasukkan seed Armada/Crew/Toko/Jadwal contoh.
+   -> Seluruh seed operasional dihapus. Schema produksi hanya membuat/upgrade struktur tabel.
+4. Jadwal mock/local dapat tetap tampil jika snapshot MySQL belum ada.
+   -> Saat API Hostinger berhasil tetapi snapshot kosong, jadwal browser dikosongkan.
+5. Portal Driver memberi fallback sampai 5 jadwal lokal saat driver tidak punya assignment.
+   -> Dihapus. Tidak ada assignment = daftar kosong.
+6. GET /api/schedules/persisted memberikan seluruh jadwal ke semua user login.
+   -> Driver/helper sekarang difilter server-side berdasarkan assignment.
+7. PATCH status jadwal dapat diarahkan ke jadwal user lain.
+   -> Driver/helper hanya boleh mengubah jadwal yang ditugaskan kepadanya.
+8. API write Armada/Crew/Toko/Jadwal hanya requireAuth.
+   -> Ditambah RBAC server-side berdasarkan role.
+9. Endpoint validasi spreadsheet 50 MB dapat dipanggil tanpa login.
+   -> Sekarang requireAuth.
+10. Google Sheets sync default memakai URL contoh/public sample dan fallback dataset toko buatan.
+    -> Auto-sync default OFF, URL default kosong, gagal fetch tidak lagi memasukkan data contoh.
+11. Modal Google Sheets membuka 312 toko preset/generatif secara default.
+    -> Default preview kosong; data hanya dari URL/paste yang diberikan user.
+12. Notifikasi admin realtime memiliki seed kejadian contoh yang terlihat operasional.
+    -> Seed notifikasi dihapus.
+13. Domain lama honeydew/hostingersite dan URL Google Cloud lama.
+    -> Tidak ditemukan lagi pada paket revisi final.
+14. Legacy Supabase client stub yang tidak dipakai.
+    -> src/supabaseClient.js dan src/supabaseClient.d.ts dihapus. Nama internal legacy lain dipertahankan agar import existing tidak rusak; runtime database tetap Hostinger MySQL.
+
+VALIDASI
+- 150 file TypeScript/TSX: 0 syntax error (TypeScript transpile check).
+- 0 relative import yang hilang.
+- 0 referensi honeydew-capybara / hostingersite.com / ais-dev / run.app.
+- 0 dependency @supabase pada package.json.
+- public/ hanya menyisakan version.json.
+- schema.sql tidak memiliki seed Armada/Crew/Toko/Jadwal dan tidak memakai DROP/TRUNCATE.
+- Full npm install/build belum dapat diverifikasi di sandbox karena pengunduhan dependency timeout; lakukan final npm build di Hostinger.
+
+DEPLOY
+Node.js: 22.x
+Build: npm run build
+Start: npm start
+DB_HOST: localhost
+APP_URL: https://akkoperasional.com

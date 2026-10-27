@@ -221,7 +221,7 @@ class DataBridgeService {
   }
 
   /**
-   * Core Engine: Pull from Google Sheets API and upsert into Supabase tables
+   * Core Engine: Pull from Google Sheets API and upsert into Hostinger MySQL through same-origin APIs
    */
   public async syncNow(triggerSource: string = 'Manual'): Promise<DataBridgeSyncResult> {
     if (this.isSyncing) {

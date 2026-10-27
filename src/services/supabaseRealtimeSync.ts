@@ -65,52 +65,7 @@ export interface AdminStatusNotification {
 
 const ADMIN_STATUS_STORAGE_KEY = 'akk_admin_status_notifications_v1';
 
-const INITIAL_ADMIN_STATUS_NOTIFICATIONS: AdminStatusNotification[] = [
-  {
-    id: 'asn-seed-1',
-    scheduleId: 'sch-20261023-DS3',
-    trackingNumber: 'PO-AKK-20261023-DS3-01',
-    storeName: 'KARTIKA PLAZA',
-    areaName: 'DENPASAR 1',
-    fleetPlate: 'P 8125 VC',
-    fleetInitialCode: 'DS3',
-    vehicleType: 'Isuzu Giga CDD Long (Bali Spec)',
-    driverName: 'Supriyanto',
-    helperName: 'Rifaldi',
-    oldStatus: 'scheduled',
-    newStatus: 'in_transit',
-    statusLabel: 'Dalam Perjalanan (In Transit)',
-    title: '🚛 Armada Berangkat (In Transit): DENPASAR 1',
-    message: 'Armada DS3 (P 8125 VC) Supriyanto & Rifaldi telah menyeberang Ketapang - Gilimanuk menuju DENPASAR 1.',
-    urgent: false,
-    timestamp: new Date(Date.now() - 12 * 60 * 1000).toISOString(),
-    isRead: false,
-    notes: 'Estimasi bongkar Kartika Plaza pukul 16:30 WITA.',
-    source: 'supabase_realtime'
-  },
-  {
-    id: 'asn-seed-2',
-    scheduleId: 'sch-20261023-NS1',
-    trackingNumber: 'PO-AKK-20261023-NS1-02',
-    storeName: 'TOKO DR. SOETOMO',
-    areaName: 'PURWO PASAR',
-    fleetPlate: 'P 8848 U',
-    fleetInitialCode: 'NS1',
-    vehicleType: 'Mitsubishi Canter FE71',
-    driverName: 'Budi Santoso',
-    helperName: 'Rizal',
-    oldStatus: 'in_transit',
-    newStatus: 'delivered',
-    statusLabel: 'Terkirim (Delivered)',
-    title: '✅ Pengiriman Berhasil (Delivered): TOKO DR. SOETOMO',
-    message: 'Armada NS1 (P 8848 U) Budi Santoso berhasil menyelesaikan pengantaran ke Toko Dr. Soetomo dengan tanda tangan penerima.',
-    urgent: false,
-    timestamp: new Date(Date.now() - 38 * 60 * 1000).toISOString(),
-    isRead: true,
-    notes: 'Muatan karton box diterima lengkap tanpa cacat.',
-    source: 'supabase_realtime'
-  }
-];
+const INITIAL_ADMIN_STATUS_NOTIFICATIONS: AdminStatusNotification[] = [];
 
 export function getAdminStatusNotifications(): AdminStatusNotification[] {
   try {

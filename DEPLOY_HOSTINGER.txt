@@ -9,7 +9,7 @@ Atur variabel berikut di Hostinger Dashboard -> Environment Variables
 NODE_ENV=production
 APP_URL=https://akkoperasional.com
 
-DB_HOST=127.0.0.1
+DB_HOST=localhost
 DB_PORT=3306
 DB_NAME=u194997008_akk_operasional
 DB_USER=u194997008_akk_app
@@ -65,3 +65,15 @@ VALIDASI SETELAH DEPLOY:
 3. Setelah login Super Admin berhasil, hapus BOOTSTRAP_ADMIN_PASSWORD dari Hostinger ENV
 4. Test CRUD Armada, Crew, Toko, Jadwal
 5. Pastikan refresh browser tetap mengambil data dari MySQL
+
+
+==============================================================================
+5. CATATAN REVISI AUDIT PRODUKSI
+==============================================================================
+- DB_HOST menggunakan localhost sesuai Hostinger Web/Cloud.
+- schema.sql TIDAK lagi memasukkan seed Armada, Crew, Toko, atau Jadwal contoh.
+- Folder public/assets/aistudio/ WAJIB tidak ikut deploy karena berisi artefak/screenshot internal.
+- Jadwal driver/helper difilter server-side berdasarkan penugasan; driver tidak menerima fallback jadwal demo.
+- API write Armada/Crew/Toko/Jadwal memiliki pemeriksaan role server-side.
+- Google Sheets auto-sync default NONAKTIF dan tidak memiliki URL/data contoh bawaan.
+- Jika Google Sheets gagal dibaca, sistem mengembalikan error dan tidak mengisi data toko palsu.

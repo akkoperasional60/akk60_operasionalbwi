@@ -2,8 +2,9 @@ HAPUS dari repository/source lama sebelum deploy:
 
 1. bun.lock
 2. Folder .aistudio/ seluruhnya (artefak editor, bukan runtime)
-3. Folder downloads/ seluruhnya (duplikasi APK lama)
-4. Semua APK lama berikut jika masih ada:
+3. Folder public/assets/aistudio/ seluruhnya (artefak/screenshot internal; JANGAN dipublish ke web)
+4. Folder downloads/ seluruhnya (duplikasi APK lama)
+5. Semua APK lama berikut jika masih ada:
    public/akk-web-portal.apk
    public/akk-mobile-v1.apk
    public/akk-driver-mobile.apk

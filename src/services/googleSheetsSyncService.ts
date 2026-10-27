@@ -1,6 +1,6 @@
 import { logisticsStore } from './store';
 import { RetailStore } from '../types';
-import { DATA_FIX_SHEET_PRESETS, getDefaultStorePresets, generate312Presets, sanitizeCoordinate } from '../components/GoogleSheetsStoreSyncModal';
+import { sanitizeCoordinate } from '../components/GoogleSheetsStoreSyncModal';
 
 export interface SyncLogEntry {
   id: string;
@@ -114,8 +114,8 @@ export function parseStoreLine(rawLine: string, lineIndex: number): {
     }
   }
 
-  let rawLat = '-8.3645';
-  let rawLng = '114.1529';
+  let rawLat = '-';
+  let rawLng = '-';
   let storeName = '';
   let no = lineIndex + 1;
 
@@ -267,7 +267,7 @@ class GoogleSheetsSyncService {
 
     // Auto-sync on launch if enabled and no stores exist or corrupted dummy stores present
     const currentStores = logisticsStore.getStores();
-    if (this.config.syncOnAppLaunch && (currentStores.length === 0 || currentStores.some(s => s.storeName.includes('Freshman') || s.storeName.includes('Sophomore')))) {
+    if (this.config.syncOnAppLaunch && this.config.spreadsheetUrl && (currentStores.length === 0 || currentStores.some(s => s.storeName.includes('Freshman') || s.storeName.includes('Sophomore')))) {
       setTimeout(() => {
         this.syncNow('Sinkronisasi Otomatis Sheet DATA FIX');
       }, 300);
@@ -290,12 +290,12 @@ class GoogleSheetsSyncService {
       console.warn('Failed to load gsheets sync config:', e);
     }
     return {
-      isAutoSyncEnabled: true,
+      isAutoSyncEnabled: false,
       autoSyncIntervalMinutes: 60,
-      lastSyncTimestamp: new Date().toISOString(),
+      lastSyncTimestamp: null,
       sheetName: 'DATA FIX',
-      spreadsheetUrl: 'https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit#gid=0',
-      syncOnAppLaunch: true
+      spreadsheetUrl: '',
+      syncOnAppLaunch: false
     };
   }
 
@@ -315,18 +315,7 @@ class GoogleSheetsSyncService {
     } catch (e) {
       console.warn('Failed to load sync logs:', e);
     }
-    return [
-      {
-        id: 'log-init',
-        timestamp: new Date().toISOString(),
-        status: 'success',
-        totalStores: 15,
-        addedStores: 15,
-        updatedStores: 0,
-        message: 'Integrasi otomatis awal Google Sheets "DATA FIX" berhasil diaktifkan.',
-        sourceSheet: 'DATA FIX'
-      }
-    ];
+    return [];
   }
 
   private saveLogs() {
@@ -434,6 +423,10 @@ class GoogleSheetsSyncService {
     console.log(`[BatchSync START] Initiating batched store sync (Source: ${triggerSource}, ForceClear: ${forceClear})...`);
 
     try {
+      if (!this.config.spreadsheetUrl.trim()) {
+        throw new Error('URL Google Sheets belum dikonfigurasi. Sinkronisasi dibatalkan agar sistem tidak memakai data contoh.');
+      }
+
       // Clear local storage cache if forceClear is requested
       if (forceClear) {
           console.log('[BatchSync] Force clearing local records...');
@@ -511,14 +504,12 @@ class GoogleSheetsSyncService {
         }
       }
     } catch (error: any) {
-      console.info('[BatchSync] Live Google Sheet unavailable (CORS/network/timeout), utilizing verified local store dataset.');
-      // Fallback to presets if online fetch fails, to ensure dashboard isn't empty
-      storeRecords = getDefaultStorePresets();
+      console.warn('[BatchSync] Google Sheet tidak dapat dibaca:', error?.message || error);
+      storeRecords = [];
     }
-    
-    // If no records were fetched/found after all attempts, fallback
+
     if (storeRecords.length === 0) {
-        storeRecords = getDefaultStorePresets();
+      throw new Error('Tidak ada data toko valid yang berhasil dibaca dari Google Sheets. Tidak ada data contoh yang dimasukkan.');
     }
 
 
@@ -559,10 +550,10 @@ class GoogleSheetsSyncService {
           province: 'Jawa Timur',
           city: p.city || 'Banyuwangi',
           address: p.address,
-          latitude: p.latitude && !isNaN(p.latitude) && p.latitude !== 0 ? p.latitude : valResult.cleanLat,
-          longitude: p.longitude && !isNaN(p.longitude) && p.longitude !== 0 ? p.longitude : valResult.cleanLng,
+          latitude: valResult.isValid && p.latitude && !isNaN(p.latitude) && p.latitude !== 0 ? p.latitude : (valResult.isValid ? valResult.cleanLat : 0),
+          longitude: valResult.isValid && p.longitude && !isNaN(p.longitude) && p.longitude !== 0 ? p.longitude : (valResult.isValid ? valResult.cleanLng : 0),
           contactPerson: 'Penanggung Jawab Toko',
-          phone: p.phone && p.phone !== '-' ? p.phone : '+62 812-3344-5566',
+          phone: p.phone && p.phone !== '-' ? p.phone : '-',
           deliveryWindow: '08:00 - 16:00',
           storeCategory: valResult.isValid ? (p.storeCategory || 'Supermarket') : 'Needs Correction'
         });
@@ -661,7 +652,7 @@ class GoogleSheetsSyncService {
       .map((line, idx) => parseStoreLine(line, idx))
       .filter((s): s is NonNullable<typeof s> => !!s && !!s.storeName && !s.storeName.includes('Freshman'));
 
-    const recordsToUse = parsedRecords.length > 0 ? parsedRecords : getDefaultStorePresets();
+    const recordsToUse = parsedRecords;
     const corruptedStores: CorruptedStoreIssue[] = [];
     const newRetailStores: RetailStore[] = recordsToUse.map((p, idx) => {
       const valResult = validateCoordinateData(p.rawLat, p.rawLng);
@@ -684,10 +675,10 @@ class GoogleSheetsSyncService {
         province: 'Jawa Timur',
         city: p.city || 'Banyuwangi',
         address: p.address,
-        latitude: p.latitude && !isNaN(p.latitude) && p.latitude !== 0 ? p.latitude : valResult.cleanLat,
-        longitude: p.longitude && !isNaN(p.longitude) && p.longitude !== 0 ? p.longitude : valResult.cleanLng,
+        latitude: valResult.isValid && p.latitude && !isNaN(p.latitude) && p.latitude !== 0 ? p.latitude : (valResult.isValid ? valResult.cleanLat : 0),
+        longitude: valResult.isValid && p.longitude && !isNaN(p.longitude) && p.longitude !== 0 ? p.longitude : (valResult.isValid ? valResult.cleanLng : 0),
         contactPerson: 'PIC Toko',
-        phone: p.phone && p.phone !== '-' ? p.phone : '+62 812-3344-5566',
+        phone: p.phone && p.phone !== '-' ? p.phone : '-',
         deliveryWindow: '08:00 - 16:00',
         storeCategory: valResult.isValid ? p.storeCategory || 'Supermarket' : 'Needs Correction'
       };

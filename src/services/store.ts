@@ -2657,8 +2657,10 @@ class LogisticsStore {
         this.stores = storePayload.data.filter((item: RetailStore) => !isAreaRouteItem(item));
         this.saveToStorage(STORAGE_KEYS.STORES, this.stores);
       }
-      if (scheduleRes.ok && schedulePayload?.exists && Array.isArray(schedulePayload?.schedules)) {
-        this.schedules = schedulePayload.schedules;
+      if (scheduleRes.ok) {
+        // Hostinger MySQL adalah source of truth. Snapshot kosong berarti jadwal benar-benar kosong;
+        // jangan mempertahankan INITIAL_SCHEDULES/mock lama dari browser.
+        this.schedules = Array.isArray(schedulePayload?.schedules) ? schedulePayload.schedules : [];
         this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
       }
 
