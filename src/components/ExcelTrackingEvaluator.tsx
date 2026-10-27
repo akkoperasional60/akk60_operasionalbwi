@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import {
   Upload,
@@ -11,17 +11,17 @@ import {
   MapPin,
   RefreshCw,
   Search,
-  Filter,
-  Layers,
   Store,
-  Navigation,
-  Check,
   TrendingUp,
-  Fuel,
   Truck,
-  ArrowRight,
-  ShieldCheck,
-  Info
+  ArrowLeft,
+  History,
+  Check,
+  ShieldAlert,
+  Calendar,
+  Layers,
+  Eye,
+  Trash2
 } from 'lucide-react';
 import { LeafletMap } from './LeafletMap';
 import { logisticsStore } from '../services/store';
@@ -32,9 +32,10 @@ import {
   TracksolidBottomSummary,
   RouteStop,
   TrackingPoint,
-  RetailStore
+  RetailStore,
+  Fleet
 } from '../types';
-import { extractCoordinatesFromObject, getStoreLocationType } from '../utils/coordinateParser';
+import { getStoreLocationType } from '../utils/coordinateParser';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 
 function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -51,7 +52,37 @@ function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: num
   return R * c;
 }
 
-// Coordinates dictionary for geocoding Tracksolid locations in Bali and Banyuwangi
+function parseTimeSeconds(timeStr: string): number | null {
+  if (!timeStr) return null;
+  const clean = String(timeStr).trim();
+  const timeMatch = clean.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (!timeMatch) return null;
+  const h = parseInt(timeMatch[1], 10);
+  const m = parseInt(timeMatch[2], 10);
+  const s = timeMatch[3] ? parseInt(timeMatch[3], 10) : 0;
+  return h * 3600 + m * 60 + s;
+}
+
+function formatSecondsToHMS(totalSec: number): string {
+  const sec = Math.max(0, Math.round(totalSec));
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+function computeStopMinutesBetween(prevEndTime: string, nextStartTime: string): number {
+  const t1 = parseTimeSeconds(prevEndTime);
+  const t2 = parseTimeSeconds(nextStartTime);
+  if (t1 === null || t2 === null) return 0;
+  let diffSec = t2 - t1;
+  if (diffSec < 0) {
+    diffSec += 24 * 3600;
+  }
+  return Math.max(0, Math.round(diffSec / 60));
+}
+
+// Coordinates dictionary for geocoding Tracksolid & Wanway locations in Banyuwangi, Jatim, and Bali
 const TRACKSOLID_GEO_DICT: Record<string, [number, number]> = {
   // Banyuwangi
   'argopuro': [-8.1906, 114.3708],
@@ -68,6 +99,19 @@ const TRACKSOLID_GEO_DICT: Record<string, [number, number]> = {
   'tirtopuro': [-8.2050, 114.3500],
   'genteng': [-8.3650, 114.1530],
   'rogojampi': [-8.3050, 114.2980],
+  'jajag': [-8.4265, 114.1825],
+  'muncar': [-8.4350, 114.3320],
+  'banyuwangi': [-8.2192, 114.3691],
+
+  // Luar Kota (Jember, Situbondo, Bondowoso)
+  'jember': [-8.1724, 113.6995],
+  'roxy square': [-8.1845, 113.6682],
+  'sumbersari': [-8.1682, 113.7155],
+  'tanggul': [-8.1642, 113.4485],
+  'situbondo': [-7.7062, 114.0095],
+  'panji': [-7.7150, 114.0350],
+  'besuki': [-7.7345, 113.6892],
+  'bondowoso': [-7.9135, 113.8214],
 
   // Bali - Jembrana & Gilimanuk
   'gilimanuk': [-8.1628, 114.4382],
@@ -120,19 +164,52 @@ const TRACKSOLID_GEO_DICT: Record<string, [number, number]> = {
   'denpasar': [-8.6705, 115.2126]
 };
 
-function resolveTracksolidCoords(locationName: string, index = 0): [number, number] {
-  const norm = String(locationName || '').toLowerCase();
+function resolveTracksolidCoords(
+  locationName: string,
+  index = 0,
+  stores: RetailStore[] = []
+): [number, number] {
+  const raw = String(locationName || '').trim();
+  // 1. Check if raw string contains explicit lat,lng coordinates like "-8.219, 114.369"
+  const coordMatch = raw.match(/(-?\d+\.\d+)\s*[,;/]\s*(\d+\.\d+)/);
+  if (coordMatch) {
+    const lat = parseFloat(coordMatch[1]);
+    const lng = parseFloat(coordMatch[2]);
+    if (!isNaN(lat) && !isNaN(lng) && lat >= -11 && lat <= 6 && lng >= 95 && lng <= 141) {
+      return [lat, lng];
+    }
+  }
+
+  const norm = raw.toLowerCase();
+
+  // 2. Match against registered customer stores in Jaringan Toko & Mitra
+  for (const st of stores) {
+    const sName = st.storeName.toLowerCase();
+    if (sName.length > 4 && norm.includes(sName)) {
+      return [st.latitude, st.longitude];
+    }
+  }
+
+  // 3. Match against known geographic dictionary
   for (const [key, coords] of Object.entries(TRACKSOLID_GEO_DICT)) {
     if (norm.includes(key)) {
       return coords;
     }
   }
-  // Safe distributed coordinate in Bali/Banyuwangi
+
+  // 4. Match by kecamatan/kabupaten in registered stores
+  for (const st of stores) {
+    const kec = (st.kecamatan || '').toLowerCase();
+    if (kec.length > 4 && norm.includes(kec)) {
+      return [st.latitude, st.longitude];
+    }
+  }
+
   const seed = (index * 37 + norm.length * 13) % 100;
-  return [-8.6700 + (seed / 1000), 115.2100 + (seed / 1000)];
+  return [-8.3050 + seed / 1200, 114.2980 + seed / 1200];
 }
 
-// Exact 26 Trip Legs from user screenshot image_2ddbbeb0.png & image_a9e28381.png
+// Default 26 Trip Legs from Tracksolid export
 export const DEFAULT_TRACKSOLID_26_LEGS: TracksolidTripLeg[] = [
   // 2026-10-26 (21 trips)
   {
@@ -339,7 +416,7 @@ export const DEFAULT_TRACKSOLID_26_LEGS: TracksolidTripLeg[] = [
     legNumber: 9,
     dateGroup: '2026-10-26',
     startTime: '09:37:58',
-    startLocation: 'Ubung, North Denpasar, Denpasar, Bali, Lesser Sunda Islands, Indonesia',
+    startLocation: 'Pemecutan Kaja, North Denpasar, Denpasar, Bali, Lesser Sunda Islands, Indonesia',
     endTime: '09:43:35',
     endLocation: 'Ubung, North Denpasar, Denpasar, Bali, Lesser Sunda Islands, 80116, Indonesia',
     mileageKm: 0.96,
@@ -349,8 +426,8 @@ export const DEFAULT_TRACKSOLID_26_LEGS: TracksolidTripLeg[] = [
     maxSpeedKmh: 35.00,
     fuelPer100Km: 0.0,
     totalFuelLiters: 0.0,
-    startLat: -8.6345,
-    startLng: 115.2035,
+    startLat: -8.6410,
+    startLng: 115.1980,
     endLat: -8.6345,
     endLng: 115.2035,
     stopBeforeMinutes: 7,
@@ -541,7 +618,7 @@ export const DEFAULT_TRACKSOLID_26_LEGS: TracksolidTripLeg[] = [
     startTime: '07:05:41',
     startLocation: 'Pondok Sulawesi, 39, Jalan Bypass Ngurah Rai, Kuta, Badung, Bali',
     endTime: '07:09:51',
-    endLocation: 'エアアジア, Sunset Road, Pemecutan Kelod, West Denpasar, Denpasar, Bali',
+    endLocation: 'Sunset Road, Pemecutan Kelod, West Denpasar, Denpasar, Bali',
     mileageKm: 2.27,
     travelTime: '00:04:09',
     travelMinutes: 4.15,
@@ -614,7 +691,7 @@ export const DEFAULT_TRACKSOLID_26_LEGS: TracksolidTripLeg[] = [
     legNumber: 20,
     dateGroup: '2026-10-26',
     startTime: '00:45:28',
-    startLocation: 'Gilimanuk, Jembrana, Bali, Lesser Sunda Islands, 01:45:48',
+    startLocation: 'Gilimanuk, Jembrana, Bali, Lesser Sunda Islands',
     endTime: '01:45:48',
     endLocation: 'Yeh Sumbul, Jembrana, Bali, Lesser Sunda Islands, Indonesia',
     mileageKm: 52.98,
@@ -708,7 +785,7 @@ export const DEFAULT_TRACKSOLID_26_LEGS: TracksolidTripLeg[] = [
     stopBeforeMinutes: 83,
     stopBeforeStart: '20:51:42',
     stopBeforeEnd: '22:14:52',
-    matchedStoreName: 'INDOMARKET & ALFAMART KETAPANG',
+    matchedStoreName: 'Area Antrean Pelabuhan Ketapang (Non-Toko)',
     matchedStoreKecamatan: 'Kalipuro',
     matchedStoreKabupaten: 'Banyuwangi'
   },
@@ -716,7 +793,7 @@ export const DEFAULT_TRACKSOLID_26_LEGS: TracksolidTripLeg[] = [
     legNumber: 24,
     dateGroup: '2026-10-25',
     startTime: '20:51:12',
-    startLocation: 'Indomarket, 1;3, Ketapang, Banyuwangi, Ketapang, 20:51:42',
+    startLocation: 'Indomarket, 1;3, Ketapang, Banyuwangi, Ketapang',
     endTime: '20:51:42',
     endLocation: 'Alfamart, 1;AH2, Ketapang, Banyuwangi, Ketapang, Banyuwangi, East Java, 68451',
     mileageKm: 0.08,
@@ -816,194 +893,478 @@ export const DEFAULT_TRACKSOLID_BOTTOM_SUMMARY: TracksolidBottomSummary = {
   duration: '09:06:11',
   avgSpeedKmh: 33.17,
   maxSpeedKmh: 79.00,
-  totalFuelConsumptionLiters: 0.00,
-  reportTitle: 'Trips(2026-10-25 00:00:00~2026-10-26 23:59:59)'
+  totalFuelConsumptionLiters: 0.00
 };
 
-function buildSampleEvaluation(): TrackingEvaluation {
+// Helper to match a location/coord against registered stores in Jaringan Toko & Mitra
+function findMatchingRegisteredStore(
+  lat: number,
+  lng: number,
+  locationText: string,
+  registeredStores: RetailStore[]
+): { store: RetailStore | null; distanceKm: number; isNonStoreKeyword: boolean } {
+  const locLower = String(locationText || '').toLowerCase();
+
+  // Keywords that explicitly indicate non-customer locations (Ferry port, SPBU/Gas Station, Rest Area, Gudang DC)
+  const nonCustomerKeywords = [
+    'pier 1 ketapang',
+    'pier 4 gilimanuk',
+    'ferry port',
+    'gas station buluh indah',
+    'pertamina, jalan gatot subroto',
+    'gereja advent',
+    'lingkungan sukowidi desa klatak',
+    'pick up?, jalan raya denpasar-gilimanuk'
+  ];
+  const isExplicitNonStore = nonCustomerKeywords.some(k => locLower.includes(k));
+  if (isExplicitNonStore) {
+    return { store: null, distanceKm: 99, isNonStoreKeyword: true };
+  }
+
+  let closestStore: RetailStore | null = null;
+  let minDistance = 1.8; // 1.8 km radius for store stop detection
+
+  for (const st of registeredStores) {
+    const stNameLower = st.storeName.toLowerCase();
+    // Exact name match in address
+    if (stNameLower.length > 4 && locLower.includes(stNameLower)) {
+      const d = calculateDistanceKm(lat, lng, st.latitude, st.longitude);
+      return { store: st, distanceKm: d, isNonStoreKeyword: false };
+    }
+
+    const dist = calculateDistanceKm(lat, lng, st.latitude, st.longitude);
+    if (dist < minDistance) {
+      minDistance = dist;
+      closestStore = st;
+    }
+  }
+
+  return { store: closestStore, distanceKm: minDistance, isNonStoreKeyword: false };
+}
+
+function buildEvaluationFromLegs(
+  legs: TracksolidTripLeg[],
+  subtotals: TracksolidDateSubtotal[],
+  bottom: TracksolidBottomSummary,
+  meta: {
+    fileName: string;
+    fleetId: string;
+    plateNumber: string;
+    initialCode: string;
+    driverName: string;
+    helperName: string;
+    gpsPlatform: 'tracksolid' | 'wanway';
+    uploadedMonth: string;
+    uploadedYear: string;
+  },
+  registeredStores: RetailStore[]
+): TrackingEvaluation {
+  // Sort legs chronologically (oldest date + earliest time first) to build the true continuous GPS road track
+  const chronologicalLegs = [...legs].sort((a, b) => {
+    const dtA = `${a.dateGroup} ${a.startTime}`;
+    const dtB = `${b.dateGroup} ${b.startTime}`;
+    return dtA.localeCompare(dtB);
+  });
+
   const points: TrackingPoint[] = [];
   const stops: RouteStop[] = [];
+  let stopSeq = 1;
 
-  DEFAULT_TRACKSOLID_26_LEGS.forEach((leg, index) => {
+  chronologicalLegs.forEach(leg => {
     points.push({
       timestamp: `${leg.dateGroup} ${leg.startTime}`,
       latitude: leg.startLat,
       longitude: leg.startLng,
       speed: Number(leg.avgSpeedKmh),
       engineStatus: 'RUNNING',
-      locationName: leg.startLocation
+      locationName: `${meta.plateNumber} • ${leg.startLocation}`
     });
     points.push({
       timestamp: `${leg.dateGroup} ${leg.endTime}`,
       latitude: leg.endLat,
       longitude: leg.endLng,
-      speed: Number(leg.avgSpeedKmh),
+      speed: 0,
       engineStatus: 'STOP',
-      locationName: leg.endLocation
+      locationName: `${meta.plateNumber} • ${leg.endLocation}`
     });
 
-    if (leg.stopBeforeMinutes && leg.stopBeforeMinutes > 0) {
+    const stopDur = leg.stopBeforeMinutes || 0;
+    if (stopDur > 0) {
+      const matchInfo = findMatchingRegisteredStore(
+        leg.startLat,
+        leg.startLng,
+        leg.startLocation,
+        registeredStores
+      );
+      const isCustomer = Boolean(matchInfo.store);
+      const isLongNonCustomer = !isCustomer && stopDur >= 15;
+
       stops.push({
-        stopNumber: index + 1,
+        stopNumber: stopSeq++,
         startTime: leg.stopBeforeStart || leg.startTime,
         endTime: leg.stopBeforeEnd || leg.startTime,
-        durationMinutes: leg.stopBeforeMinutes,
+        durationMinutes: stopDur,
         latitude: leg.startLat,
         longitude: leg.startLng,
         locationName: leg.startLocation,
-        reason:
-          leg.stopBeforeMinutes >= 60
-            ? 'Port Transit / Ferry Queue'
-            : leg.stopBeforeMinutes >= 20
-            ? 'Retail Unloading'
-            : 'Driver Rest / Meals'
+        matchedStoreName: matchInfo.store?.storeName,
+        matchedStoreRegion: matchInfo.store ? getStoreLocationType(matchInfo.store) : undefined,
+        isCustomerStore: isCustomer,
+        isLongNonCustomerStop: isLongNonCustomer,
+        fleetPlate: meta.plateNumber,
+        reason: isCustomer
+          ? 'Retail Unloading'
+          : isLongNonCustomer
+          ? 'Berhenti Lama Non-Mitra'
+          : 'Driver Rest / Meals'
       });
     }
   });
 
+  const totalIdle = stops.reduce((acc, s) => acc + s.durationMinutes, 0);
+
   return {
-    fileName: 'Trips_Tracksolid_20261025_20261026.xlsx',
-    plateNumber: 'P 8381 VE',
-    driverName: 'Budiono',
-    helperName: 'Saifur Rizal',
+    fileName: meta.fileName,
+    fleetId: meta.fleetId,
+    plateNumber: meta.plateNumber,
+    initialCode: meta.initialCode,
+    driverName: meta.driverName,
+    helperName: meta.helperName,
+    gpsPlatform: meta.gpsPlatform,
+    uploadedMonth: meta.uploadedMonth,
+    uploadedYear: meta.uploadedYear,
     totalPoints: points.length,
-    totalDistanceKm: DEFAULT_TRACKSOLID_BOTTOM_SUMMARY.totalMileageKm,
-    durationHours: 9.1,
-    avgSpeedKmh: DEFAULT_TRACKSOLID_BOTTOM_SUMMARY.avgSpeedKmh,
-    maxSpeedKmh: DEFAULT_TRACKSOLID_BOTTOM_SUMMARY.maxSpeedKmh,
-    totalIdleMinutes: 526,
+    totalDistanceKm: bottom.totalMileageKm,
+    durationHours: Number(( (parseTimeSeconds(bottom.duration) || 32771) / 3600 ).toFixed(1)),
+    avgSpeedKmh: bottom.avgSpeedKmh,
+    maxSpeedKmh: bottom.maxSpeedKmh,
+    totalIdleMinutes: totalIdle,
     routeDeviationKm: 0,
     isWithinRouteTolerance: true,
     onTimeStatus: 'On-Time',
     delayMinutes: 0,
     stops,
     points,
-    tripLegs: DEFAULT_TRACKSOLID_26_LEGS,
-    dateSubtotals: DEFAULT_TRACKSOLID_DATE_SUBTOTALS,
-    bottomSummary: DEFAULT_TRACKSOLID_BOTTOM_SUMMARY
+    tripLegs: legs,
+    dateSubtotals: subtotals,
+    bottomSummary: bottom
   };
 }
 
+const MONTHS_ID = [
+  'Januari',
+  'Februari',
+  'Maret',
+  'April',
+  'Mei',
+  'Juni',
+  'Juli',
+  'Agustus',
+  'September',
+  'Oktober',
+  'November',
+  'Desember'
+];
+
 export const ExcelTrackingEvaluator: React.FC = () => {
-  const [evaluation, setEvaluation] = useState<TrackingEvaluation>(buildSampleEvaluation());
-  const [activeTab, setActiveTab] = useState<'map' | 'moving_stopped' | 'speed_summary' | 'customer_integration'>('map');
+  const registeredStores = useMemo(() => logisticsStore.getStores(), []);
+  const fleets = useMemo(() => logisticsStore.getFleets(), []);
+
+  // Multi-Fleet Evaluations State (Supports 1 or multiple uploaded fleets)
+  const [fleetEvaluations, setFleetEvaluations] = useState<TrackingEvaluation[]>(() => {
+    const defaultFleet = fleets.find(f => f.plateNumber.includes('8381')) || fleets[0];
+    return [
+      buildEvaluationFromLegs(
+        DEFAULT_TRACKSOLID_26_LEGS,
+        DEFAULT_TRACKSOLID_DATE_SUBTOTALS,
+        DEFAULT_TRACKSOLID_BOTTOM_SUMMARY,
+        {
+          fileName: 'Evaluasi_Rute_P8381VE.xlsx',
+          fleetId: defaultFleet?.id || 'flt-02',
+          plateNumber: defaultFleet?.plateNumber || 'P 8381 VE',
+          initialCode: defaultFleet?.initialCode || 'N2 / NP2',
+          driverName: 'Budiono',
+          helperName: 'Saifur Rizal',
+          gpsPlatform: 'tracksolid',
+          uploadedMonth: 'Oktober',
+          uploadedYear: '2026'
+        },
+        logisticsStore.getStores()
+      )
+    ];
+  });
+
+  // Active selected fleet index or 'all'
+  const [selectedFleetPlate, setSelectedFleetPlate] = useState<string>(() => {
+    return fleetEvaluations[0]?.plateNumber || 'P 8381 VE';
+  });
+
+  // View Mode: 'evaluation' (Main Maps & Unified Analysis) vs 'upload_form' (Image 2 style upload screen)
+  const [viewMode, setViewMode] = useState<'evaluation' | 'upload_form'>('evaluation');
+  const [showUploadHistory, setShowUploadHistory] = useState<boolean>(false);
+
+  // Upload Form States (Matching Image 2 + Tracksolid/Wanway + 1 or Multiple Fleets)
+  const [uploadMonth, setUploadMonth] = useState<string>('Oktober');
+  const [uploadYear, setUploadYear] = useState<string>('2026');
+  const [gpsPlatform, setGpsPlatform] = useState<'tracksolid' | 'wanway'>('tracksolid');
+  const [fleetScopeMode, setFleetScopeMode] = useState<'single' | 'multiple'>('single');
+  const [selectedSingleFleetId, setSelectedSingleFleetId] = useState<string>(() => fleets[0]?.id || 'flt-01');
+  const [selectedMultiFleetIds, setSelectedMultiFleetIds] = useState<string[]>(() =>
+    fleets.slice(0, 2).map(f => f.id)
+  );
+  const [importMode, setImportMode] = useState<'append' | 'replace'>('append');
+  const [stagedFiles, setStagedFiles] = useState<File[]>([]);
+
+  // Unified Tabs:
+  // 1. 'map' -> Peta Rute GPS & Rincian Harian Armada
+  // 2. 'unified_stops_customer' -> Armada Bergerak, Berhenti & Analisa Kirim ke Pelanggan (Jaringan Toko & Mitra)
+  // 3. 'speed_summary' -> Profil Kecepatan & Rekapitulasi Harian
+  const [activeTab, setActiveTab] = useState<'map' | 'unified_stops_customer' | 'speed_summary'>('map');
+
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [selectedFleetId, setSelectedFleetId] = useState<string>('all');
   const [selectedDateGroup, setSelectedDateGroup] = useState<string>('all');
+  const [activityFilter, setActivityFilter] = useState<
+    'all' | 'customer_stop' | 'long_non_customer' | 'moving_only'
+  >('all');
   const [searchFilter, setSearchFilter] = useState('');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // All customer stores from Jaringan Toko & Mitra
-  const registeredStores = useMemo(() => {
-    return logisticsStore.getStores();
-  }, []);
+  // Current active evaluation based on selectedFleetPlate
+  const activeEvaluation = useMemo(() => {
+    if (selectedFleetPlate === 'all') {
+      // Combine all uploaded fleet evaluations
+      const allLegs: TracksolidTripLeg[] = [];
+      const allPoints: TrackingPoint[] = [];
+      const allStops: RouteStop[] = [];
+      const subtotalMap = new Map<string, TracksolidDateSubtotal>();
 
-  const fleets = useMemo(() => {
-    return logisticsStore.getFleets();
-  }, []);
+      fleetEvaluations.forEach(ev => {
+        (ev.tripLegs || []).forEach(l => allLegs.push(l));
+        (ev.points || []).forEach(p => allPoints.push(p));
+        (ev.stops || []).forEach(s => allStops.push(s));
+        (ev.dateSubtotals || []).forEach(ds => {
+          const existing = subtotalMap.get(ds.dateGroup);
+          if (!existing) {
+            subtotalMap.set(ds.dateGroup, { ...ds });
+          } else {
+            const totalTrips = existing.tripCount + ds.tripCount;
+            const totalKm = Number((existing.totalMileageKm + ds.totalMileageKm).toFixed(2));
+            const sec1 = parseTimeSeconds(existing.travelTime) || 0;
+            const sec2 = parseTimeSeconds(ds.travelTime) || 0;
+            const avgSpd = Number(((existing.avgSpeedKmh + ds.avgSpeedKmh) / 2).toFixed(2));
+            const maxSpd = Math.max(existing.maxSpeedKmh, ds.maxSpeedKmh);
+            subtotalMap.set(ds.dateGroup, {
+              dateGroup: ds.dateGroup,
+              tripCount: totalTrips,
+              totalMileageKm: totalKm,
+              travelTime: formatSecondsToHMS(sec1 + sec2),
+              avgSpeedKmh: avgSpd,
+              maxSpeedKmh: maxSpd,
+              fuelPer100Km: 0,
+              totalFuelLiters: 0
+            });
+          }
+        });
+      });
 
-  // Match each trip leg & stop against the customer stores in Jaringan Toko & Mitra
-  const deliveryStoreAnalyses = useMemo(() => {
-    const legs = evaluation.tripLegs || [];
+      const combinedSubtotals = Array.from(subtotalMap.values()).sort((a, b) =>
+        b.dateGroup.localeCompare(a.dateGroup)
+      );
+      const totalTrips = allLegs.length;
+      const totalKm = Number(allLegs.reduce((s, l) => s + l.mileageKm, 0).toFixed(2));
+      const totalDurationSec = combinedSubtotals.reduce(
+        (s, d) => s + (parseTimeSeconds(d.travelTime) || 0),
+        0
+      );
+      const avgSpeed =
+        allLegs.length > 0
+          ? Number((allLegs.reduce((s, l) => s + l.avgSpeedKmh, 0) / allLegs.length).toFixed(2))
+          : 0;
+      const maxSpeed = allLegs.length > 0 ? Math.max(...allLegs.map(l => l.maxSpeedKmh)) : 0;
+
+      return {
+        ...fleetEvaluations[0],
+        plateNumber: `Semua Armada (${fleetEvaluations.length} Unit)`,
+        totalPoints: allPoints.length,
+        totalDistanceKm: totalKm,
+        avgSpeedKmh: avgSpeed,
+        maxSpeedKmh: maxSpeed,
+        points: allPoints,
+        stops: allStops,
+        tripLegs: allLegs,
+        dateSubtotals: combinedSubtotals,
+        bottomSummary: {
+          trips: totalTrips,
+          totalMileageKm: totalKm,
+          duration: formatSecondsToHMS(totalDurationSec),
+          avgSpeedKmh: avgSpeed,
+          maxSpeedKmh: maxSpeed,
+          totalFuelConsumptionLiters: 0
+        }
+      } as TrackingEvaluation;
+    }
+
+    return (
+      fleetEvaluations.find(e => e.plateNumber === selectedFleetPlate) ||
+      fleetEvaluations[0]
+    );
+  }, [fleetEvaluations, selectedFleetPlate]);
+
+  // Unified Analysis combining Moving Legs, Stop Duration, Customer Store Matching, and Non-Customer Long Stop Warnings
+  const unifiedRows = useMemo(() => {
+    const evalList =
+      selectedFleetPlate === 'all' ? fleetEvaluations : [activeEvaluation].filter(Boolean);
+
     const results: Array<{
+      id: string;
+      fleetPlate: string;
+      fleetInitial: string;
+      gpsPlatform: 'tracksolid' | 'wanway';
       legNumber: number;
       dateGroup: string;
       startTime: string;
       endTime: string;
-      stopDurationMinutes: number;
-      locationName: string;
+      startLocation: string;
+      endLocation: string;
+      travelTime: string;
       mileageKm: number;
       avgSpeedKmh: number;
+      maxSpeedKmh: number;
+      stopDurationMinutes: number;
+      stopStart: string;
+      stopEnd: string;
       matchedStore: RetailStore | null;
+      distanceToStoreKm: number;
+      stopCategory: 'customer_store' | 'long_non_customer' | 'short_transit' | 'moving_no_stop';
       regionType: 'dalam_kota' | 'luar_kota' | 'luar_pulau';
-      matchConfidence: 'Tinggi (Koordinat & Nama)' | 'Sedang (Area/Kecamatan)' | 'Toko Belum Terdaftar';
       nomorToko: string | number;
-      namaToko: string;
+      namaTokoAtauLokasi: string;
       kecamatan: string;
       kabupaten: string;
     }> = [];
 
-    legs.forEach(leg => {
-      // Find matching store by exact or approximate coordinates, or location text
-      let matched: RetailStore | null = null;
-      let minDistance = 2.5; // 2.5 km tolerance
-      const startLocLower = leg.startLocation.toLowerCase();
-      const endLocLower = leg.endLocation.toLowerCase();
+    evalList.forEach(ev => {
+      const legs = ev.tripLegs || [];
+      legs.forEach(leg => {
+        const stopMinutes = leg.stopBeforeMinutes || 0;
+        // Match stop location (where vehicle stopped before/at this leg) against Jaringan Toko & Mitra
+        const matchStart = findMatchingRegisteredStore(
+          leg.startLat,
+          leg.startLng,
+          leg.startLocation,
+          registeredStores
+        );
+        const matchEnd = findMatchingRegisteredStore(
+          leg.endLat,
+          leg.endLng,
+          leg.endLocation,
+          registeredStores
+        );
 
-      for (const st of registeredStores) {
-        // Distance check from start or end point
-        const distStart = calculateDistanceKm(leg.startLat, leg.startLng, st.latitude, st.longitude);
-        const distEnd = calculateDistanceKm(leg.endLat, leg.endLng, st.latitude, st.longitude);
-        const bestDist = Math.min(distStart, distEnd);
+        const matchedStore = matchStart.store || matchEnd.store;
+        const bestDist = matchStart.store ? matchStart.distanceKm : matchEnd.distanceKm;
 
-        if (bestDist < minDistance) {
-          minDistance = bestDist;
-          matched = st;
+        let stopCategory: 'customer_store' | 'long_non_customer' | 'short_transit' | 'moving_no_stop' =
+          'moving_no_stop';
+
+        if (stopMinutes > 0) {
+          if (matchedStore && !matchStart.isNonStoreKeyword) {
+            stopCategory = 'customer_store';
+          } else if (stopMinutes >= 15) {
+            stopCategory = 'long_non_customer';
+          } else {
+            stopCategory = 'short_transit';
+          }
+        } else if (matchedStore) {
+          stopCategory = 'customer_store';
         }
 
-        // Text matching check
-        const stNameLower = st.storeName.toLowerCase();
-        const stKecLower = (st.kecamatan || '').toLowerCase();
-        if (stNameLower.length > 4 && (startLocLower.includes(stNameLower) || endLocLower.includes(stNameLower))) {
-          matched = st;
-          break;
-        }
-        if (stKecLower.length > 4 && (startLocLower.includes(stKecLower) || endLocLower.includes(stKecLower))) {
-          if (!matched) matched = st;
-        }
-      }
+        const locType = matchedStore
+          ? getStoreLocationType(matchedStore)
+          : leg.startLng > 114.432 || leg.endLng > 114.432
+          ? 'luar_pulau'
+          : leg.startLat <= -7.75 && leg.startLat >= -8.85 && leg.startLng <= 114.432
+          ? 'dalam_kota'
+          : 'luar_kota';
 
-      const locType = matched
-        ? getStoreLocationType(matched)
-        : leg.startLng > 114.432 || leg.endLng > 114.432
-        ? 'luar_pulau'
-        : leg.startLat <= -7.75 && leg.startLat >= -8.85 && leg.startLng <= 114.432
-        ? 'dalam_kota'
-        : 'luar_kota';
-
-      results.push({
-        legNumber: leg.legNumber,
-        dateGroup: leg.dateGroup,
-        startTime: leg.startTime,
-        endTime: leg.endTime,
-        stopDurationMinutes: leg.stopBeforeMinutes || 0,
-        locationName: leg.endLocation,
-        mileageKm: leg.mileageKm,
-        avgSpeedKmh: leg.avgSpeedKmh,
-        matchedStore: matched,
-        regionType: locType,
-        matchConfidence: matched ? (minDistance < 1.0 ? 'Tinggi (Koordinat & Nama)' : 'Sedang (Area/Kecamatan)') : 'Toko Belum Terdaftar',
-        nomorToko: matched?.nomor ?? '-',
-        namaToko: matched?.storeName || leg.matchedStoreName || leg.endLocation.split(',')[0],
-        kecamatan: matched?.kecamatan || leg.matchedStoreKecamatan || '-',
-        kabupaten: matched?.kabupaten || leg.matchedStoreKabupaten || (locType === 'dalam_kota' ? 'Banyuwangi' : locType === 'luar_kota' ? 'Jatim' : 'Bali')
+        results.push({
+          id: `${ev.plateNumber}-${leg.dateGroup}-${leg.legNumber}`,
+          fleetPlate: ev.plateNumber || 'P 8381 VE',
+          fleetInitial: ev.initialCode || 'N2 / NP2',
+          gpsPlatform: ev.gpsPlatform || 'tracksolid',
+          legNumber: leg.legNumber,
+          dateGroup: leg.dateGroup,
+          startTime: leg.startTime,
+          endTime: leg.endTime,
+          startLocation: leg.startLocation,
+          endLocation: leg.endLocation,
+          travelTime: leg.travelTime,
+          mileageKm: leg.mileageKm,
+          avgSpeedKmh: leg.avgSpeedKmh,
+          maxSpeedKmh: leg.maxSpeedKmh,
+          stopDurationMinutes: stopMinutes,
+          stopStart: leg.stopBeforeStart || leg.endTime,
+          stopEnd: leg.stopBeforeEnd || leg.startTime,
+          matchedStore,
+          distanceToStoreKm: Number(bestDist.toFixed(2)),
+          stopCategory,
+          regionType: locType,
+          nomorToko: matchedStore?.nomor ?? '-',
+          namaTokoAtauLokasi: matchedStore
+            ? matchedStore.storeName
+            : leg.startLocation.split(',')[0] || leg.endLocation.split(',')[0],
+          kecamatan: matchedStore?.kecamatan || leg.matchedStoreKecamatan || '-',
+          kabupaten:
+            matchedStore?.kabupaten ||
+            leg.matchedStoreKabupaten ||
+            (locType === 'dalam_kota' ? 'Banyuwangi' : locType === 'luar_kota' ? 'Jatim' : 'Bali')
+        });
       });
     });
 
     return results;
-  }, [evaluation, registeredStores]);
+  }, [fleetEvaluations, activeEvaluation, selectedFleetPlate, registeredStores]);
 
-  // Filtered delivery store analyses
-  const filteredDeliveryAnalyses = useMemo(() => {
-    return deliveryStoreAnalyses.filter(item => {
+  // Filtered unified rows
+  const filteredUnifiedRows = useMemo(() => {
+    return unifiedRows.filter(item => {
       if (selectedDateGroup !== 'all' && item.dateGroup !== selectedDateGroup) return false;
-      if (!searchFilter) return true;
+      if (activityFilter === 'customer_stop' && item.stopCategory !== 'customer_store') return false;
+      if (activityFilter === 'long_non_customer' && item.stopCategory !== 'long_non_customer') return false;
+      if (activityFilter === 'moving_only' && item.stopDurationMinutes > 0) return false;
+
+      if (!searchFilter.trim()) return true;
       const q = searchFilter.toLowerCase();
       return (
-        item.namaToko.toLowerCase().includes(q) ||
+        item.namaTokoAtauLokasi.toLowerCase().includes(q) ||
         item.kecamatan.toLowerCase().includes(q) ||
         item.kabupaten.toLowerCase().includes(q) ||
-        item.locationName.toLowerCase().includes(q)
+        item.startLocation.toLowerCase().includes(q) ||
+        item.endLocation.toLowerCase().includes(q) ||
+        item.fleetPlate.toLowerCase().includes(q)
       );
     });
-  }, [deliveryStoreAnalyses, selectedDateGroup, searchFilter]);
+  }, [unifiedRows, selectedDateGroup, activityFilter, searchFilter]);
+
+  // Summary counts for the unified tab
+  const unifiedStats = useMemo(() => {
+    const customerStops = unifiedRows.filter(r => r.stopCategory === 'customer_store');
+    const longNonCustomerStops = unifiedRows.filter(r => r.stopCategory === 'long_non_customer');
+    const shortTransits = unifiedRows.filter(r => r.stopCategory === 'short_transit');
+    return {
+      totalLegs: unifiedRows.length,
+      customerStopsCount: customerStops.length,
+      longNonCustomerCount: longNonCustomerStops.length,
+      shortTransitCount: shortTransits.length
+    };
+  }, [unifiedRows]);
 
   // Speed profile data for Recharts
   const speedChartData = useMemo(() => {
-    const legs = evaluation.tripLegs || [];
-    return [...legs].reverse().map((leg, idx) => ({
+    const legs = activeEvaluation?.tripLegs || [];
+    return [...legs].reverse().map(leg => ({
       name: `#${leg.legNumber} (${leg.startTime.slice(0, 5)})`,
       legNumber: leg.legNumber,
       time: leg.startTime,
@@ -1013,257 +1374,393 @@ export const ExcelTrackingEvaluator: React.FC = () => {
       mileage: Number(leg.mileageKm.toFixed(1)),
       location: leg.startLocation.split(',')[0]
     }));
-  }, [evaluation]);
+  }, [activeEvaluation]);
 
-  // Parse Tracksolid Trips Excel file
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  // Parse a single Excel file (Tracksolid or Wanway) and return a TrackingEvaluation for a given fleet
+  const parseExcelFileForFleet = (
+    file: File,
+    targetFleet: Fleet,
+    platform: 'tracksolid' | 'wanway'
+  ): Promise<TrackingEvaluation> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = evt => {
+        try {
+          const data = evt.target?.result;
+          const workbook = XLSX.read(data, { type: 'binary' });
+          const sheetName = workbook.SheetNames[0];
+          const sheet = workbook.Sheets[sheetName];
+          const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
 
-    setIsProcessing(true);
+          if (!rows || rows.length < 2) {
+            throw new Error(`File "${file.name}" tidak memiliki baris data perjalanan GPS yang valid.`);
+          }
+
+          let headerRowIndex = -1;
+          for (let i = 0; i < Math.min(12, rows.length); i++) {
+            const rowStr = rows[i].map((c: any) => String(c).toLowerCase()).join(' ');
+            if (
+              rowStr.includes('start time') ||
+              rowStr.includes('start location') ||
+              rowStr.includes('total mileage') ||
+              rowStr.includes('waktu') ||
+              rowStr.includes('latitude') ||
+              rowStr.includes('kecepatan') ||
+              rowStr.includes('speed')
+            ) {
+              headerRowIndex = i;
+              break;
+            }
+          }
+
+          if (headerRowIndex === -1) {
+            headerRowIndex = 0;
+          }
+
+          const headers = rows[headerRowIndex].map((h: any) => String(h).trim().toLowerCase());
+          const colStartTime = headers.findIndex((h: string) =>
+            h.includes('start time') || h.includes('waktu mulai') || h.includes('time') || h.includes('waktu')
+          );
+          const colStartLoc = headers.findIndex((h: string) =>
+            h.includes('start location') || h.includes('start loc') || h.includes('lokasi awal') || h.includes('location') || h.includes('alamat')
+          );
+          const colEndTime = headers.findIndex((h: string) =>
+            h.includes('end time') || h.includes('waktu selesai')
+          );
+          const colEndLoc = headers.findIndex((h: string) =>
+            h.includes('end location') || h.includes('end loc') || h.includes('lokasi akhir') || h.includes('tujuan')
+          );
+          const colMileage = headers.findIndex((h: string) =>
+            h.includes('mileage') || h.includes('total mileage') || h.includes('jarak') || h.includes('km')
+          );
+          const colTravelTime = headers.findIndex((h: string) =>
+            h.includes('travel time') || h.includes('durasi') || h.includes('duration')
+          );
+          const colAvgSpeed = headers.findIndex((h: string) =>
+            h.includes('average speed') || h.includes('avg speed') || h.includes('rata-rata') || h.includes('speed')
+          );
+          const colMaxSpeed = headers.findIndex((h: string) =>
+            h.includes('max. speed') || h.includes('max speed') || h.includes('maks')
+          );
+          const colLat = headers.findIndex((h: string) => h === 'lat' || h.includes('latitude'));
+          const colLng = headers.findIndex((h: string) => h === 'lng' || h === 'lon' || h.includes('longitude'));
+
+          const parsedLegs: TracksolidTripLeg[] = [];
+          const dateSubtotals: TracksolidDateSubtotal[] = [];
+          const bottomSummary: TracksolidBottomSummary = {
+            trips: 0,
+            totalMileageKm: 0,
+            duration: '00:00:00',
+            avgSpeedKmh: 0,
+            maxSpeedKmh: 0,
+            totalFuelConsumptionLiters: 0
+          };
+
+          let currentDateGroup = '2026-10-26';
+          let legCounter = 1;
+
+          for (let i = headerRowIndex + 1; i < rows.length; i++) {
+            const row = rows[i];
+            if (!row || row.every((c: any) => String(c).trim() === '')) continue;
+
+            const cell0 = String(row[0] || '').trim();
+            const cell0Lower = cell0.toLowerCase();
+
+            // Check Bottom Summary rows
+            if (cell0Lower === 'trips' || cell0Lower.startsWith('trips')) {
+              const val = Number(row[1]);
+              if (!isNaN(val) && val > 0) {
+                bottomSummary.trips = val;
+                continue;
+              }
+            }
+            if (cell0Lower.includes('total mileage')) {
+              bottomSummary.totalMileageKm = Number(row[1]) || 0;
+              continue;
+            }
+            if (cell0Lower === 'duration') {
+              bottomSummary.duration = String(row[1] || '00:00:00');
+              continue;
+            }
+            if (cell0Lower.includes('average speed')) {
+              bottomSummary.avgSpeedKmh = Number(row[1]) || 0;
+              continue;
+            }
+            if (cell0Lower.includes('max. speed') || cell0Lower.includes('max speed')) {
+              bottomSummary.maxSpeedKmh = Number(row[1]) || 0;
+              continue;
+            }
+            if (cell0Lower.includes('total fuel')) {
+              continue;
+            }
+
+            // Date group header row (e.g., 2026-10-26)
+            if (cell0.match(/^\d{4}-\d{2}-\d{2}$/)) {
+              currentDateGroup = cell0;
+              continue;
+            }
+
+            // Daily subtotal row ('Total')
+            if (cell0Lower === 'total') {
+              dateSubtotals.push({
+                dateGroup: currentDateGroup,
+                tripCount: parsedLegs.filter(l => l.dateGroup === currentDateGroup).length,
+                totalMileageKm: colMileage >= 0 ? Number(row[colMileage]) || 0 : 0,
+                travelTime: colTravelTime >= 0 ? String(row[colTravelTime] || '00:00:00') : '00:00:00',
+                avgSpeedKmh: colAvgSpeed >= 0 ? Number(row[colAvgSpeed]) || 0 : 0,
+                maxSpeedKmh: colMaxSpeed >= 0 ? Number(row[colMaxSpeed]) || 0 : 0,
+                fuelPer100Km: 0,
+                totalFuelLiters: 0
+              });
+              continue;
+            }
+
+            const rawStart = colStartTime >= 0 ? String(row[colStartTime] || '').trim() : cell0;
+            const rawStartLoc =
+              colStartLoc >= 0 ? String(row[colStartLoc] || '').trim() : String(row[1] || '').trim();
+            const rawEnd = colEndTime >= 0 ? String(row[colEndTime] || '').trim() : rawStart;
+            const rawEndLoc =
+              colEndLoc >= 0 ? String(row[colEndLoc] || '').trim() : rawStartLoc;
+
+            // Extract date if embedded in timestamp (e.g. "2026-10-26 08:15:00")
+            let timeOnlyStart = rawStart;
+            const dtMatch = rawStart.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2}(?::\d{2})?)/);
+            if (dtMatch) {
+              currentDateGroup = dtMatch[1];
+              timeOnlyStart = dtMatch[2];
+            }
+
+            let timeOnlyEnd = rawEnd;
+            const dtEndMatch = rawEnd.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2}(?::\d{2})?)/);
+            if (dtEndMatch) {
+              timeOnlyEnd = dtEndMatch[2];
+            }
+
+            if (timeOnlyStart && (rawStartLoc || (colLat >= 0 && colLng >= 0))) {
+              const mileageVal = colMileage >= 0 ? Number(row[colMileage]) || 0 : 2.5;
+              const travelTimeVal =
+                colTravelTime >= 0 && row[colTravelTime]
+                  ? String(row[colTravelTime])
+                  : '00:10:00';
+              const avgSpeedVal = colAvgSpeed >= 0 ? Number(row[colAvgSpeed]) || 28 : 28;
+              const maxSpeedVal =
+                colMaxSpeed >= 0 ? Number(row[colMaxSpeed]) || avgSpeedVal + 12 : avgSpeedVal + 12;
+
+              let sLat = 0;
+              let sLng = 0;
+              if (colLat >= 0 && colLng >= 0 && Number(row[colLat]) && Number(row[colLng])) {
+                sLat = Number(row[colLat]);
+                sLng = Number(row[colLng]);
+              } else {
+                [sLat, sLng] = resolveTracksolidCoords(rawStartLoc, legCounter, registeredStores);
+              }
+
+              const [eLat, eLng] =
+                rawEndLoc && rawEndLoc !== rawStartLoc
+                  ? resolveTracksolidCoords(rawEndLoc, legCounter + 1, registeredStores)
+                  : [sLat, sLng];
+
+              parsedLegs.push({
+                legNumber: legCounter++,
+                dateGroup: currentDateGroup,
+                startTime: timeOnlyStart,
+                startLocation: rawStartLoc || `${sLat}, ${sLng}`,
+                endTime: timeOnlyEnd || timeOnlyStart,
+                endLocation: rawEndLoc || rawStartLoc || `${eLat}, ${eLng}`,
+                mileageKm: mileageVal,
+                travelTime: travelTimeVal,
+                travelMinutes: Math.max(1, Math.round((parseTimeSeconds(travelTimeVal) || 600) / 60)),
+                avgSpeedKmh: avgSpeedVal,
+                maxSpeedKmh: maxSpeedVal,
+                fuelPer100Km: 0,
+                totalFuelLiters: 0,
+                startLat: sLat,
+                startLng: sLng,
+                endLat: eLat,
+                endLng: eLng
+              });
+            }
+          }
+
+          if (parsedLegs.length === 0) {
+            throw new Error(`Tidak ditemukan baris perjalanan GPS yang valid pada file "${file.name}".`);
+          }
+
+          // Calculate accurate Stop Durations (in minutes) between consecutive trips
+          // Detect whether rows are reverse-chronological (Tracksolid default) or chronological
+          const isReverseChronological =
+            parsedLegs.length >= 2 &&
+            `${parsedLegs[0].dateGroup} ${parsedLegs[0].startTime}` >
+              `${parsedLegs[parsedLegs.length - 1].dateGroup} ${parsedLegs[parsedLegs.length - 1].startTime}`;
+
+          for (let idx = 0; idx < parsedLegs.length; idx++) {
+            const current = parsedLegs[idx];
+            const prevTrip = isReverseChronological ? parsedLegs[idx + 1] : parsedLegs[idx - 1];
+            if (prevTrip) {
+              current.stopBeforeStart = prevTrip.endTime;
+              current.stopBeforeEnd = current.startTime;
+              current.stopBeforeMinutes = computeStopMinutesBetween(
+                prevTrip.endTime,
+                current.startTime
+              );
+            } else {
+              current.stopBeforeMinutes = 0;
+            }
+          }
+
+          // Build per-date subtotals if not explicitly present in the Excel file
+          if (dateSubtotals.length === 0) {
+            const byDate = new Map<string, TracksolidTripLeg[]>();
+            parsedLegs.forEach(l => {
+              const list = byDate.get(l.dateGroup) || [];
+              list.push(l);
+              byDate.set(l.dateGroup, list);
+            });
+            byDate.forEach((legsOnDate, dateKey) => {
+              const km = Number(legsOnDate.reduce((s, l) => s + l.mileageKm, 0).toFixed(2));
+              const sec = legsOnDate.reduce(
+                (s, l) => s + (parseTimeSeconds(l.travelTime) || 0),
+                0
+              );
+              const avg = Number(
+                (legsOnDate.reduce((s, l) => s + l.avgSpeedKmh, 0) / legsOnDate.length).toFixed(2)
+              );
+              const max = Math.max(...legsOnDate.map(l => l.maxSpeedKmh));
+              dateSubtotals.push({
+                dateGroup: dateKey,
+                tripCount: legsOnDate.length,
+                totalMileageKm: km,
+                travelTime: formatSecondsToHMS(sec),
+                avgSpeedKmh: avg,
+                maxSpeedKmh: max,
+                fuelPer100Km: 0,
+                totalFuelLiters: 0
+              });
+            });
+          }
+
+          if (!bottomSummary.trips || bottomSummary.trips === 0) {
+            bottomSummary.trips = parsedLegs.length;
+          }
+          if (!bottomSummary.totalMileageKm || bottomSummary.totalMileageKm === 0) {
+            bottomSummary.totalMileageKm = Number(
+              parsedLegs.reduce((sum, l) => sum + l.mileageKm, 0).toFixed(2)
+            );
+          }
+          if (!bottomSummary.duration || bottomSummary.duration === '00:00:00') {
+            const totalSec = parsedLegs.reduce(
+              (sum, l) => sum + (parseTimeSeconds(l.travelTime) || 0),
+              0
+            );
+            bottomSummary.duration = formatSecondsToHMS(totalSec);
+          }
+          if (!bottomSummary.avgSpeedKmh || bottomSummary.avgSpeedKmh === 0) {
+            bottomSummary.avgSpeedKmh = Number(
+              (parsedLegs.reduce((sum, l) => sum + l.avgSpeedKmh, 0) / parsedLegs.length).toFixed(2)
+            );
+          }
+          if (!bottomSummary.maxSpeedKmh || bottomSummary.maxSpeedKmh === 0) {
+            bottomSummary.maxSpeedKmh = Math.max(...parsedLegs.map(l => l.maxSpeedKmh));
+          }
+
+          const evaluationObj = buildEvaluationFromLegs(
+            parsedLegs,
+            dateSubtotals,
+            bottomSummary,
+            {
+              fileName: file.name,
+              fleetId: targetFleet.id,
+              plateNumber: targetFleet.plateNumber,
+              initialCode: targetFleet.initialCode || 'ARMADA',
+              driverName: 'Tim Pengiriman AKK',
+              helperName: '-',
+              gpsPlatform: platform,
+              uploadedMonth: uploadMonth,
+              uploadedYear: uploadYear
+            },
+            registeredStores
+          );
+
+          resolve(evaluationObj);
+        } catch (err: any) {
+          reject(err);
+        }
+      };
+      reader.onerror = () => reject(new Error(`Gagal membaca file "${file.name}".`));
+      reader.readAsBinaryString(file);
+    });
+  };
+
+  // Process staged files from the Image 2 style upload screen
+  const handleProcessUploadForm = async () => {
     setErrorMessage(null);
     setSuccessMessage(null);
 
-    const reader = new FileReader();
-    reader.onload = evt => {
-      try {
-        const data = evt.target?.result;
-        const workbook = XLSX.read(data, { type: 'binary' });
-        const sheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
-        const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+    const targetFleets: Fleet[] =
+      fleetScopeMode === 'single'
+        ? [fleets.find(f => f.id === selectedSingleFleetId) || fleets[0]].filter(Boolean)
+        : fleets.filter(f => selectedMultiFleetIds.includes(f.id));
 
-        if (!rows || rows.length < 3) {
-          throw new Error('File Excel tidak memiliki cukup baris data ritase Tracksolid.');
-        }
+    if (targetFleets.length === 0) {
+      setErrorMessage('Pilih minimal 1 armada terlebih dahulu pada Spesifikasi Armada.');
+      return;
+    }
 
-        let reportTitle = String(rows[0]?.[0] || 'Trips Tracksolid Report');
-        let headerRowIndex = -1;
+    if (stagedFiles.length === 0) {
+      setErrorMessage('Pilih file Excel (.xls, .xlsx, .csv) Tracksolid / Wanway terlebih dahulu.');
+      return;
+    }
 
-        for (let i = 0; i < Math.min(10, rows.length); i++) {
-          const rowStr = rows[i].map((c: any) => String(c).toLowerCase()).join(' ');
-          if (rowStr.includes('start time') || rowStr.includes('start location') || rowStr.includes('total mileage')) {
-            headerRowIndex = i;
-            break;
-          }
-        }
+    setIsProcessing(true);
+    try {
+      const newEvaluations: TrackingEvaluation[] = [];
 
-        if (headerRowIndex === -1) {
-          throw new Error('Format kolom Tracksolid tidak dikenali (wajib berisi "Start time", "Start location", "End time", "End location", "Total Mileage(km)").');
-        }
-
-        const headers = rows[headerRowIndex].map((h: any) => String(h).trim().toLowerCase());
-        const colStartTime = headers.findIndex((h: string) => h.includes('start time'));
-        const colStartLoc = headers.findIndex((h: string) => h.includes('start location') || h.includes('start loc'));
-        const colEndTime = headers.findIndex((h: string) => h.includes('end time'));
-        const colEndLoc = headers.findIndex((h: string) => h.includes('end location') || h.includes('end loc'));
-        const colMileage = headers.findIndex((h: string) => h.includes('mileage') || h.includes('total mileage'));
-        const colTravelTime = headers.findIndex((h: string) => h.includes('travel time'));
-        const colAvgSpeed = headers.findIndex((h: string) => h.includes('average speed') || h.includes('avg speed'));
-        const colMaxSpeed = headers.findIndex((h: string) => h.includes('max. speed') || h.includes('max speed'));
-        const colFuelPer100 = headers.findIndex((h: string) => h.includes('fuel/100km'));
-        const colTotalFuel = headers.findIndex((h: string) => h.includes('total fuel'));
-
-        const parsedLegs: TracksolidTripLeg[] = [];
-        const dateSubtotals: TracksolidDateSubtotal[] = [];
-        let bottomSummary: TracksolidBottomSummary = { ...DEFAULT_TRACKSOLID_BOTTOM_SUMMARY };
-
-        let currentDateGroup = '2026-10-26';
-        let legCounter = 1;
-
-        for (let i = headerRowIndex + 1; i < rows.length; i++) {
-          const row = rows[i];
-          if (!row || row.every((c: any) => String(c).trim() === '')) continue;
-
-          const cell0 = String(row[0] || '').trim();
-          const cell0Lower = cell0.toLowerCase();
-
-          // Check for Bottom Summary rows (Trips, Total Mileage, Duration, Average Speed, Max Speed, Total Fuel)
-          if (cell0Lower === 'trips' || cell0Lower.startsWith('trips')) {
-            bottomSummary.trips = Number(row[1]) || parsedLegs.length;
-            continue;
-          }
-          if (cell0Lower.includes('total mileage') && !cell0Lower.includes('(')) {
-            bottomSummary.totalMileageKm = Number(row[1]) || 0;
-            continue;
-          }
-          if (cell0Lower === 'total mileage(km)') {
-            bottomSummary.totalMileageKm = Number(row[1]) || 0;
-            continue;
-          }
-          if (cell0Lower === 'duration') {
-            bottomSummary.duration = String(row[1] || '00:00:00');
-            continue;
-          }
-          if (cell0Lower.includes('average speed')) {
-            bottomSummary.avgSpeedKmh = Number(row[1]) || 0;
-            continue;
-          }
-          if (cell0Lower.includes('max. speed') || cell0Lower.includes('max speed')) {
-            bottomSummary.maxSpeedKmh = Number(row[1]) || 0;
-            continue;
-          }
-          if (cell0Lower.includes('total fuel consumption') || cell0Lower.includes('total fuel')) {
-            bottomSummary.totalFuelConsumptionLiters = Number(row[1]) || 0;
-            continue;
-          }
-
-          // Check if this row is a Date Header (e.g., '2026-10-26' or '2026-10-25')
-          if (cell0.match(/^\d{4}-\d{2}-\d{2}$/)) {
-            currentDateGroup = cell0;
-            continue;
-          }
-
-          // Check if this row is a Daily Subtotal ('Total')
-          if (cell0Lower === 'total') {
-            dateSubtotals.push({
-              dateGroup: currentDateGroup,
-              tripCount: parsedLegs.filter(l => l.dateGroup === currentDateGroup).length,
-              totalMileageKm: Number(row[colMileage]) || 0,
-              travelTime: String(row[colTravelTime] || ''),
-              avgSpeedKmh: Number(row[colAvgSpeed]) || 0,
-              maxSpeedKmh: Number(row[colMaxSpeed]) || 0,
-              fuelPer100Km: Number(row[colFuelPer100]) || 0,
-              totalFuelLiters: Number(row[colTotalFuel]) || 0
-            });
-            continue;
-          }
-
-          // Normal trip leg row (colStartTime must have valid time like 17:15:33)
-          const startTimeVal = String(row[colStartTime] || '').trim();
-          const startLocVal = String(row[colStartLoc] || '').trim();
-          const endTimeVal = String(row[colEndTime] || '').trim();
-          const endLocVal = String(row[colEndLoc] || '').trim();
-
-          if (startTimeVal && startLocVal) {
-            const mileageVal = Number(row[colMileage]) || 0;
-            const travelTimeVal = String(row[colTravelTime] || '00:00:00');
-            const avgSpeedVal = Number(row[colAvgSpeed]) || 0;
-            const maxSpeedVal = Number(row[colMaxSpeed]) || 0;
-            const fuel100Val = Number(row[colFuelPer100]) || 0;
-            const totalFuelVal = Number(row[colTotalFuel]) || 0;
-
-            const [sLat, sLng] = resolveTracksolidCoords(startLocVal, legCounter);
-            const [eLat, eLng] = resolveTracksolidCoords(endLocVal, legCounter + 1);
-
-            parsedLegs.push({
-              legNumber: legCounter++,
-              dateGroup: currentDateGroup,
-              startTime: startTimeVal,
-              startLocation: startLocVal,
-              endTime: endTimeVal || startTimeVal,
-              endLocation: endLocVal || startLocVal,
-              mileageKm: mileageVal,
-              travelTime: travelTimeVal,
-              travelMinutes: 10,
-              avgSpeedKmh: avgSpeedVal,
-              maxSpeedKmh: maxSpeedVal,
-              fuelPer100Km: fuel100Val,
-              totalFuelLiters: totalFuelVal,
-              startLat: sLat,
-              startLng: sLng,
-              endLat: eLat,
-              endLng: eLng
-            });
-          }
-        }
-
-        if (parsedLegs.length === 0) {
-          throw new Error('Tidak ada baris ritase pengiriman yang berhasil diparsing.');
-        }
-
-        // Calculate Stop Durations between consecutive trips
-        for (let idx = 0; idx < parsedLegs.length; idx++) {
-          const current = parsedLegs[idx];
-          const nextInTable = parsedLegs[idx + 1]; // Note: table is in reverse chronological order in screenshot
-          if (nextInTable && nextInTable.dateGroup === current.dateGroup) {
-            current.stopBeforeStart = nextInTable.endTime;
-            current.stopBeforeEnd = current.startTime;
-            // approximate minutes
-            current.stopBeforeMinutes = 15;
-          }
-        }
-
-        // Final bottom summary fallback if not present in Excel footer
-        if (!bottomSummary.trips || bottomSummary.trips === 0) {
-          bottomSummary.trips = parsedLegs.length;
-          bottomSummary.totalMileageKm = Number(parsedLegs.reduce((sum, l) => sum + l.mileageKm, 0).toFixed(2));
-          bottomSummary.avgSpeedKmh = Number(
-            (parsedLegs.reduce((sum, l) => sum + l.avgSpeedKmh, 0) / parsedLegs.length).toFixed(2)
-          );
-          bottomSummary.maxSpeedKmh = Math.max(...parsedLegs.map(l => l.maxSpeedKmh));
-        }
-
-        const points: TrackingPoint[] = [];
-        const stops: RouteStop[] = [];
-
-        parsedLegs.forEach((leg, index) => {
-          points.push({
-            timestamp: `${leg.dateGroup} ${leg.startTime}`,
-            latitude: leg.startLat,
-            longitude: leg.startLng,
-            speed: leg.avgSpeedKmh,
-            engineStatus: 'RUNNING',
-            locationName: leg.startLocation
-          });
-          points.push({
-            timestamp: `${leg.dateGroup} ${leg.endTime}`,
-            latitude: leg.endLat,
-            longitude: leg.endLng,
-            speed: 0,
-            engineStatus: 'STOP',
-            locationName: leg.endLocation
-          });
-
-          stops.push({
-            stopNumber: index + 1,
-            startTime: leg.startTime,
-            endTime: leg.endTime,
-            durationMinutes: leg.stopBeforeMinutes || 15,
-            latitude: leg.startLat,
-            longitude: leg.startLng,
-            locationName: leg.startLocation,
-            reason: 'Retail Unloading'
-          });
-        });
-
-        const newEval: TrackingEvaluation = {
-          fileName: file.name,
-          totalPoints: points.length,
-          totalDistanceKm: bottomSummary.totalMileageKm,
-          durationHours: 9.1,
-          avgSpeedKmh: bottomSummary.avgSpeedKmh,
-          maxSpeedKmh: bottomSummary.maxSpeedKmh,
-          totalIdleMinutes: 526,
-          routeDeviationKm: 0,
-          isWithinRouteTolerance: true,
-          onTimeStatus: 'On-Time',
-          delayMinutes: 0,
-          stops,
-          points,
-          tripLegs: parsedLegs,
-          dateSubtotals,
-          bottomSummary
-        };
-
-        setEvaluation(newEval);
-        setSuccessMessage(`Berhasil memuat ${parsedLegs.length} ritase dari file "${file.name}". Profil kecepatan dan ringkasan bawah berhasil diekstrak!`);
-      } catch (err: any) {
-        setErrorMessage(err.message || 'Gagal memproses file Excel Tracksolid.');
-      } finally {
-        setIsProcessing(false);
-        if (fileInputRef.current) {
-          fileInputRef.current.value = '';
+      if (fleetScopeMode === 'single') {
+        const parsed = await parseExcelFileForFleet(stagedFiles[0], targetFleets[0], gpsPlatform);
+        newEvaluations.push(parsed);
+      } else {
+        // Multi-fleet mode: pair uploaded files with selected fleets or apply file across selected fleets
+        for (let i = 0; i < targetFleets.length; i++) {
+          const fleet = targetFleets[i];
+          const fileToUse = stagedFiles[i] || stagedFiles[0];
+          const parsed = await parseExcelFileForFleet(fileToUse, fleet, gpsPlatform);
+          newEvaluations.push(parsed);
         }
       }
-    };
-    reader.readAsBinaryString(file);
+
+      setFleetEvaluations(prev => {
+        if (importMode === 'replace') {
+          return newEvaluations;
+        }
+        const mapByPlate = new Map<string, TrackingEvaluation>();
+        prev.forEach(item => mapByPlate.set(item.plateNumber || item.fileName, item));
+        newEvaluations.forEach(item => mapByPlate.set(item.plateNumber || item.fileName, item));
+        return Array.from(mapByPlate.values());
+      });
+
+      setSelectedFleetPlate(
+        newEvaluations.length > 1 ? 'all' : newEvaluations[0].plateNumber || 'all'
+      );
+      setStagedFiles([]);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      setViewMode('evaluation');
+      setSuccessMessage(
+        `Berhasil memproses ${newEvaluations.length} armada (${newEvaluations
+          .map(e => e.plateNumber)
+          .join(', ')}) dari platform ${
+          gpsPlatform === 'tracksolid' ? 'Tracksolid Pro' : 'WanwayTrack'
+        } periode ${uploadMonth} ${uploadYear}.`
+      );
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Gagal memproses file Excel GPS.');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
-  // Unduh file template Excel Tracksolid persis seperti format Trips export
-  const handleDownloadTracksolidTemplate = () => {
+  // Download template Excel (Tracksolid or Wanway) without Fuel columns
+  const handleDownloadTemplate = () => {
     const sheetData: any[][] = [
-      ['Trips(2026-10-25 00:00:00~2026-10-26 23:59:59)'],
       [
         'Start time',
         'Start location',
@@ -1272,9 +1769,7 @@ export const ExcelTrackingEvaluator: React.FC = () => {
         'Total Mileage(km)',
         'Travel time',
         'Average Speed',
-        'Max. speed(km/h)',
-        'Fuel/100KM(L)',
-        'Total Fuel'
+        'Max. speed(km/h)'
       ],
       ['2026-10-26']
     ];
@@ -1288,26 +1783,13 @@ export const ExcelTrackingEvaluator: React.FC = () => {
         l.mileageKm,
         l.travelTime,
         l.avgSpeedKmh,
-        l.maxSpeedKmh,
-        l.fuelPer100Km,
-        l.totalFuelLiters
+        l.maxSpeedKmh
       ]);
     });
 
-    sheetData.push([
-      'Total',
-      '',
-      '',
-      '',
-      294.90,
-      '08:51:14',
-      33.31,
-      79.00,
-      0.0,
-      0.0
-    ]);
-
+    sheetData.push(['Total', '', '', '', 294.90, '08:51:14', 33.31, 79.00]);
     sheetData.push(['2026-10-25']);
+
     DEFAULT_TRACKSOLID_26_LEGS.filter(l => l.dateGroup === '2026-10-25').forEach(l => {
       sheetData.push([
         l.startTime,
@@ -1317,60 +1799,61 @@ export const ExcelTrackingEvaluator: React.FC = () => {
         l.mileageKm,
         l.travelTime,
         l.avgSpeedKmh,
-        l.maxSpeedKmh,
-        l.fuelPer100Km,
-        l.totalFuelLiters
+        l.maxSpeedKmh
       ]);
     });
 
-    sheetData.push([
-      'Total',
-      '',
-      '',
-      '',
-      7.05,
-      '00:14:57',
-      28.31,
-      55.00,
-      0.0,
-      0.0
-    ]);
-
+    sheetData.push(['Total', '', '', '', 7.05, '00:14:57', 28.31, 55.00]);
     sheetData.push(['Trips', 26]);
     sheetData.push(['Total Mileage(km)', 301.95]);
     sheetData.push(['Duration', '09:06:11']);
     sheetData.push(['Average Speed (km/h)', 33.17]);
     sheetData.push(['Max. speed(km/h)', 79.00]);
-    sheetData.push(['Total Fuel Consumption (L)', 0.00]);
 
     const ws = XLSX.utils.aoa_to_sheet(sheetData);
     ws['!cols'] = [
       { wch: 14 },
-      { wch: 45 },
+      { wch: 48 },
       { wch: 14 },
-      { wch: 45 },
+      { wch: 48 },
+      { wch: 18 },
+      { wch: 14 },
       { wch: 16 },
-      { wch: 14 },
-      { wch: 14 },
-      { wch: 16 },
-      { wch: 14 },
-      { wch: 12 }
+      { wch: 18 }
     ];
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Trips_Tracksolid');
-    XLSX.writeFile(wb, 'Format_Export_Trips_Tracksolid.xlsx');
+    XLSX.utils.book_append_sheet(
+      wb,
+      ws,
+      gpsPlatform === 'tracksolid' ? 'Template_Tracksolid' : 'Template_Wanway'
+    );
+    XLSX.writeFile(
+      wb,
+      `Template_Evaluasi_${gpsPlatform === 'tracksolid' ? 'Tracksolid' : 'Wanway'}_AKK.xlsx`
+    );
   };
 
-  // Unduh Laporan Hasil Analisa Pengantaran Pelanggan ke Excel (.XLSX)
-  const handleExportDeliveryAnalysis = () => {
-    const rows = deliveryStoreAnalyses.map(item => ({
+  // Export Unified Analysis to Excel (.XLSX)
+  const handleExportUnifiedAnalysis = () => {
+    const rows = unifiedRows.map(item => ({
+      Armada: `${item.fleetPlate} [${item.fleetInitial}]`,
+      Platform: item.gpsPlatform === 'tracksolid' ? 'Tracksolid' : 'Wanway',
       Ritase: `#${item.legNumber}`,
       Tanggal: item.dateGroup,
-      'Jam Berangkat': item.startTime,
-      'Jam Selesai': item.endTime,
-      'Lama Berhenti (Bongkar/Parkir)': `${item.stopDurationMinutes} Menit`,
+      'Jam Mulai Gerak': item.startTime,
+      'Jam Selesai Gerak': item.endTime,
+      'Durasi Gerak': item.travelTime,
+      'Lama Berhenti (Menit)': `${item.stopDurationMinutes} Menit`,
+      'Status Pemberhentian':
+        item.stopCategory === 'customer_store'
+          ? 'BERHENTI DI TOKO MITRA PELANGGAN'
+          : item.stopCategory === 'long_non_customer'
+          ? 'PERINGATAN: BERHENTI LAMA DI LUAR TOKO (NON-MITRA)'
+          : item.stopCategory === 'short_transit'
+          ? 'Transit Singkat Non-Toko'
+          : 'Bergerak Langsung',
       'Nomor Toko': item.nomorToko,
-      'Nama Pelanggan / Toko': item.namaToko,
+      'Nama Toko Pelanggan / Lokasi Stop': item.namaTokoAtauLokasi,
       Kecamatan: item.kecamatan,
       Kabupaten: item.kabupaten,
       'Kategori Wilayah':
@@ -1380,97 +1863,524 @@ export const ExcelTrackingEvaluator: React.FC = () => {
           ? 'Luar Kota (Kuning)'
           : 'Luar Pulau (Hijau)',
       'Jarak Tempuh (km)': item.mileageKm,
-      'Kecepatan Rata-Rata (km/jam)': item.avgSpeedKmh,
-      'Status Pencocokan': item.matchConfidence,
-      'Lokasi GPS': item.locationName
+      'Kecepatan Rata-Rata (km/h)': item.avgSpeedKmh,
+      'Kecepatan Maksimal (km/h)': item.maxSpeedKmh,
+      'Lokasi Keberangkatan': item.startLocation,
+      'Lokasi Tujuan': item.endLocation
     }));
 
     const ws = XLSX.utils.json_to_sheet(rows);
-    ws['!cols'] = [
-      { wch: 10 },
-      { wch: 12 },
-      { wch: 14 },
-      { wch: 14 },
-      { wch: 28 },
-      { wch: 12 },
-      { wch: 36 },
-      { wch: 18 },
-      { wch: 18 },
-      { wch: 20 },
-      { wch: 16 },
-      { wch: 18 },
-      { wch: 25 },
-      { wch: 50 }
-    ];
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Analisa_Kirim_Pelanggan');
-    XLSX.writeFile(wb, `Analisa_Armada_Kirim_Pelanggan_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, 'Analisa_Armada_Pelanggan');
+    XLSX.writeFile(wb, `Analisa_Rute_Armada_AKK_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
-  const bottom = evaluation.bottomSummary || DEFAULT_TRACKSOLID_BOTTOM_SUMMARY;
+  const toggleMultiFleetSelection = (fleetId: string) => {
+    setSelectedMultiFleetIds(prev =>
+      prev.includes(fleetId) ? prev.filter(id => id !== fleetId) : [...prev, fleetId]
+    );
+  };
 
+  const bottom = activeEvaluation?.bottomSummary || DEFAULT_TRACKSOLID_BOTTOM_SUMMARY;
+  const subtotals = activeEvaluation?.dateSubtotals || DEFAULT_TRACKSOLID_DATE_SUBTOTALS;
+
+  // ============================================================================
+  // RENDER UPLOAD FORM SCREEN (MATCHING IMAGE 2 + TRACKSOLID/WANWAY + FLEET SPEC)
+  // ============================================================================
+  if (viewMode === 'upload_form') {
+    return (
+      <div className="space-y-5">
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
+          {/* Header Row */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+            <div>
+              <div className="flex items-center gap-2.5">
+                <FileSpreadsheet className="w-5 h-5 text-blue-400" />
+                <h2 className="text-lg font-bold text-white">
+                  Unggah File Evaluasi Rute GPS Armada
+                </h2>
+              </div>
+              <p className="text-xs text-slate-400 mt-1">
+                Pilih periode bulan, platform GPS (Tracksolid / Wanway), spesifikasi armada (1 atau beberapa armada), dan unggah file Excel (.xls, .xlsx, .csv).
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setViewMode('evaluation')}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition cursor-pointer shrink-0"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Kembali ke Peta & Analisa Rute</span>
+            </button>
+          </div>
+
+          {errorMessage && (
+            <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-rose-950/40 border border-rose-500/40 text-rose-200 text-xs">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
+                <span>{errorMessage}</span>
+              </div>
+              <button type="button" onClick={() => setErrorMessage(null)} className="p-1 hover:text-white">
+                ✕
+              </button>
+            </div>
+          )}
+
+          {/* Row 1: BULAN DATA & TAHUN DATA */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-300">
+                Bulan Data
+              </label>
+              <select
+                value={uploadMonth}
+                onChange={e => setUploadMonth(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white font-semibold focus:outline-none focus:border-blue-500"
+              >
+                {MONTHS_ID.map(m => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-300">
+                Tahun Data
+              </label>
+              <select
+                value={uploadYear}
+                onChange={e => setUploadYear(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-white font-semibold focus:outline-none focus:border-blue-500"
+              >
+                {['2025', '2026', '2027'].map(y => (
+                  <option key={y} value={y}>
+                    {y}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Row 2: PILIHAN PLATFORM GPS (TRACKSOLID ATAU WANWAY) */}
+          <div className="space-y-2">
+            <label className="text-[11px] font-bold uppercase tracking-wider text-slate-300">
+              Platform Sumber Data GPS (Tracksolid / Wanway)
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div
+                onClick={() => setGpsPlatform('tracksolid')}
+                className={`p-3.5 rounded-xl border cursor-pointer transition flex items-start gap-3 ${
+                  gpsPlatform === 'tracksolid'
+                    ? 'bg-blue-600/10 border-blue-500 text-white'
+                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                }`}
+              >
+                <div
+                  className={`w-4 h-4 rounded-full border flex items-center justify-center mt-0.5 shrink-0 ${
+                    gpsPlatform === 'tracksolid' ? 'border-blue-400 bg-blue-600' : 'border-slate-600'
+                  }`}
+                >
+                  {gpsPlatform === 'tracksolid' && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-white">Tracksolid Pro (Format Trips / Track)</div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">
+                    Unggah file export perjalanan GPS dari platform Tracksolid.
+                  </div>
+                </div>
+              </div>
+
+              <div
+                onClick={() => setGpsPlatform('wanway')}
+                className={`p-3.5 rounded-xl border cursor-pointer transition flex items-start gap-3 ${
+                  gpsPlatform === 'wanway'
+                    ? 'bg-blue-600/10 border-blue-500 text-white'
+                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                }`}
+              >
+                <div
+                  className={`w-4 h-4 rounded-full border flex items-center justify-center mt-0.5 shrink-0 ${
+                    gpsPlatform === 'wanway' ? 'border-blue-400 bg-blue-600' : 'border-slate-600'
+                  }`}
+                >
+                  {gpsPlatform === 'wanway' && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-white">WanwayTrack (Wanway GPS)</div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">
+                    Unggah file histori perjalanan & koordinat dari platform Wanway GPS.
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Row 3: PILIHAN FILE SPESIFIKASI ARMADA (1 ARMADA ATAU BEBERAPA ARMADA) */}
+          <div className="space-y-3">
+            <label className="text-[11px] font-bold uppercase tracking-wider text-slate-300">
+              Spesifikasi Armada yang Diunggah (1 Armada / Beberapa Armada)
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div
+                onClick={() => setFleetScopeMode('single')}
+                className={`p-3.5 rounded-xl border cursor-pointer transition flex items-start gap-3 ${
+                  fleetScopeMode === 'single'
+                    ? 'bg-blue-600/10 border-blue-500 text-white'
+                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                }`}
+              >
+                <div
+                  className={`w-4 h-4 rounded-full border flex items-center justify-center mt-0.5 shrink-0 ${
+                    fleetScopeMode === 'single' ? 'border-blue-400 bg-blue-600' : 'border-slate-600'
+                  }`}
+                >
+                  {fleetScopeMode === 'single' && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-white">Hanya 1 Armada Spesifik</div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">
+                    File Excel yang diunggah merupakan track untuk 1 unit armada pengiriman.
+                  </div>
+                </div>
+              </div>
+
+              <div
+                onClick={() => setFleetScopeMode('multiple')}
+                className={`p-3.5 rounded-xl border cursor-pointer transition flex items-start gap-3 ${
+                  fleetScopeMode === 'multiple'
+                    ? 'bg-blue-600/10 border-blue-500 text-white'
+                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                }`}
+              >
+                <div
+                  className={`w-4 h-4 rounded-full border flex items-center justify-center mt-0.5 shrink-0 ${
+                    fleetScopeMode === 'multiple' ? 'border-blue-400 bg-blue-600' : 'border-slate-600'
+                  }`}
+                >
+                  {fleetScopeMode === 'multiple' && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-white">Beberapa Armada Sekaligus</div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">
+                    Unggah file untuk beberapa armada pengiriman sekaligus dalam satu proses.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Selector Unit Armada */}
+            {fleetScopeMode === 'single' ? (
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-1.5">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  Pilih Unit Armada untuk File Ini:
+                </label>
+                <select
+                  value={selectedSingleFleetId}
+                  onChange={e => setSelectedSingleFleetId(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-semibold focus:outline-none focus:border-blue-500"
+                >
+                  {fleets.map(f => (
+                    <option key={f.id} value={f.id}>
+                      {f.plateNumber} {f.initialCode ? `[Inisial: ${f.initialCode}]` : ''} — {f.brand || 'Armada'} ({f.vehicleType})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Pilih Beberapa Armada yang Terunggah ({selectedMultiFleetIds.length} Armada Dipilih):
+                  </span>
+                  <div className="flex items-center gap-2 text-[11px]">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedMultiFleetIds(fleets.map(f => f.id))}
+                      className="text-blue-400 hover:underline font-semibold cursor-pointer"
+                    >
+                      Pilih Semua
+                    </button>
+                    <span className="text-slate-600">•</span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedMultiFleetIds([])}
+                      className="text-slate-400 hover:text-white cursor-pointer"
+                    >
+                      Reset
+                    </button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 max-h-48 overflow-y-auto pr-1">
+                  {fleets.map(f => {
+                    const checked = selectedMultiFleetIds.includes(f.id);
+                    return (
+                      <div
+                        key={f.id}
+                        onClick={() => toggleMultiFleetSelection(f.id)}
+                        className={`p-2.5 rounded-xl border text-xs flex items-center gap-2.5 cursor-pointer transition ${
+                          checked
+                            ? 'bg-blue-600/15 border-blue-500 text-white font-semibold'
+                            : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                        }`}
+                      >
+                        <div
+                          className={`w-4 h-4 rounded flex items-center justify-center border shrink-0 ${
+                            checked ? 'bg-blue-600 border-blue-400 text-white' : 'border-slate-600'
+                          }`}
+                        >
+                          {checked && <Check className="w-3 h-3" />}
+                        </div>
+                        <div className="truncate">
+                          <div className="font-bold text-white truncate">
+                            {f.plateNumber} {f.initialCode ? `[${f.initialCode}]` : ''}
+                          </div>
+                          <div className="text-[10px] text-slate-400 truncate">{f.brand || f.vehicleType} ({f.vehicleType})</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Row 4: MODE IMPORT (Matching Image 2) */}
+          <div className="space-y-2">
+            <label className="text-[11px] font-bold uppercase tracking-wider text-slate-300">
+              Mode Import
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div
+                onClick={() => setImportMode('append')}
+                className={`p-3.5 rounded-xl border cursor-pointer transition flex items-start gap-3 ${
+                  importMode === 'append'
+                    ? 'bg-blue-600/10 border-blue-500 text-white'
+                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                }`}
+              >
+                <div
+                  className={`w-4 h-4 rounded-full border flex items-center justify-center mt-0.5 shrink-0 ${
+                    importMode === 'append' ? 'border-blue-400 bg-blue-600' : 'border-slate-600'
+                  }`}
+                >
+                  {importMode === 'append' && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-white">Tambahkan data</div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">
+                    Data armada pada bulan yang sama ditambahkan tanpa menghapus armada lain.
+                  </div>
+                </div>
+              </div>
+
+              <div
+                onClick={() => setImportMode('replace')}
+                className={`p-3.5 rounded-xl border cursor-pointer transition flex items-start gap-3 ${
+                  importMode === 'replace'
+                    ? 'bg-blue-600/10 border-blue-500 text-white'
+                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                }`}
+              >
+                <div
+                  className={`w-4 h-4 rounded-full border flex items-center justify-center mt-0.5 shrink-0 ${
+                    importMode === 'replace' ? 'border-blue-400 bg-blue-600' : 'border-slate-600'
+                  }`}
+                >
+                  {importMode === 'replace' && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-white">Ganti data bulan ini</div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">
+                    Data lama periode sama dihapus lalu diimport ulang dengan file baru.
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Row 5: FILE UPLOAD DASHED BOX (Matching Image 2) */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] font-bold uppercase tracking-wider text-slate-300">
+                File Evaluasi GPS ({gpsPlatform === 'tracksolid' ? 'Tracksolid' : 'Wanway'})
+              </label>
+              <button
+                type="button"
+                onClick={handleDownloadTemplate}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-400 hover:text-blue-300 cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Unduh Template Excel</span>
+              </button>
+            </div>
+
+            <div className="border-2 border-dashed border-slate-800 rounded-2xl p-4 bg-slate-950/60 space-y-2.5">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                multiple={fleetScopeMode === 'multiple'}
+                onChange={e => {
+                  const files = Array.from(e.target.files || []);
+                  setStagedFiles(files);
+                }}
+                className="hidden"
+              />
+
+              <div className="flex items-center gap-3 bg-slate-900 border border-slate-800 rounded-xl p-2">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs transition cursor-pointer shrink-0"
+                >
+                  Choose File
+                </button>
+                <span className="text-xs text-slate-300 truncate">
+                  {stagedFiles.length > 0
+                    ? stagedFiles.map(f => f.name).join(', ')
+                    : 'No file chosen'}
+                </span>
+              </div>
+
+              <p className="text-[11px] text-slate-400">
+                Format didukung: .xls, .xlsx, .csv. Maksimal 10MB. Sistem akan memetakan track perjalanan armada di peta & menganalisa pemberhentian di pelanggan.
+              </p>
+            </div>
+          </div>
+
+          {/* Bottom Buttons (Matching Image 2: Preview Dulu & Lihat Riwayat Upload) */}
+          <div className="flex flex-wrap items-center gap-3 pt-2">
+            <button
+              type="button"
+              onClick={handleProcessUploadForm}
+              disabled={isProcessing}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shadow-sm transition cursor-pointer disabled:opacity-50"
+            >
+              <Search className="w-4 h-4" />
+              <span>{isProcessing ? 'Memproses Track GPS...' : 'Preview & Proses Rute'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowUploadHistory(prev => !prev)}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-200 border border-slate-800 font-bold text-xs transition cursor-pointer"
+            >
+              <History className="w-4 h-4 text-slate-400" />
+              <span>Lihat Riwayat Upload ({fleetEvaluations.length} Armada)</span>
+            </button>
+          </div>
+
+          {/* Collapsible Riwayat Upload */}
+          {showUploadHistory && (
+            <div className="pt-4 border-t border-slate-800 space-y-3">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                Riwayat Armada yang Telah Diunggah
+              </h4>
+              <div className="overflow-x-auto rounded-xl border border-slate-800">
+                <table className="w-full text-left text-xs text-slate-300">
+                  <thead className="bg-slate-950 text-[10px] uppercase font-bold text-slate-400 border-b border-slate-800">
+                    <tr>
+                      <th className="py-2.5 px-3">Armada</th>
+                      <th className="py-2.5 px-3">Platform</th>
+                      <th className="py-2.5 px-3">Periode</th>
+                      <th className="py-2.5 px-3">Total Ritase</th>
+                      <th className="py-2.5 px-3">Total Jarak</th>
+                      <th className="py-2.5 px-3 text-right">Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800">
+                    {fleetEvaluations.map(ev => (
+                      <tr key={ev.plateNumber} className="hover:bg-slate-800/40">
+                        <td className="py-2.5 px-3 font-bold text-white">
+                          {ev.plateNumber} {ev.initialCode ? `[${ev.initialCode}]` : ''}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <span className="px-2 py-0.5 rounded bg-blue-500/15 text-blue-300 border border-blue-500/30 text-[10px] font-bold uppercase">
+                            {ev.gpsPlatform || 'tracksolid'}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3">
+                          {ev.uploadedMonth || 'Oktober'} {ev.uploadedYear || '2026'}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono">
+                          {ev.bottomSummary?.trips || ev.tripLegs?.length || 0} Ritase
+                        </td>
+                        <td className="py-2.5 px-3 font-mono text-emerald-400 font-bold">
+                          {ev.totalDistanceKm} km
+                        </td>
+                        <td className="py-2.5 px-3 text-right">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedFleetPlate(ev.plateNumber || 'all');
+                              setViewMode('evaluation');
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-blue-600 text-white text-[10px] font-bold hover:bg-blue-500 cursor-pointer"
+                          >
+                            Buka Rute
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ============================================================================
+  // MAIN EVALUATION VIEW: MAP, DAILY FLEET BREAKDOWN & UNIFIED CUSTOMER STOPS
+  // ============================================================================
   return (
     <div className="space-y-5">
-      {/* Header bar with Excel Import & Template Download */}
+      {/* Top Header Bar */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-slate-900 border border-slate-800 rounded-2xl p-5">
         <div>
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-medium mb-1.5">
             <Truck className="w-3.5 h-3.5" />
-            <span>Evaluasi & Visualisasi Jalur Pengiriman (Import Excel Tracksolid)</span>
+            <span>Evaluasi Rute GPS Tracksolid & Wanway • Terintegrasi Jaringan Toko & Mitra</span>
           </div>
           <h2 className="text-xl font-bold text-white tracking-tight">
             Peta Rute GPS & Analisa Armada Kirim ke Pelanggan
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            Ekstraksi rute GPS, armada bergerak & berhenti, serta profil kecepatan baris bawah dari Excel Tracksolid. Terintegrasi langsung dengan database Jaringan Toko & Mitra.
+            Rincian perjalanan setiap armada (ritase, jarak tempuh, durasi per hari, rata-rata kecepatan harian, kecepatan maksimal) serta analisa berhenti di toko pelanggan vs berhenti lama non-mitra.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".xlsx,.xls,.csv"
-            onChange={handleFileUpload}
-            className="hidden"
-          />
-
           <button
             type="button"
-            onClick={handleDownloadTracksolidTemplate}
+            onClick={handleDownloadTemplate}
             className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs transition cursor-pointer"
-            title="Unduh Format Asli Trips Tracksolid (.xlsx)"
           >
             <Download className="w-4 h-4 text-blue-400" />
-            <span>Unduh Template Tracksolid</span>
+            <span>Unduh Template Excel</span>
           </button>
 
           <button
             type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isProcessing}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shadow-lg shadow-blue-600/25 transition cursor-pointer disabled:opacity-50"
+            onClick={() => setViewMode('upload_form')}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shadow-sm transition cursor-pointer"
           >
             <Upload className="w-4 h-4" />
-            <span>{isProcessing ? 'Memproses File...' : 'Unggah File Excel Tracksolid'}</span>
+            <span>Unggah File Excel (Tracksolid / Wanway)</span>
           </button>
 
           <button
             type="button"
-            onClick={handleExportDeliveryAnalysis}
+            onClick={handleExportUnifiedAnalysis}
             className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/30 font-semibold text-xs transition cursor-pointer"
           >
             <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
             <span>Ekspor Hasil Analisa</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setEvaluation(buildSampleEvaluation())}
-            className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
-            title="Reset ke Contoh 26 Ritase Bali Tracksolid"
-          >
-            <RefreshCw className="w-4 h-4" />
           </button>
         </div>
       </div>
@@ -1500,72 +2410,152 @@ export const ExcelTrackingEvaluator: React.FC = () => {
         </div>
       )}
 
-      {/* 6 Metric Cards Extracted DIRECTLY from Tracksolid Bottom Summary Rows */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-xl">
-          <div className="flex items-center justify-between text-slate-400 text-[11px] uppercase font-bold tracking-wider mb-1">
-            <span>Trips (Ritase)</span>
-            <Truck className="w-4 h-4 text-blue-400" />
+      {/* Fleet Selector Bar (When 1 or Multiple Fleets are Uploaded) */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Layers className="w-4 h-4 text-blue-400" />
+            <span className="text-xs font-bold text-white uppercase tracking-wider">
+              Spesifikasi Armada Terunggah ({fleetEvaluations.length} Unit Armada)
+            </span>
           </div>
-          <div className="text-2xl font-black text-white">{bottom.trips}</div>
-          <div className="text-[10px] text-slate-400 mt-0.5">Dari Baris Excel Bawah</div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {fleetEvaluations.length > 1 && (
+              <button
+                type="button"
+                onClick={() => setSelectedFleetPlate('all')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                  selectedFleetPlate === 'all'
+                    ? 'bg-blue-600 border-blue-500 text-white'
+                    : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-white'
+                }`}
+              >
+                Semua Armada ({fleetEvaluations.length})
+              </button>
+            )}
+            {fleetEvaluations.map(ev => (
+              <button
+                key={ev.plateNumber}
+                type="button"
+                onClick={() => setSelectedFleetPlate(ev.plateNumber || 'P 8381 VE')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition flex items-center gap-2 cursor-pointer ${
+                  selectedFleetPlate === ev.plateNumber
+                    ? 'bg-blue-600 border-blue-500 text-white'
+                    : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+                }`}
+              >
+                <Truck className="w-3.5 h-3.5" />
+                <span>{ev.plateNumber}</span>
+                {ev.initialCode && (
+                  <span className="px-1.5 py-0.5 rounded bg-slate-900/70 text-[10px] font-mono">
+                    {ev.initialCode}
+                  </span>
+                )}
+                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[9px] uppercase">
+                  {ev.gpsPlatform === 'wanway' ? 'Wanway' : 'Tracksolid'}
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-xl">
-          <div className="flex items-center justify-between text-slate-400 text-[11px] uppercase font-bold tracking-wider mb-1">
-            <span>Total Mileage</span>
-            <MapPin className="w-4 h-4 text-emerald-400" />
+        {/* 5 KPI Cards (NO FUEL CARD - With Daily Duration & Daily Avg Speed Breakdown) */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-1">
+          {/* Card 1: Trips */}
+          <div className="bg-slate-950 border border-slate-800 p-3.5 rounded-xl">
+            <div className="flex items-center justify-between text-slate-400 text-[11px] uppercase font-bold tracking-wider mb-1">
+              <span>Trips (Ritase)</span>
+              <Truck className="w-4 h-4 text-blue-400" />
+            </div>
+            <div className="text-2xl font-black text-white">{bottom.trips}</div>
+            <div className="text-[10px] text-slate-400 mt-1 space-y-0.5">
+              {subtotals.slice(0, 2).map(st => (
+                <div key={st.dateGroup} className="flex items-center justify-between">
+                  <span>{st.dateGroup}:</span>
+                  <strong className="text-slate-200">{st.tripCount} ritase</strong>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="text-2xl font-black text-white">
-            {bottom.totalMileageKm} <span className="text-xs font-normal text-slate-400">km</span>
-          </div>
-          <div className="text-[10px] text-slate-400 mt-0.5">Jarak Akumulasi</div>
-        </div>
 
-        <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-xl">
-          <div className="flex items-center justify-between text-slate-400 text-[11px] uppercase font-bold tracking-wider mb-1">
-            <span>Duration</span>
-            <Clock className="w-4 h-4 text-amber-400" />
+          {/* Card 2: Total KM */}
+          <div className="bg-slate-950 border border-slate-800 p-3.5 rounded-xl">
+            <div className="flex items-center justify-between text-slate-400 text-[11px] uppercase font-bold tracking-wider mb-1">
+              <span>Total KM</span>
+              <MapPin className="w-4 h-4 text-emerald-400" />
+            </div>
+            <div className="text-2xl font-black text-emerald-400">
+              {bottom.totalMileageKm} <span className="text-xs font-normal text-slate-400">km</span>
+            </div>
+            <div className="text-[10px] text-slate-400 mt-1 space-y-0.5">
+              {subtotals.slice(0, 2).map(st => (
+                <div key={st.dateGroup} className="flex items-center justify-between">
+                  <span>{st.dateGroup}:</span>
+                  <strong className="text-emerald-300">{st.totalMileageKm} km</strong>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="text-xl font-black text-white font-mono">{bottom.duration}</div>
-          <div className="text-[10px] text-slate-400 mt-0.5">Waktu Tempuh Perjalanan</div>
-        </div>
 
-        <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-xl">
-          <div className="flex items-center justify-between text-slate-400 text-[11px] uppercase font-bold tracking-wider mb-1">
-            <span>Average Speed</span>
-            <Gauge className="w-4 h-4 text-blue-400" />
+          {/* Card 3: Durasi Per Hari */}
+          <div className="bg-slate-950 border border-slate-800 p-3.5 rounded-xl">
+            <div className="flex items-center justify-between text-slate-400 text-[11px] uppercase font-bold tracking-wider mb-1">
+              <span>Durasi Per Hari</span>
+              <Clock className="w-4 h-4 text-amber-400" />
+            </div>
+            <div className="text-xl font-black text-white font-mono">{bottom.duration}</div>
+            <div className="text-[10px] text-slate-400 mt-1 space-y-0.5">
+              {subtotals.slice(0, 2).map(st => (
+                <div key={st.dateGroup} className="flex items-center justify-between">
+                  <span>{st.dateGroup}:</span>
+                  <strong className="text-amber-300 font-mono">{st.travelTime}</strong>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="text-2xl font-black text-white">
-            {bottom.avgSpeedKmh} <span className="text-xs font-normal text-slate-400">km/h</span>
-          </div>
-          <div className="text-[10px] text-slate-400 mt-0.5">Kecepatan Rata-Rata</div>
-        </div>
 
-        <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-xl">
-          <div className="flex items-center justify-between text-slate-400 text-[11px] uppercase font-bold tracking-wider mb-1">
-            <span>Max. Speed</span>
-            <TrendingUp className="w-4 h-4 text-rose-400" />
+          {/* Card 4: Rata-Rata Kecepatan Per Hari */}
+          <div className="bg-slate-950 border border-slate-800 p-3.5 rounded-xl">
+            <div className="flex items-center justify-between text-slate-400 text-[11px] uppercase font-bold tracking-wider mb-1">
+              <span>Rata-Rata Kecepatan</span>
+              <Gauge className="w-4 h-4 text-blue-400" />
+            </div>
+            <div className="text-2xl font-black text-white">
+              {bottom.avgSpeedKmh} <span className="text-xs font-normal text-slate-400">km/h</span>
+            </div>
+            <div className="text-[10px] text-slate-400 mt-1 space-y-0.5">
+              {subtotals.slice(0, 2).map(st => (
+                <div key={st.dateGroup} className="flex items-center justify-between">
+                  <span>{st.dateGroup}:</span>
+                  <strong className="text-blue-300">{st.avgSpeedKmh} km/h</strong>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="text-2xl font-black text-rose-300">
-            {bottom.maxSpeedKmh} <span className="text-xs font-normal text-slate-400">km/h</span>
-          </div>
-          <div className="text-[10px] text-slate-400 mt-0.5">Kecepatan Tertinggi</div>
-        </div>
 
-        <div className="bg-slate-900 border border-slate-800 p-3.5 rounded-xl">
-          <div className="flex items-center justify-between text-slate-400 text-[11px] uppercase font-bold tracking-wider mb-1">
-            <span>Total Fuel</span>
-            <Fuel className="w-4 h-4 text-purple-400" />
+          {/* Card 5: Kecepatan Maksimal */}
+          <div className="bg-slate-950 border border-slate-800 p-3.5 rounded-xl">
+            <div className="flex items-center justify-between text-slate-400 text-[11px] uppercase font-bold tracking-wider mb-1">
+              <span>Kecepatan Maksimal</span>
+              <TrendingUp className="w-4 h-4 text-rose-400" />
+            </div>
+            <div className="text-2xl font-black text-rose-300">
+              {bottom.maxSpeedKmh} <span className="text-xs font-normal text-slate-400">km/h</span>
+            </div>
+            <div className="text-[10px] text-slate-400 mt-1 space-y-0.5">
+              {subtotals.slice(0, 2).map(st => (
+                <div key={st.dateGroup} className="flex items-center justify-between">
+                  <span>{st.dateGroup}:</span>
+                  <strong className="text-rose-300">{st.maxSpeedKmh} km/h</strong>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="text-2xl font-black text-white">
-            {bottom.totalFuelConsumptionLiters} <span className="text-xs font-normal text-slate-400">L</span>
-          </div>
-          <div className="text-[10px] text-slate-400 mt-0.5">Total Konsumsi BBM</div>
         </div>
       </div>
 
-      {/* Tabs Navigation */}
+      {/* Tabs Navigation (NO Trips_Tracksolid_... text on the right!) */}
       <div className="flex items-center justify-between border-b border-slate-800 pb-1">
         <div className="flex items-center gap-2 overflow-x-auto">
           <button
@@ -1573,25 +2563,30 @@ export const ExcelTrackingEvaluator: React.FC = () => {
             onClick={() => setActiveTab('map')}
             className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
               activeTab === 'map'
-                ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25'
+                ? 'bg-blue-600 text-white shadow-sm'
                 : 'text-slate-400 hover:text-white hover:bg-slate-800'
             }`}
           >
             <MapPin className="w-3.5 h-3.5" />
-            <span>Peta Visualisasi Rute GPS & Pelanggan Dikunjungi</span>
+            <span>Peta Rute GPS & Rincian Harian Armada</span>
           </button>
 
           <button
             type="button"
-            onClick={() => setActiveTab('moving_stopped')}
+            onClick={() => setActiveTab('unified_stops_customer')}
             className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
-              activeTab === 'moving_stopped'
-                ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25'
+              activeTab === 'unified_stops_customer'
+                ? 'bg-blue-600 text-white shadow-sm'
                 : 'text-slate-400 hover:text-white hover:bg-slate-800'
             }`}
           >
-            <Truck className="w-3.5 h-3.5" />
-            <span>Armada Bergerak & Berhenti (Data Excel)</span>
+            <Store className="w-3.5 h-3.5" />
+            <span>Armada Bergerak, Berhenti & Analisa Kirim Pelanggan</span>
+            {unifiedStats.longNonCustomerCount > 0 && (
+              <span className="px-1.5 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-black">
+                {unifiedStats.longNonCustomerCount} Non-Mitra
+              </span>
+            )}
           </button>
 
           <button
@@ -1599,176 +2594,430 @@ export const ExcelTrackingEvaluator: React.FC = () => {
             onClick={() => setActiveTab('speed_summary')}
             className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
               activeTab === 'speed_summary'
-                ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25'
+                ? 'bg-blue-600 text-white shadow-sm'
                 : 'text-slate-400 hover:text-white hover:bg-slate-800'
             }`}
           >
             <Gauge className="w-3.5 h-3.5" />
-            <span>Profil Kecepatan & Ringkasan Bawah Excel</span>
+            <span>Profil Kecepatan & Rekapitulasi Per Hari</span>
           </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('customer_integration')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
-              activeTab === 'customer_integration'
-                ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/25'
-                : 'text-emerald-400 hover:text-white hover:bg-slate-800'
-            }`}
-          >
-            <Store className="w-3.5 h-3.5" />
-            <span>Analisa Kirim ke Pelanggan (Jaringan Toko & Mitra)</span>
-          </button>
-        </div>
-
-        <div className="hidden sm:flex items-center gap-2 text-xs text-slate-400">
-          <span className="font-mono text-slate-300 font-bold">{evaluation.fileName}</span>
         </div>
       </div>
 
-      {/* TAB 1: PETA VISUALISASI RUTE GPS & PELANGGAN DIKUNJUNGI */}
+      {/* ======================================================================
+          TAB 1: PETA VISUALISASI RUTE GPS & RINCIAN HARIAN SETIAP ARMADA
+         ====================================================================== */}
       {activeTab === 'map' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-3 pb-2 border-b border-slate-800">
-            <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-              <h3 className="text-sm font-bold text-white">
-                Rute Aktual GPS Perjalanan Armada ({evaluation.points.length} Koordinat Waypoint & {evaluation.stops.length} Titik Berhenti)
-              </h3>
+        <div className="space-y-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-2 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
+                <h3 className="text-sm font-bold text-white">
+                  Track Rute Aktual GPS Armada: {activeEvaluation?.plateNumber} (
+                  {activeEvaluation?.points.length || 0} Titik Track & {activeEvaluation?.stops.length || 0} Titik Berhenti)
+                </h3>
+              </div>
+              <div className="flex flex-wrap items-center gap-3 text-xs text-slate-300">
+                <span className="flex items-center gap-1.5 font-semibold text-emerald-400">
+                  <span className="w-3 h-3 rounded-full bg-emerald-600 border border-white" /> Berhenti di Toko Mitra
+                </span>
+                <span className="flex items-center gap-1.5 font-semibold text-rose-400">
+                  <span className="w-3 h-3 rounded-full bg-rose-600 border border-amber-300" /> ⚠️ Berhenti Lama Non-Mitra
+                </span>
+                <span className="flex items-center gap-1.5 font-semibold text-blue-400">
+                  <span className="w-3 h-3 rounded-full bg-blue-600 border border-white" /> Dalam Kota (Biru)
+                </span>
+                <span className="flex items-center gap-1.5 font-semibold text-amber-300">
+                  <span className="w-3 h-3 rounded-full bg-amber-400 border border-slate-900" /> Luar Kota (Kuning)
+                </span>
+              </div>
             </div>
-            <div className="flex flex-wrap items-center gap-3 text-xs text-slate-300">
-              <span className="flex items-center gap-1.5 font-semibold text-blue-400">
-                <span className="w-3 h-3 rounded-full bg-blue-600 border border-white" /> Dalam Kota = Biru
-              </span>
-              <span className="flex items-center gap-1.5 font-semibold text-amber-300">
-                <span className="w-3 h-3 rounded-full bg-amber-400 border border-slate-900" /> Luar Kota = Kuning
-              </span>
-              <span className="flex items-center gap-1.5 font-semibold text-emerald-400">
-                <span className="w-3 h-3 rounded-full bg-emerald-500 border border-white" /> Luar Pulau = Hijau
-              </span>
+
+            <div className="h-[540px] rounded-xl overflow-hidden relative border border-slate-800">
+              <LeafletMap
+                stores={registeredStores}
+                trackingPoints={activeEvaluation?.points || []}
+                stops={activeEvaluation?.stops || []}
+                showWarehouse={true}
+              />
             </div>
           </div>
 
-          <div className="h-[560px] rounded-xl overflow-hidden relative border border-slate-800">
-            <LeafletMap
-              stores={registeredStores}
-              trackingPoints={evaluation.points}
-              stops={evaluation.stops}
-              showWarehouse={true}
-            />
+          {/* Rincian Setiap Armada & Per Hari Table (No Fuel!) */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-white">
+                  Rincian Performa Setiap Armada & Per Hari
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Rekapitulasi trips, total km, durasi per hari, rata-rata kecepatan per hari, dan kecepatan maksimal dari track armada yang diunggah.
+                </p>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto rounded-xl border border-slate-800">
+              <table className="w-full text-left text-xs text-slate-300">
+                <thead className="bg-slate-950 text-[11px] uppercase font-bold text-slate-400 border-b border-slate-800">
+                  <tr>
+                    <th className="py-3 px-4">Armada</th>
+                    <th className="py-3 px-3">Platform GPS</th>
+                    <th className="py-3 px-3">Tanggal (Hari)</th>
+                    <th className="py-3 px-3 text-right">Trips (Ritase)</th>
+                    <th className="py-3 px-3 text-right">Total KM</th>
+                    <th className="py-3 px-3">Durasi Per Hari</th>
+                    <th className="py-3 px-3 text-right">Rata-Rata Kecepatan / Hari</th>
+                    <th className="py-3 px-3 text-right">Kecepatan Maksimal</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800">
+                  {fleetEvaluations.flatMap(ev =>
+                    (ev.dateSubtotals || []).map(ds => (
+                      <tr key={`${ev.plateNumber}-${ds.dateGroup}`} className="hover:bg-slate-800/40">
+                        <td className="py-3 px-4 font-bold text-white">
+                          {ev.plateNumber}{' '}
+                          {ev.initialCode && (
+                            <span className="text-[10px] font-mono text-blue-400">[{ev.initialCode}]</span>
+                          )}
+                        </td>
+                        <td className="py-3 px-3">
+                          <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-200 text-[10px] font-semibold uppercase">
+                            {ev.gpsPlatform === 'wanway' ? 'Wanway' : 'Tracksolid'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 font-mono font-semibold text-slate-200">{ds.dateGroup}</td>
+                        <td className="py-3 px-3 font-mono text-right font-bold text-white">
+                          {ds.tripCount} Ritase
+                        </td>
+                        <td className="py-3 px-3 font-mono text-right font-bold text-emerald-400">
+                          {ds.totalMileageKm.toFixed(2)} km
+                        </td>
+                        <td className="py-3 px-3 font-mono font-bold text-amber-300">{ds.travelTime}</td>
+                        <td className="py-3 px-3 font-mono text-right font-bold text-blue-300">
+                          {ds.avgSpeedKmh.toFixed(2)} km/h
+                        </td>
+                        <td className="py-3 px-3 font-mono text-right font-bold text-rose-300">
+                          {ds.maxSpeedKmh.toFixed(2)} km/h
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
 
-      {/* TAB 2: ARMADA BERGERAK & BERHENTI (DATA EXCEL TRACKSOLID) */}
-      {activeTab === 'moving_stopped' && (
+      {/* ======================================================================
+          TAB 2: UNIFIED ARMADA BERGERAK, BERHENTI & ANALISA KIRIM KE PELANGGAN
+         ====================================================================== */}
+      {activeTab === 'unified_stops_customer' && (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+          {/* Header & Summary Badges */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-3 border-b border-slate-800">
             <div>
-              <h3 className="text-base font-bold text-white">Tabel Analisis Armada Bergerak & Berhenti</h3>
+              <h3 className="text-base font-bold text-white">
+                Analisa Terpadu: Armada Bergerak, Berhenti & Kirim ke Pelanggan (Jaringan Toko & Mitra)
+              </h3>
               <p className="text-xs text-slate-400 mt-0.5">
-                Rincian setiap ritase bergerak (Start Location &rarr; End Location) dan jeda waktu berhenti (bongkar di pelanggan / antre ferry).
+                Mencocokkan setiap titik berhenti armada dengan database Jaringan Toko & Mitra. Jika armada berhenti lama (&ge; 15 menit) tetapi tidak berada di toko pelanggan, sistem memberikan penanda peringatan khusus.
               </p>
             </div>
-            <div className="flex items-center gap-2">
+
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative w-60">
+                <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Cari nama toko, kecamatan, lokasi..."
+                  value={searchFilter}
+                  onChange={e => setSearchFilter(e.target.value)}
+                  className="w-full pl-8 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
               <select
                 value={selectedDateGroup}
                 onChange={e => setSelectedDateGroup(e.target.value)}
                 className="bg-slate-950 border border-slate-800 text-xs text-slate-300 font-semibold px-3 py-2 rounded-xl focus:outline-none"
               >
-                <option value="all">Semua Tanggal ({DEFAULT_TRACKSOLID_DATE_SUBTOTALS.length} Hari)</option>
-                {DEFAULT_TRACKSOLID_DATE_SUBTOTALS.map(ds => (
+                <option value="all">Semua Tanggal ({subtotals.length} Hari)</option>
+                {subtotals.map(ds => (
                   <option key={ds.dateGroup} value={ds.dateGroup}>
-                    {ds.dateGroup} ({ds.tripCount} Ritase • {ds.totalMileageKm} km)
+                    {ds.dateGroup} ({ds.tripCount} Ritase)
                   </option>
                 ))}
               </select>
             </div>
           </div>
 
+          {/* Filter Pills for Customer Store vs Long Non-Customer Stop */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div
+              onClick={() => setActivityFilter('all')}
+              className={`p-3 rounded-xl border cursor-pointer transition flex items-center justify-between ${
+                activityFilter === 'all'
+                  ? 'bg-blue-600/15 border-blue-500 text-white'
+                  : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+              }`}
+            >
+              <div>
+                <div className="text-xs font-bold text-white">Semua Aktivitas Bergerak & Berhenti</div>
+                <div className="text-[10px] text-slate-400">Seluruh ritase perjalanan armada</div>
+              </div>
+              <span className="text-lg font-black text-blue-400">{unifiedStats.totalLegs}</span>
+            </div>
+
+            <div
+              onClick={() => setActivityFilter('customer_stop')}
+              className={`p-3 rounded-xl border cursor-pointer transition flex items-center justify-between ${
+                activityFilter === 'customer_stop'
+                  ? 'bg-emerald-600/15 border-emerald-500 text-white'
+                  : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+              }`}
+            >
+              <div>
+                <div className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Berhenti di Toko Pelanggan (Mitra)</span>
+                </div>
+                <div className="text-[10px] text-slate-400">Terverifikasi di Jaringan Toko & Mitra</div>
+              </div>
+              <span className="text-lg font-black text-emerald-400">{unifiedStats.customerStopsCount}</span>
+            </div>
+
+            <div
+              onClick={() => setActivityFilter('long_non_customer')}
+              className={`p-3 rounded-xl border cursor-pointer transition flex items-center justify-between ${
+                activityFilter === 'long_non_customer'
+                  ? 'bg-rose-600/20 border-rose-500 text-white'
+                  : 'bg-slate-950 border-rose-500/30 text-slate-300 hover:border-rose-500'
+              }`}
+            >
+              <div>
+                <div className="text-xs font-bold text-rose-300 flex items-center gap-1.5">
+                  <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
+                  <span>⚠️ Berhenti Lama Bukan di Toko (Non-Mitra)</span>
+                </div>
+                <div className="text-[10px] text-rose-300/80">Stop &ge; 15 menit di luar toko pelanggan</div>
+              </div>
+              <span className="text-lg font-black text-rose-400">{unifiedStats.longNonCustomerCount}</span>
+            </div>
+          </div>
+
+          {/* Unified Table */}
           <div className="overflow-x-auto rounded-xl border border-slate-800">
             <table className="w-full text-left text-xs text-slate-300">
-              <thead className="bg-slate-950/80 text-[11px] uppercase font-bold text-slate-400 border-b border-slate-800">
+              <thead className="bg-slate-950/90 text-[11px] uppercase font-bold text-slate-400 border-b border-slate-800">
                 <tr>
-                  <th className="py-3 px-3">Ritase</th>
-                  <th className="py-3 px-3">Status Armada</th>
-                  <th className="py-3 px-3">Waktu Mulai</th>
-                  <th className="py-3 px-4">Lokasi Keberangkatan (Start)</th>
-                  <th className="py-3 px-3">Waktu Selesai</th>
-                  <th className="py-3 px-4">Lokasi Kedatangan (End)</th>
-                  <th className="py-3 px-3 text-right">Jarak (km)</th>
-                  <th className="py-3 px-3">Durasi Gerak</th>
-                  <th className="py-3 px-3 text-right">Rata-Rata</th>
-                  <th className="py-3 px-3 text-right">Maks</th>
-                  <th className="py-3 px-3">Jeda Berhenti</th>
+                  <th className="py-3 px-3">Ritase & Armada</th>
+                  <th className="py-3 px-3">Status Gerak & Berhenti</th>
+                  <th className="py-3 px-3">Berhenti Berapa Lama</th>
+                  <th className="py-3 px-4">Toko Pelanggan (Jaringan Mitra) / Lokasi Stop</th>
+                  <th className="py-3 px-3">Wilayah</th>
+                  <th className="py-3 px-4">Rute Perjalanan (Start &rarr; End)</th>
+                  <th className="py-3 px-3 text-right">Jarak & Durasi Gerak</th>
+                  <th className="py-3 px-3 text-right">Kecepatan</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/80">
-                {(evaluation.tripLegs || [])
-                  .filter(l => selectedDateGroup === 'all' || l.dateGroup === selectedDateGroup)
-                  .map(leg => (
-                    <tr key={leg.legNumber} className="hover:bg-slate-800/40 transition">
-                      <td className="py-3 px-3 font-mono font-bold text-white">#{leg.legNumber}</td>
+                {filteredUnifiedRows.map(item => {
+                  const isLongNonCustomer = item.stopCategory === 'long_non_customer';
+                  const isCustomer = item.stopCategory === 'customer_store';
+                  const isDalamKota = item.regionType === 'dalam_kota';
+                  const isLuarKota = item.regionType === 'luar_kota';
+                  const isLuarPulau = item.regionType === 'luar_pulau';
+
+                  return (
+                    <tr
+                      key={item.id}
+                      className={`transition ${
+                        isLongNonCustomer
+                          ? 'bg-rose-950/25 hover:bg-rose-950/40 border-l-4 border-l-rose-500'
+                          : 'hover:bg-slate-800/40'
+                      }`}
+                    >
+                      {/* Col 1: Ritase & Armada */}
                       <td className="py-3 px-3">
-                        <span className="px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-300 border border-blue-500/30 font-bold text-[10px] inline-flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-blue-400" /> Bergerak
-                        </span>
+                        <div className="font-mono font-bold text-white">#{item.legNumber}</div>
+                        <div className="text-[10px] font-semibold text-blue-400">{item.fleetPlate}</div>
+                        <div className="text-[10px] text-slate-500 font-mono">{item.dateGroup}</div>
                       </td>
-                      <td className="py-3 px-3 font-mono text-slate-200">
-                        <div className="font-bold">{leg.startTime}</div>
-                        <div className="text-[10px] text-slate-500">{leg.dateGroup}</div>
-                      </td>
-                      <td className="py-3 px-4 max-w-xs truncate" title={leg.startLocation}>
-                        <div className="font-semibold text-white truncate">{leg.startLocation.split(',')[0]}</div>
-                        <div className="text-[10px] text-slate-400 truncate">{leg.startLocation}</div>
-                      </td>
-                      <td className="py-3 px-3 font-mono text-slate-200">
-                        <div className="font-bold">{leg.endTime}</div>
-                        <div className="text-[10px] text-slate-500">{leg.dateGroup}</div>
-                      </td>
-                      <td className="py-3 px-4 max-w-xs truncate" title={leg.endLocation}>
-                        <div className="font-semibold text-white truncate">{leg.endLocation.split(',')[0]}</div>
-                        <div className="text-[10px] text-slate-400 truncate">{leg.endLocation}</div>
-                      </td>
-                      <td className="py-3 px-3 font-mono text-right font-bold text-emerald-400">{leg.mileageKm.toFixed(2)}</td>
-                      <td className="py-3 px-3 font-mono text-slate-300">{leg.travelTime}</td>
-                      <td className="py-3 px-3 font-mono text-right">{leg.avgSpeedKmh.toFixed(1)} km/h</td>
-                      <td className="py-3 px-3 font-mono text-right text-rose-300 font-semibold">{leg.maxSpeedKmh.toFixed(1)} km/h</td>
+
+                      {/* Col 2: Status Gerak & Berhenti (Distinct Badge for Non-Customer Long Stop!) */}
                       <td className="py-3 px-3">
-                        {leg.stopBeforeMinutes && leg.stopBeforeMinutes > 0 ? (
-                          <span className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 text-[10px] font-bold inline-flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            {leg.stopBeforeMinutes} Menit
+                        <div className="space-y-1">
+                          <span className="px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-300 border border-blue-500/25 font-semibold text-[10px] inline-flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-400" /> Bergerak ({item.startTime.slice(0, 5)} - {item.endTime.slice(0, 5)})
                           </span>
+
+                          {isCustomer && (
+                            <div>
+                              <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-bold text-[10px] inline-flex items-center gap-1">
+                                <Store className="w-3 h-3 text-emerald-400" />
+                                Berhenti di Toko Pelanggan
+                              </span>
+                            </div>
+                          )}
+
+                          {isLongNonCustomer && (
+                            <div>
+                              <span className="px-2 py-1 rounded-lg bg-rose-600 text-white border border-amber-300 font-black text-[10px] inline-flex items-center gap-1 shadow-xs">
+                                <AlertTriangle className="w-3 h-3 text-amber-200 shrink-0" />
+                                BERHENTI LAMA BUKAN TOKO MITRA
+                              </span>
+                            </div>
+                          )}
+
+                          {item.stopCategory === 'short_transit' && (
+                            <div>
+                              <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 font-semibold text-[10px] inline-flex items-center gap-1">
+                                <Clock className="w-3 h-3 text-slate-400" />
+                                Transit Singkat Non-Toko
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* Col 3: Berhenti Berapa Lama */}
+                      <td className="py-3 px-3">
+                        {item.stopDurationMinutes > 0 ? (
+                          <div className="space-y-0.5">
+                            <span
+                              className={`px-2.5 py-1 rounded-lg font-mono font-black text-xs inline-flex items-center gap-1.5 border ${
+                                isLongNonCustomer
+                                  ? 'bg-rose-500/20 text-rose-300 border-rose-500/50'
+                                  : isCustomer
+                                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                                  : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                              }`}
+                            >
+                              <Clock className="w-3.5 h-3.5" />
+                              {item.stopDurationMinutes} Menit
+                            </span>
+                            <div className="text-[10px] text-slate-400 font-mono">
+                              {item.stopStart.slice(0, 5)} s/d {item.stopEnd.slice(0, 5)}
+                            </div>
+                          </div>
                         ) : (
-                          <span className="text-slate-600 text-[10px]">-</span>
+                          <span className="text-slate-500 text-[11px]">Langsung Jalan</span>
                         )}
                       </td>
+
+                      {/* Col 4: Toko Pelanggan / Lokasi Non-Mitra */}
+                      <td className="py-3 px-4 max-w-xs">
+                        {isCustomer ? (
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              {item.nomorToko !== '-' && (
+                                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-200 font-mono text-[10px] font-bold">
+                                  No. {item.nomorToko}
+                                </span>
+                              )}
+                              <span className="font-bold text-white text-xs">{item.namaTokoAtauLokasi}</span>
+                            </div>
+                            <div className="text-[10px] text-slate-400 mt-0.5">
+                              Kec. {item.kecamatan}, Kab. {item.kabupaten}
+                            </div>
+                          </div>
+                        ) : isLongNonCustomer ? (
+                          <div>
+                            <div className="font-bold text-rose-300 text-xs flex items-center gap-1">
+                              <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                              <span>Tidak Terdaftar di Jaringan Toko & Mitra</span>
+                            </div>
+                            <div className="text-[11px] text-slate-200 font-semibold mt-0.5 truncate" title={item.startLocation}>
+                              Lokasi: {item.startLocation}
+                            </div>
+                            <div className="text-[10px] text-rose-300/80 mt-0.5">
+                              Armada berhenti {item.stopDurationMinutes} menit di luar titik pelanggan
+                            </div>
+                          </div>
+                        ) : (
+                          <div>
+                            <div className="font-semibold text-slate-200 text-xs">{item.namaTokoAtauLokasi}</div>
+                            <div className="text-[10px] text-slate-400 truncate max-w-[240px]">
+                              {item.startLocation}
+                            </div>
+                          </div>
+                        )}
+                      </td>
+
+                      {/* Col 5: Wilayah (Biru / Kuning / Hijau) */}
+                      <td className="py-3 px-3">
+                        {isDalamKota && (
+                          <span className="px-2 py-0.5 rounded-full bg-blue-600/20 text-blue-300 border border-blue-500/40 font-bold text-[10px] inline-flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500" /> Dalam Kota
+                          </span>
+                        )}
+                        {isLuarKota && (
+                          <span className="px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/50 font-bold text-[10px] inline-flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> Luar Kota
+                          </span>
+                        )}
+                        {isLuarPulau && (
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold text-[10px] inline-flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Luar Pulau
+                          </span>
+                        )}
+                      </td>
+
+                      {/* Col 6: Rute Perjalanan */}
+                      <td className="py-3 px-4 max-w-xs">
+                        <div className="text-[11px] text-slate-200 truncate" title={item.startLocation}>
+                          <span className="text-slate-500">Dari:</span> {item.startLocation.split(',')[0]}
+                        </div>
+                        <div className="text-[11px] text-emerald-300 truncate mt-0.5" title={item.endLocation}>
+                          <span className="text-slate-500">Ke:</span> {item.endLocation.split(',')[0]}
+                        </div>
+                      </td>
+
+                      {/* Col 7: Jarak & Durasi Gerak */}
+                      <td className="py-3 px-3 text-right font-mono">
+                        <div className="font-bold text-emerald-400">{item.mileageKm.toFixed(2)} km</div>
+                        <div className="text-[10px] text-slate-400">{item.travelTime}</div>
+                      </td>
+
+                      {/* Col 8: Kecepatan */}
+                      <td className="py-3 px-3 text-right font-mono">
+                        <div className="text-slate-200">Avg: {item.avgSpeedKmh.toFixed(1)}</div>
+                        <div className="text-[10px] text-rose-300 font-semibold">
+                          Max: {item.maxSpeedKmh.toFixed(1)} km/h
+                        </div>
+                      </td>
                     </tr>
-                  ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
         </div>
       )}
 
-      {/* TAB 3: PROFIL KECEPATAN & RINGKASAN BAWAH EXCEL */}
+      {/* ======================================================================
+          TAB 3: PROFIL KECEPATAN & REKAPITULASI PER HARI (NO FUEL)
+         ====================================================================== */}
       {activeTab === 'speed_summary' && (
         <div className="space-y-5">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
               <div>
-                <h3 className="text-base font-bold text-white">Grafik Profil Kecepatan Tiap Ritase (Data Excel Tracksolid)</h3>
+                <h3 className="text-base font-bold text-white">
+                  Grafik Profil Kecepatan Perjalanan Armada ({activeEvaluation?.plateNumber})
+                </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Visualisasi perbandingan Kecepatan Rata-Rata (Average Speed) dan Kecepatan Maksimum (Max Speed) per leg perjalanan.
+                  Perbandingan kecepatan rata-rata dan kecepatan maksimal per ritase perjalanan.
                 </p>
               </div>
               <div className="flex items-center gap-3 text-xs">
                 <span className="flex items-center gap-1.5 font-bold text-blue-400">
-                  <span className="w-3 h-3 rounded-full bg-blue-500" /> Avg Speed (km/h)
+                  <span className="w-3 h-3 rounded-full bg-blue-500" /> Rata-Rata Kecepatan (km/h)
                 </span>
                 <span className="flex items-center gap-1.5 font-bold text-rose-400">
-                  <span className="w-3 h-3 rounded-full bg-rose-500" /> Max Speed (km/h)
+                  <span className="w-3 h-3 rounded-full bg-rose-500" /> Kecepatan Maksimal (km/h)
                 </span>
               </div>
             </div>
@@ -1778,11 +3027,11 @@ export const ExcelTrackingEvaluator: React.FC = () => {
                 <AreaChart data={speedChartData} margin={{ top: 10, right: 20, left: -10, bottom: 0 }}>
                   <defs>
                     <linearGradient id="avgSpeedGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4} />
+                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.35} />
                       <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.0} />
                     </linearGradient>
                     <linearGradient id="maxSpeedGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.3} />
+                      <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.25} />
                       <stop offset="95%" stopColor="#f43f5e" stopOpacity={0.0} />
                     </linearGradient>
                   </defs>
@@ -1790,41 +3039,72 @@ export const ExcelTrackingEvaluator: React.FC = () => {
                   <XAxis dataKey="name" stroke="#64748b" tick={{ fontSize: 10 }} />
                   <YAxis stroke="#64748b" tick={{ fontSize: 10 }} unit=" km/h" />
                   <Tooltip
-                    contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '0.75rem', fontSize: '11px' }}
+                    contentStyle={{
+                      backgroundColor: '#0f172a',
+                      borderColor: '#334155',
+                      borderRadius: '0.75rem',
+                      fontSize: '11px'
+                    }}
                     labelStyle={{ color: '#ffffff', fontWeight: 'bold' }}
                   />
-                  <Area type="monotone" dataKey="avgSpeed" stroke="#3b82f6" strokeWidth={2.5} fillOpacity={1} fill="url(#avgSpeedGrad)" name="Kecepatan Rata-Rata" />
-                  <Area type="monotone" dataKey="maxSpeed" stroke="#f43f5e" strokeWidth={2} strokeDasharray="4 4" fillOpacity={1} fill="url(#maxSpeedGrad)" name="Kecepatan Maksimum" />
+                  <Area
+                    type="monotone"
+                    dataKey="avgSpeed"
+                    stroke="#3b82f6"
+                    strokeWidth={2.5}
+                    fillOpacity={1}
+                    fill="url(#avgSpeedGrad)"
+                    name="Rata-Rata Kecepatan"
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="maxSpeed"
+                    stroke="#f43f5e"
+                    strokeWidth={2}
+                    strokeDasharray="4 4"
+                    fillOpacity={1}
+                    fill="url(#maxSpeedGrad)"
+                    name="Kecepatan Maksimal"
+                  />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
           </div>
 
-          {/* Subtotal Tanggal & Baris Bawah Rekapitulasi */}
+          {/* Subtotal Per Hari & Rekapitulasi Baris Bawah Excel (Tanpa Fuel) */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
-              <h4 className="text-sm font-bold text-white uppercase tracking-wider text-slate-400">
-                Subtotal Pertanggal dari File Excel
+              <h4 className="text-sm font-bold text-slate-300 uppercase tracking-wider">
+                Rincian Per Hari (Trips, KM, Durasi Harian & Kecepatan Harian)
               </h4>
               <div className="space-y-2.5">
-                {(evaluation.dateSubtotals || DEFAULT_TRACKSOLID_DATE_SUBTOTALS).map(st => (
-                  <div key={st.dateGroup} className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 flex items-center justify-between">
+                {subtotals.map(st => (
+                  <div
+                    key={st.dateGroup}
+                    className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 flex items-center justify-between"
+                  >
                     <div>
                       <div className="text-xs font-bold text-white flex items-center gap-2">
                         <span>Tanggal: {st.dateGroup}</span>
                         <span className="px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 font-mono text-[10px]">
-                          {st.tripCount} Ritase
+                          {st.tripCount} Trips
                         </span>
                       </div>
-                      <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-3">
-                        <span>Waktu Tempuh: <strong className="text-slate-200">{st.travelTime}</strong></span>
-                        <span>Avg: <strong className="text-blue-400">{st.avgSpeedKmh} km/h</strong></span>
-                        <span>Max: <strong className="text-rose-400">{st.maxSpeedKmh} km/h</strong></span>
+                      <div className="text-[11px] text-slate-400 mt-1 flex flex-wrap items-center gap-3">
+                        <span>
+                          Durasi Hari Ini: <strong className="text-amber-300 font-mono">{st.travelTime}</strong>
+                        </span>
+                        <span>
+                          Rata-Rata Kecepatan: <strong className="text-blue-400">{st.avgSpeedKmh} km/h</strong>
+                        </span>
+                        <span>
+                          Kecepatan Maks: <strong className="text-rose-400">{st.maxSpeedKmh} km/h</strong>
+                        </span>
                       </div>
                     </div>
                     <div className="text-right">
                       <div className="text-lg font-black text-emerald-400">{st.totalMileageKm} km</div>
-                      <div className="text-[10px] text-slate-500">Subtotal Mileage</div>
+                      <div className="text-[10px] text-slate-500">Total KM Harian</div>
                     </div>
                   </div>
                 ))}
@@ -1832,161 +3112,32 @@ export const ExcelTrackingEvaluator: React.FC = () => {
             </div>
 
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
-              <h4 className="text-sm font-bold text-white uppercase tracking-wider text-slate-400">
-                Rekapitulasi Baris Paling Bawah Excel
+              <h4 className="text-sm font-bold text-slate-300 uppercase tracking-wider">
+                Rekapitulasi Baris Bawah Excel ({activeEvaluation?.plateNumber})
               </h4>
               <div className="bg-slate-950 rounded-xl border border-slate-800 divide-y divide-slate-800/80 text-xs">
                 <div className="flex items-center justify-between p-3">
-                  <span className="text-slate-400">Trips</span>
+                  <span className="text-slate-400">Trips (Total Ritase)</span>
                   <span className="font-mono font-bold text-white text-sm">{bottom.trips} Ritase</span>
                 </div>
                 <div className="flex items-center justify-between p-3">
-                  <span className="text-slate-400">Total Mileage(km)</span>
+                  <span className="text-slate-400">Total KM (Total Mileage)</span>
                   <span className="font-mono font-bold text-emerald-400 text-sm">{bottom.totalMileageKm} km</span>
                 </div>
                 <div className="flex items-center justify-between p-3">
-                  <span className="text-slate-400">Duration</span>
-                  <span className="font-mono font-bold text-white text-sm">{bottom.duration}</span>
+                  <span className="text-slate-400">Total Durasi Perjalanan</span>
+                  <span className="font-mono font-bold text-amber-300 text-sm">{bottom.duration}</span>
                 </div>
                 <div className="flex items-center justify-between p-3">
-                  <span className="text-slate-400">Average Speed (km/h)</span>
+                  <span className="text-slate-400">Rata-Rata Kecepatan Keseluruhan</span>
                   <span className="font-mono font-bold text-blue-400 text-sm">{bottom.avgSpeedKmh} km/h</span>
                 </div>
                 <div className="flex items-center justify-between p-3">
-                  <span className="text-slate-400">Max. speed(km/h)</span>
+                  <span className="text-slate-400">Kecepatan Maksimal Tertinggi</span>
                   <span className="font-mono font-bold text-rose-400 text-sm">{bottom.maxSpeedKmh} km/h</span>
                 </div>
-                <div className="flex items-center justify-between p-3">
-                  <span className="text-slate-400">Total Fuel Consumption (L)</span>
-                  <span className="font-mono font-bold text-purple-400 text-sm">{bottom.totalFuelConsumptionLiters} Liter</span>
-                </div>
               </div>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* TAB 4: ANALISA ARMADA KIRIM KE PELANGGAN (INTEGRASI JARINGAN TOKO & MITRA) */}
-      {activeTab === 'customer_integration' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-slate-800">
-            <div>
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[11px] font-bold mb-1">
-                <Store className="w-3.5 h-3.5" />
-                <span>Terhubung dengan Jaringan Toko & Mitra ({registeredStores.length} Toko Terdaftar)</span>
-              </div>
-              <h3 className="text-base font-bold text-white">
-                Analisa Pengiriman Armada ke Toko Pelanggan ({filteredDeliveryAnalyses.length} Pengantaran)
-              </h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Mengetahui secara rinci armada mengirim ke pelanggan mana saja, waktu tiba, lama bongkar, kecamatan, kabupaten, dan kategori wilayah (Biru = Dalam Kota, Kuning = Luar Kota, Hijau = Luar Pulau).
-              </p>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="relative w-64">
-                <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  placeholder="Cari pelanggan, kecamatan, kabupaten..."
-                  value={searchFilter}
-                  onChange={e => setSearchFilter(e.target.value)}
-                  className="w-full pl-8 pr-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none"
-                />
-              </div>
-
-              <button
-                type="button"
-                onClick={handleExportDeliveryAnalysis}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition cursor-pointer"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Ekspor Excel</span>
-              </button>
-            </div>
-          </div>
-
-          <div className="overflow-x-auto rounded-xl border border-slate-800">
-            <table className="w-full text-left text-xs text-slate-300">
-              <thead className="bg-slate-950/80 text-[11px] uppercase font-bold text-slate-400 border-b border-slate-800">
-                <tr>
-                  <th className="py-3 px-3">Ritase</th>
-                  <th className="py-3 px-3">No. Toko</th>
-                  <th className="py-3 px-4">Nama Toko / Pelanggan Dikunjungi</th>
-                  <th className="py-3 px-3">Kecamatan</th>
-                  <th className="py-3 px-3">Kabupaten</th>
-                  <th className="py-3 px-3">Kategori Wilayah</th>
-                  <th className="py-3 px-3">Jam Tiba</th>
-                  <th className="py-3 px-3">Lama Bongkar</th>
-                  <th className="py-3 px-3 text-right">Jarak Tempuh</th>
-                  <th className="py-3 px-3">Status Pencocokan</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/80">
-                {filteredDeliveryAnalyses.map(item => {
-                  const isDalamKota = item.regionType === 'dalam_kota';
-                  const isLuarKota = item.regionType === 'luar_kota';
-                  const isLuarPulau = item.regionType === 'luar_pulau';
-
-                  return (
-                    <tr key={item.legNumber} className="hover:bg-slate-800/40 transition">
-                      <td className="py-3 px-3 font-mono font-bold text-white">#{item.legNumber}</td>
-                      <td className="py-3 px-3 font-mono font-bold text-slate-300">
-                        {item.nomorToko !== '-' ? `No. ${item.nomorToko}` : '-'}
-                      </td>
-                      <td className="py-3 px-4 max-w-sm">
-                        <div className="font-bold text-white text-xs">{item.namaToko}</div>
-                        <div className="text-[10px] text-slate-400 truncate max-w-xs">{item.locationName}</div>
-                      </td>
-                      <td className="py-3 px-3 font-semibold text-slate-200">{item.kecamatan}</td>
-                      <td className="py-3 px-3 font-semibold text-slate-200">{item.kabupaten}</td>
-                      <td className="py-3 px-3">
-                        {isDalamKota && (
-                          <span className="px-2 py-0.5 rounded-full bg-blue-600/20 text-blue-300 border border-blue-500/40 font-bold text-[10px] inline-flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500" /> Dalam Kota (Biru)
-                          </span>
-                        )}
-                        {isLuarKota && (
-                          <span className="px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/50 font-bold text-[10px] inline-flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> Luar Kota (Kuning)
-                          </span>
-                        )}
-                        {isLuarPulau && (
-                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold text-[10px] inline-flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Luar Pulau (Hijau)
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-3 px-3 font-mono font-bold text-slate-200">{item.startTime}</td>
-                      <td className="py-3 px-3">
-                        {item.stopDurationMinutes > 0 ? (
-                          <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-bold text-[10px] inline-flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            {item.stopDurationMinutes} Menit
-                          </span>
-                        ) : (
-                          <span className="text-slate-500 text-[10px]">-</span>
-                        )}
-                      </td>
-                      <td className="py-3 px-3 font-mono text-right font-bold text-emerald-400">
-                        {item.mileageKm.toFixed(2)} km
-                      </td>
-                      <td className="py-3 px-3">
-                        <span
-                          className={`px-2 py-0.5 rounded text-[10px] font-semibold border ${
-                            item.matchedStore
-                              ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
-                              : 'bg-slate-800 text-slate-400 border-slate-700'
-                          }`}
-                        >
-                          {item.matchConfidence}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
           </div>
         </div>
       )}

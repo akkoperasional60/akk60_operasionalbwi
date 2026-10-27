@@ -253,7 +253,12 @@ export interface RouteStop {
   latitude: number;
   longitude: number;
   locationName: string;
-  reason: 'Port Transit / Ferry Queue' | 'Driver Rest / Meals' | 'Traffic Congestion' | 'Retail Unloading' | 'Toll Gate Inspection';
+  reason: 'Port Transit / Ferry Queue' | 'Driver Rest / Meals' | 'Traffic Congestion' | 'Retail Unloading' | 'Toll Gate Inspection' | 'Berhenti Lama Non-Mitra';
+  isCustomerStore?: boolean;
+  isLongNonCustomerStop?: boolean;
+  matchedStoreName?: string;
+  matchedStoreRegion?: 'dalam_kota' | 'luar_kota' | 'luar_pulau';
+  fleetPlate?: string;
 }
 
 export interface TracksolidTripLeg {
@@ -310,8 +315,12 @@ export interface TrackingEvaluation {
   scheduleId?: string;
   fleetId?: string;
   plateNumber?: string;
+  initialCode?: string;
   driverName?: string;
   helperName?: string;
+  gpsPlatform?: 'tracksolid' | 'wanway';
+  uploadedMonth?: string;
+  uploadedYear?: string;
   totalPoints: number;
   totalDistanceKm: number;
   durationHours: number;

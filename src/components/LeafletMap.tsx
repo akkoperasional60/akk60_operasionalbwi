@@ -660,15 +660,26 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
       }
     }
 
-    // 5. Idle Stops Markers (Clean numbered badges; popup appears on click)
+    // 5. Idle Stops Markers (Distinguish Customer Store Stop vs Long Non-Customer Stop)
     stops.forEach((stop, sIdx) => {
       const stopNumber = stop.stopNumber || sIdx + 1;
+      const isLongNonCustomer = Boolean(stop.isLongNonCustomerStop);
+      const isCustomer = Boolean(stop.isCustomerStore);
+
+      const badgeColorClass = isLongNonCustomer
+        ? 'bg-rose-600 hover:bg-rose-500 border-2 border-amber-300 text-white ring-4 ring-rose-500/35'
+        : isCustomer
+        ? 'bg-emerald-600 hover:bg-emerald-500 border-2 border-white text-white ring-2 ring-emerald-500/30'
+        : 'bg-amber-500 hover:bg-amber-400 border-2 border-white text-slate-950';
+
+      const badgeText = isLongNonCustomer ? `!${stopNumber}` : `${stopNumber}`;
+
       const stopIcon = L.divIcon({
         className: 'stop-marker cursor-pointer',
         html: `
           <div class="relative flex items-center justify-center -translate-x-1/2 -translate-y-1/2 cursor-pointer transition-transform hover:scale-125">
-            <div class="w-6 h-6 rounded-full bg-amber-500 hover:bg-amber-400 border-2 border-white shadow-lg flex items-center justify-center text-slate-950 font-black text-[11px] leading-none select-none">
-              ${stopNumber}
+            <div class="w-6 h-6 rounded-full ${badgeColorClass} shadow-lg flex items-center justify-center font-black text-[10px] leading-none select-none">
+              ${badgeText}
             </div>
           </div>
         `,
@@ -676,30 +687,37 @@ export const LeafletMap: React.FC<LeafletMapProps> = ({
         iconAnchor: [12, 12]
       });
 
+      const headerBadgeHtml = isLongNonCustomer
+        ? `<span class="text-[10px] font-black uppercase text-rose-800 bg-rose-100 border border-rose-300 px-2 py-0.5 rounded font-mono">⚠️ STOP LAMA NON-MITRA #${stopNumber}</span>`
+        : isCustomer
+        ? `<span class="text-[10px] font-black uppercase text-emerald-800 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded font-mono">✅ TOKO PELANGGAN #${stopNumber}</span>`
+        : `<span class="text-[10px] font-black uppercase text-amber-800 bg-amber-100 px-2 py-0.5 rounded font-mono">TITIK BERHENTI #${stopNumber}</span>`;
+
       const stopMarker = L.marker([stop.latitude, stop.longitude], { icon: stopIcon })
         .bindPopup(`
-          <div class="p-2.5 min-w-[220px] max-w-[280px] font-sans">
+          <div class="p-2.5 min-w-[230px] max-w-[290px] font-sans">
             <div class="flex items-center justify-between gap-2 pb-1.5 mb-1.5 border-b border-slate-200">
-              <span class="text-[10px] font-black uppercase text-amber-800 bg-amber-100 px-2 py-0.5 rounded font-mono">
-                TITIK PERHENTIAN #${stopNumber}
-              </span>
-              <span class="text-[10px] font-semibold text-slate-600">
+              ${headerBadgeHtml}
+              <span class="text-[10px] font-bold ${isLongNonCustomer ? 'text-rose-600' : 'text-slate-700'}">
                 ⏱ ${stop.durationMinutes} Menit
               </span>
             </div>
             <div class="text-[10px] font-bold uppercase text-slate-500 tracking-wider">
-              NAMA TOKO / PELANGGAN:
+              ${isCustomer ? 'TOKO MITRA / PELANGGAN:' : isLongNonCustomer ? 'LOKASI BERHENTI (BUKAN TOKO MITRA):' : 'LOKASI PERHENTIAN:'}
             </div>
             <div class="font-extrabold text-sm text-slate-900 mt-0.5 leading-snug">
-              ${stop.locationName}
+              ${stop.matchedStoreName || stop.locationName}
             </div>
+            ${stop.matchedStoreName && stop.matchedStoreName !== stop.locationName ? `
+              <div class="text-[11px] text-slate-500 mt-0.5 leading-tight">${stop.locationName}</div>
+            ` : ''}
             ${stop.reason ? `
-              <div class="text-xs text-slate-700 mt-2 bg-slate-50 p-1.5 rounded border border-slate-100">
-                <span class="font-semibold text-slate-500">Aktivitas:</span> ${stop.reason}
+              <div class="text-xs ${isLongNonCustomer ? 'text-rose-800 bg-rose-50 border-rose-200' : 'text-slate-700 bg-slate-50 border-slate-100'} mt-2 p-1.5 rounded border font-medium">
+                <span class="font-bold">Status:</span> ${isLongNonCustomer ? '⚠️ Berhenti Lama di Luar Toko Pelanggan' : isCustomer ? '✅ Bongkar Muatan di Toko Pelanggan' : stop.reason}
               </div>
             ` : ''}
             <div class="text-[11px] text-slate-500 font-mono mt-2 pt-1 border-t border-slate-100">
-              Waktu: ${stop.startTime} - ${stop.endTime}
+              Waktu Berhenti: ${stop.startTime} - ${stop.endTime}
             </div>
           </div>
         `, {
