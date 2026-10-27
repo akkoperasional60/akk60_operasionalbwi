@@ -69,13 +69,13 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
   const fleets = useMemo(() => logisticsStore.getFleets(), []);
 
   const resetAddForm = () => {
-    const defaultDriver = crews.find(c => c.role.includes('Driver'))?.name || crews[0]?.name || 'Budiono';
-    const defaultHelper = crews.find(c => c.role.includes('Helper'))?.name || 'Saifur Rizal';
-    const defaultFleet = fleets[0]?.plateNumber || 'P 8125 VC';
+    const defaultDriver = crews.find(c => c.role.includes('Driver'))?.name || crews[0]?.name || '';
+    const defaultHelper = crews.find(c => c.role.includes('Helper'))?.name || '';
+    const defaultFleet = fleets[0]?.plateNumber || '';
     setFormDriverName(defaultDriver);
     setFormHelperName(defaultHelper);
     setFormPlateNumber(defaultFleet);
-    setFormAreaName('SUSULAN ROGOJAMPI (Banyuwangi)');
+    setFormAreaName('');
     setFormCustomerName('');
     setFormNotes('');
     setFormPhotoDataUrl(null);
@@ -216,18 +216,15 @@ export const CrewAttendanceReportView: React.FC<CrewAttendanceReportViewProps> =
 
     driverReportService.addReport({
       driverId: `drv-${Date.now()}`,
-      driverName: formDriverName.trim() || 'Driver AKK',
+      driverName: formDriverName.trim() || '-',
       userRole: 'Driver',
       helperName: formHelperName.trim() && formHelperName !== '-' ? formHelperName.trim() : undefined,
-      plateNumber: formPlateNumber.trim() || 'P 8125 VC',
+      plateNumber: formPlateNumber.trim() || '-',
       category: 'istirahat',
-      areaName: formAreaName.trim() || 'Area Distribusi AKK',
+      areaName: formAreaName.trim() || '-',
       customerOutletName: cleanCustomer,
       notes: noteText,
       photoUrl: formPhotoDataUrl,
-      latitude: -8.2192,
-      longitude: 114.3691,
-      gmapsUrl: 'https://www.google.com/maps?q=-8.2192,114.3691',
       status: 'verified',
       verifiedBy: currentUser?.fullName || 'Sistem Absen Kiriman'
     });

@@ -37,8 +37,8 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
   driverName,
   userRole = 'Driver',
   fleetId,
-  plateNumber = 'P 8848 U',
-  vehicleType = 'Engkel Long Box',
+  plateNumber = '-',
+  vehicleType = '-',
   areaName = 'Area Pengiriman Terjadwal',
   initialMode = 'checkin',
   onCheckinSuccess
@@ -223,7 +223,7 @@ export const DriverCheckinModal: React.FC<DriverCheckinModalProps> = ({
     });
 
     if (saved) {
-      setPinSuccessMsg(`PIN Keamanan baru (${pin2}) berhasil disimpan & tercatat di Sub-Menu Laporan Kiriman Kru!`);
+      setPinSuccessMsg('PIN Keamanan baru (****) berhasil disimpan & tercatat di Sub-Menu Laporan Kiriman Kru!');
       addNotification(
         'schedule',
         'PIN Keamanan Diperbarui',

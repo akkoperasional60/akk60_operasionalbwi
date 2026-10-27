@@ -65,135 +65,7 @@ class DriverReportService {
   private seqCounter = 0;
 
   private getInitialReports(): DriverHelperReport[] {
-    const today = getLocalDateStr(new Date());
-    const yesterdayDate = new Date(Date.now() - 86400000);
-    const yesterday = getLocalDateStr(yesterdayDate);
-
-    return [
-      {
-        id: 'REP-2026-001',
-        timestamp: new Date(Date.now() - 86400000 - 1000 * 60 * 45).toISOString(),
-        date: yesterday,
-        driverId: 'crew-01',
-        driverName: 'Zainul Agustiar',
-        userRole: 'Driver',
-        helperName: 'Rifaldi Aminullah',
-        plateNumber: 'P 8125 VC',
-        category: 'kendala_jalan',
-        areaName: 'SUSULAN ROGOJAMPI (Banyuwangi)',
-        notes: 'Terjadi antrean padat di persimpangan Rogojampi akibat pasar tumpah pagi hari, estimasi keterlambatan tiba di titik bongkar sekitar 20 menit.',
-        photoUrl: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?w=600&auto=format&fit=crop&q=80',
-        latitude: -8.3075,
-        longitude: 114.2975,
-        gmapsUrl: 'https://www.google.com/maps?q=-8.3075,114.2975',
-        status: 'follow_up',
-        solution: 'Gunakan jalur alternatif lingkar barat Rogojampi tembus Gladag. SPV sudah mengabari PIC toko bahwa kiriman mundur 20 menit namun tetap tiba sebelum jam 10 pagi.',
-        solutionBy: 'Muhammad Syaiful Bahri (SPV Logistik)',
-        solutionAt: new Date(Date.now() - 86400000 - 1000 * 60 * 30).toISOString(),
-        driverAcknowledged: true,
-        driverAcknowledgedAt: new Date(Date.now() - 86400000 - 1000 * 60 * 20).toISOString()
-      },
-      {
-        id: 'REP-2026-002',
-        timestamp: new Date(Date.now() - 1000 * 60 * 180).toISOString(),
-        date: today,
-        driverId: 'crew-02',
-        driverName: 'Ach Taufiq',
-        userRole: 'Driver',
-        helperName: 'Budi Santoso',
-        plateNumber: 'P 8848 U',
-        category: 'kendala_jalan',
-        areaName: 'GENTENG WETAN (Banyuwangi)',
-        notes: 'Akses jembatan masuk sedang diperbaiki satu jalur buka-tutup. Membutuhkan izin lewat rute jalan alternatif atau tunggu 30 menit.',
-        photoUrl: 'https://images.unsplash.com/photo-1506015391300-4802dc74de2e?w=600&auto=format&fit=crop&q=80',
-        latitude: -8.3580,
-        longitude: 114.1550,
-        gmapsUrl: 'https://www.google.com/maps?q=-8.3580,114.1550',
-        status: 'pending',
-        solution: '',
-        solutionBy: '',
-        driverAcknowledged: false
-      },
-      {
-        id: 'REP-2026-003',
-        timestamp: new Date(Date.now() - 1000 * 60 * 360).toISOString(),
-        date: today,
-        driverId: 'crew-02',
-        driverName: 'Ach Taufiq',
-        userRole: 'Driver',
-        helperName: 'Budi Santoso',
-        plateNumber: 'P 8848 U',
-        category: 'akhir_kiriman',
-        areaName: 'RITEL SRONO (Banyuwangi)',
-        notes: 'Seluruh karton box telah selesai dibongkar di gudang toko retail mitra dalam kondisi utuh dan baik, diterima oleh Pak Wahyu (PIC Toko).',
-        photoUrl: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=600&auto=format&fit=crop&q=80',
-        latitude: -8.3980,
-        longitude: 114.2650,
-        gmapsUrl: 'https://www.google.com/maps?q=-8.3980,114.2650',
-        status: 'verified',
-        verifiedBy: 'SPV Logistik DC',
-        verifiedAt: new Date(Date.now() - 1000 * 60 * 300).toISOString()
-      },
-      {
-        id: 'REP-2026-004',
-        timestamp: new Date(Date.now() - 86400000 - 1000 * 60 * 120).toISOString(),
-        date: yesterday,
-        driverId: 'crew-03',
-        driverName: 'Hendra Setiawan',
-        userRole: 'Driver',
-        helperName: 'Agus Purnomo',
-        plateNumber: 'DK 8214 AB',
-        category: 'update_lokasi',
-        areaName: 'SEMPU KALISTAIL (Banyuwangi)',
-        notes: 'Posisi armada sedang melintasi jalur alternatif Genteng - Kalistail untuk menghindari penutupan jalan perbaikan jembatan.',
-        photoUrl: 'https://images.unsplash.com/photo-1506015391300-4802dc74de2e?w=600&auto=format&fit=crop&q=80',
-        latitude: -8.3650,
-        longitude: 114.1530,
-        gmapsUrl: 'https://www.google.com/maps?q=-8.3650,114.1530',
-        status: 'verified',
-        verifiedBy: 'SPV Logistik',
-        verifiedAt: new Date(Date.now() - 86400000 - 1000 * 60 * 60).toISOString()
-      },
-      {
-        id: 'REP-2026-005',
-        timestamp: new Date(Date.now() - 1000 * 60 * 95).toISOString(),
-        date: today,
-        driverId: 'crew-01',
-        driverName: 'Zainul Agustiar',
-        userRole: 'Driver',
-        helperName: 'Rifaldi Aminullah',
-        plateNumber: 'P 8125 VC',
-        category: 'istirahat',
-        areaName: 'SUSULAN ROGOJAMPI (Banyuwangi)',
-        customerOutletName: 'Toko Sinar Plastik Rogojampi',
-        notes: '[ABSEN KIRIMAN PELANGGAN: Toko Sinar Plastik Rogojampi] Barang pesanan 25 dus kemasan telah diterima lengkap oleh pemilik toko.',
-        photoUrl: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=600&auto=format&fit=crop&q=80',
-        latitude: -8.3075,
-        longitude: 114.2975,
-        gmapsUrl: 'https://www.google.com/maps?q=-8.3075,114.2975',
-        status: 'verified',
-        verifiedBy: 'SPV Logistik DC',
-        verifiedAt: new Date(Date.now() - 1000 * 60 * 60).toISOString()
-      },
-      {
-        id: 'REP-2026-006',
-        timestamp: new Date(Date.now() - 1000 * 60 * 240).toISOString(),
-        date: today,
-        driverId: 'crew-01',
-        driverName: 'Zainul Agustiar',
-        userRole: 'Driver',
-        helperName: 'Rifaldi Aminullah',
-        plateNumber: 'P 8125 VC',
-        category: 'presensi_shift',
-        areaName: 'SUSULAN ROGOJAMPI (Banyuwangi)',
-        checkinTimeFormatted: '07:30 WIB',
-        checkoutTimeFormatted: undefined,
-        securityPin: '1234',
-        notes: '[PRESENSI CHECK-IN] Waktu Masuk: 07:30 WIB (Status: Sedang Bertugas) | PIN Keamanan: 1234',
-        status: 'verified',
-        verifiedBy: 'Sistem Presensi Terpadu'
-      }
-    ];
+    return [];
   }
 
   private getStoredReports(): DriverHelperReport[] {
@@ -202,6 +74,7 @@ class DriverReportService {
         const data = localStorage.getItem(STORAGE_KEY);
         if (data) {
           const parsed: DriverHelperReport[] = JSON.parse(data);
+          if (!Array.isArray(parsed)) return [];
           const seenIds = new Set<string>();
           let hadDuplicates = false;
           const normalized = parsed.map((r, index) => {
@@ -226,17 +99,6 @@ class DriverReportService {
               date: r.timestamp ? getLocalDateStr(new Date(r.timestamp)) : (r.date || getLocalDateStr())
             };
           });
-          const hasCustomerAttendance = normalized.some(r => r.category === 'istirahat');
-          if (!hasCustomerAttendance) {
-            const sampleCustomerAttendance = this.getInitialReports()
-              .filter(r => r.category === 'istirahat')
-              .map(r => ({
-                ...r,
-                date: r.date || (r.timestamp ? getLocalDateStr(new Date(r.timestamp)) : getLocalDateStr())
-              }));
-            normalized.unshift(...sampleCustomerAttendance);
-            hadDuplicates = true;
-          }
           if (hadDuplicates) {
             try {
               localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
@@ -244,15 +106,13 @@ class DriverReportService {
           }
           return normalized;
         }
-        const init = this.getInitialReports();
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(init));
-        return init;
+        return [];
       } catch (e) {
         console.warn('Failed to read from localStorage:', e);
       }
     }
     if (!this.memoryReports) {
-      this.memoryReports = this.getInitialReports();
+      this.memoryReports = [];
     }
     return this.memoryReports;
   }
@@ -327,10 +187,10 @@ class DriverReportService {
     if (existingIdx >= 0) {
       const existing = list[existingIdx];
       const mergedCheckout = params.checkoutTimeFormatted || existing.checkoutTimeFormatted;
-      const mergedPin = params.securityPin || existing.securityPin || '****';
+      const mergedPin = '****';
       const updatedNotes = mergedCheckout
-        ? `[PRESENSI SHIFT TERPADU] Check-In: ${existing.checkinTimeFormatted || params.checkinTimeFormatted} | Check-Out: ${mergedCheckout} | PIN Keamanan: ${mergedPin}`
-        : `[PRESENSI CHECK-IN] Waktu Masuk: ${params.checkinTimeFormatted} (Status: Sedang Bertugas) | PIN Keamanan: ${mergedPin}`;
+        ? `[PRESENSI SHIFT TERPADU] Check-In: ${existing.checkinTimeFormatted || params.checkinTimeFormatted} | Check-Out: ${mergedCheckout} | PIN Keamanan: Terverifikasi`
+        : `[PRESENSI CHECK-IN] Waktu Masuk: ${params.checkinTimeFormatted} (Status: Sedang Bertugas) | PIN Keamanan: Terverifikasi`;
 
       list[existingIdx] = {
         ...existing,
@@ -354,16 +214,16 @@ class DriverReportService {
       return list[existingIdx];
     }
 
-    const pinStr = params.securityPin || '****';
+    const pinStr = '****';
     const initialNotes = params.checkoutTimeFormatted
-      ? `[PRESENSI SHIFT TERPADU] Check-In: ${params.checkinTimeFormatted} | Check-Out: ${params.checkoutTimeFormatted} | PIN Keamanan: ${pinStr}`
-      : `[PRESENSI CHECK-IN] Waktu Masuk: ${params.checkinTimeFormatted} (Status: Sedang Bertugas) | PIN Keamanan: ${pinStr}`;
+      ? `[PRESENSI SHIFT TERPADU] Check-In: ${params.checkinTimeFormatted} | Check-Out: ${params.checkoutTimeFormatted} | PIN Keamanan: Terverifikasi`
+      : `[PRESENSI CHECK-IN] Waktu Masuk: ${params.checkinTimeFormatted} (Status: Sedang Bertugas) | PIN Keamanan: Terverifikasi`;
 
     return this.addReport({
       driverId: params.driverId,
       driverName: params.driverName,
       userRole: params.userRole || 'Driver',
-      plateNumber: params.plateNumber || 'P 8848 U',
+      plateNumber: params.plateNumber || '-',
       category: 'presensi_shift',
       areaName: params.areaName || 'Presensi Operasional DC',
       notes: initialNotes,
@@ -395,11 +255,7 @@ class DriverReportService {
       r => r.category === 'presensi_shift' && r.driverId === params.driverId && r.date === today
     );
     if (activeShiftIdx >= 0) {
-      list[activeShiftIdx].securityPin = params.newPin;
-      list[activeShiftIdx].notes = list[activeShiftIdx].notes.replace(
-        /PIN Keamanan \(2x Verifikasi\): [0-9*]+/,
-        `PIN Keamanan (2x Verifikasi): ${params.newPin}`
-      );
+      list[activeShiftIdx].securityPin = '****';
       this.saveReports(list);
     }
 
@@ -407,11 +263,11 @@ class DriverReportService {
       driverId: params.driverId,
       driverName: params.driverName,
       userRole: params.userRole || 'Driver',
-      plateNumber: params.plateNumber || 'P 8848 U',
+      plateNumber: params.plateNumber || '-',
       category: 'pin_keamanan',
       areaName: params.areaName || 'Keamanan Akun Kru DC',
-      securityPin: params.newPin,
-      notes: `[DATA PIN KEAMANAN KRU] Pengguna memperbarui / mengaktifkan PIN Keamanan (Verifikasi 2x): ${params.newPin}`,
+      securityPin: '****',
+      notes: `[DATA PIN KEAMANAN KRU] Pengguna memperbarui / mengaktifkan PIN Keamanan (Verifikasi 2x).`,
       status: 'verified',
       verifiedBy: 'Otentikasi PIN 2x Verifikasi'
     });
@@ -544,7 +400,7 @@ class DriverReportService {
       driverName: params.driverName,
       userRole: params.userRole || 'Driver',
       helperName: params.helperName,
-      plateNumber: params.plateNumber || 'P 8848 U',
+      plateNumber: params.plateNumber || '-',
       category: 'mode_offline',
       areaName: params.areaName || 'Rute Pengiriman Aktif',
       offlineStatus: 'masih_offline',

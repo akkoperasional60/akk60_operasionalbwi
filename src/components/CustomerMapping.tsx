@@ -110,10 +110,10 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
   // Add Store Form State (matching exact Excel template columns: Nomor, Nama Toko, Kecamatan, Kabupaten, Latitude, Longitude)
   const [nomorInput, setNomorInput] = useState<string>(String(stores.length + 1));
   const [storeName, setStoreName] = useState('');
-  const [kecamatan, setKecamatan] = useState('Genteng');
+  const [kecamatan, setKecamatan] = useState('');
   const [kabupaten, setKabupaten] = useState('Banyuwangi');
-  const [latitude, setLatitude] = useState('-8.365000');
-  const [longitude, setLongitude] = useState('114.153000');
+  const [latitude, setLatitude] = useState('');
+  const [longitude, setLongitude] = useState('');
   const [address, setAddress] = useState('');
   const [contactPerson, setContactPerson] = useState('');
   const [phone, setPhone] = useState('');
@@ -409,6 +409,7 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
         }
 
         const parsedStores: RetailStore[] = [];
+        let skippedInvalidCoords = 0;
 
         rawRows.forEach((row, index) => {
           const keys = Object.keys(row);
@@ -442,6 +443,11 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
           };
 
           const coords = extractCoordinatesFromObject(tempObj, index);
+          if (!coords.isValid) {
+            skippedInvalidCoords += 1;
+            return;
+          }
+
           const locType = getStoreLocationType({
             storeName: rawNamaToko,
             kecamatan: rawKecamatan,
@@ -480,7 +486,10 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
         if (parsedStores.length === 0) {
           setImportBanner({
             type: 'error',
-            message: 'Tidak ditemukan kolom "Nama Toko" yang valid. Gunakan Template Excel yang telah disediakan.'
+            message:
+              skippedInvalidCoords > 0
+                ? `Seluruh baris (${skippedInvalidCoords} baris) dilewati karena koordinat Latitude/Longitude kosong atau tidak valid.`
+                : 'Tidak ditemukan kolom "Nama Toko" serta koordinat Latitude/Longitude yang valid. Gunakan Template Excel yang telah disediakan.'
           });
           return;
         }
@@ -514,7 +523,7 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
           type: 'success',
           message: `Berhasil mengunggah ${parsedStores.length} data pelanggan dari file "${file.name}" (${
             importMode === 'replace' ? 'Mengganti seluruh daftar' : 'Digabungkan ke daftar pelanggan'
-          }).`
+          })${skippedInvalidCoords > 0 ? `. (${skippedInvalidCoords} baris dilewati karena koordinat tidak valid)` : '.'}`
         });
       } catch (err: any) {
         setImportBanner({
@@ -544,6 +553,14 @@ export const CustomerMapping: React.FC<CustomerMappingProps> = ({
       },
       stores.length
     );
+
+    if (!coords.isValid) {
+      setImportBanner({
+        type: 'error',
+        message: 'Koordinat Latitude dan Longitude wajib diisi dengan angka koordinat GPS yang valid.'
+      });
+      return;
+    }
 
     const locType = getStoreLocationType({
       storeName,

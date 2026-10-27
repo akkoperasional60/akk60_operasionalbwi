@@ -508,12 +508,13 @@ class LogisticsStore {
         }
       }, 30000);
     }
-    this.fleets = this.loadFromStorage(STORAGE_KEYS.FLEETS, INITIAL_FLEETS);
-    this.crews = this.loadFromStorage(STORAGE_KEYS.CREWS, INITIAL_CREWS);
-    this.stores = this.loadFromStorage(STORAGE_KEYS.STORES, INITIAL_STORES);
+    const isProd = Boolean(import.meta.env.PROD);
+    this.fleets = this.loadFromStorage(STORAGE_KEYS.FLEETS, isProd ? [] : INITIAL_FLEETS);
+    this.crews = this.loadFromStorage(STORAGE_KEYS.CREWS, isProd ? [] : INITIAL_CREWS);
+    this.stores = this.loadFromStorage(STORAGE_KEYS.STORES, isProd ? [] : INITIAL_STORES);
     this.schedules = this.loadFromStorage(STORAGE_KEYS.SCHEDULES, []);
-    this.devices = this.loadFromStorage(STORAGE_KEYS.DEVICES, INITIAL_TRACKSOLID_DEVICES);
-    this.users = this.loadFromStorage(STORAGE_KEYS.USERS, INITIAL_PROFILES);
+    this.devices = this.loadFromStorage(STORAGE_KEYS.DEVICES, isProd ? [] : INITIAL_TRACKSOLID_DEVICES);
+    this.users = this.loadFromStorage(STORAGE_KEYS.USERS, isProd ? [] : INITIAL_PROFILES);
 
     // Initial authentication session from sessionStorage (Menutup browser otomatis mereset sesi)
     const sessionUserId = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STORAGE_KEYS.AUTH_SESSION) : null;
@@ -534,20 +535,21 @@ class LogisticsStore {
       }
     } catch {}
 
-    // Official AKK profile synchronization (identity/role only).
     // Passwords are never stored in browser state; authentication is handled by Hostinger MySQL.
-    const existingById = new Map((this.users || []).map(u => [u.id, u]));
-    this.users = INITIAL_PROFILES.map(initU => {
-      const existing = existingById.get(initU.id);
-      return {
-        ...(existing || {} as UserProfile),
-        ...initU,
-        password: undefined,
-        permissions: existing?.permissions || initU.permissions,
-        status: existing?.status || initU.status
-      } as UserProfile;
-    });
-    this.users = this.users.map(u => ({ ...u, password: undefined } as UserProfile));
+    if (!isProd && (!this.users || this.users.length === 0)) {
+      const existingById = new Map((this.users || []).map(u => [u.id, u]));
+      this.users = INITIAL_PROFILES.map(initU => {
+        const existing = existingById.get(initU.id);
+        return {
+          ...(existing || {} as UserProfile),
+          ...initU,
+          password: undefined,
+          permissions: existing?.permissions || initU.permissions,
+          status: existing?.status || initU.status
+        } as UserProfile;
+      });
+    }
+    this.users = (this.users || []).map(u => ({ ...u, password: undefined } as UserProfile));
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
 
     // Sync active session if authenticated
@@ -600,47 +602,50 @@ class LogisticsStore {
       this.crews = [];
     }
 
-    // Self-heal and migrate stores if missing or if all stores are stacked on identical dummy coordinates (-8.36, 114.15)
-    const isCorruptedStackedStores = this.stores && this.stores.length > 5 && this.stores.filter(s => Math.abs(s.latitude - (-8.36)) < 0.01 && Math.abs(s.longitude - 114.15) < 0.01).length > this.stores.length * 0.8;
-    if (!this.stores || this.stores.length === 0 || isCorruptedStackedStores) {
-      this.stores = [...INITIAL_STORES];
-      this.saveToStorage(STORAGE_KEYS.STORES, this.stores);
-    } else {
-      let storesUpdated = false;
-      const filteredStores = this.stores.filter(s => !isAreaRouteItem(s));
-      if (filteredStores.length !== this.stores.length) {
-        storesUpdated = true;
-      }
-      this.stores = filteredStores.map((s, idx) => {
-        const ref = INITIAL_STORES.find(initS => initS.id === s.id || initS.storeCode === s.storeCode || initS.storeName.toLowerCase() === (s.storeName || '').toLowerCase());
-        const nextKecamatan = s.kecamatan || ref?.kecamatan || ((s.city || '').match(/\((.*?)\)/)?.[1]) || s.city || 'Genteng';
-        const nextKabupaten = s.kabupaten || ref?.kabupaten || (s.city || '').replace(/\s*\(.*?\)/g, '').replace(/^Kota\s+/i, '') || 'Banyuwangi';
-        const nextNomor = s.nomor ?? ref?.nomor ?? idx + 1;
-        if (s.kecamatan !== nextKecamatan || s.kabupaten !== nextKabupaten || s.nomor !== nextNomor) {
-          storesUpdated = true;
-          return {
-            ...s,
-            nomor: nextNomor,
-            kecamatan: nextKecamatan,
-            kabupaten: nextKabupaten
-          };
-        }
-        return s;
-      });
-
-      INITIAL_STORES.forEach(initStore => {
-        const exists = this.stores.some(
-          s => s.id === initStore.id || s.storeCode === initStore.storeCode || (s.storeName || '').trim().toLowerCase() === initStore.storeName.trim().toLowerCase()
-        );
-        if (!exists) {
-          this.stores.push({ ...initStore });
-          storesUpdated = true;
-        }
-      });
-
-      if (storesUpdated) {
+    if (!isProd) {
+      const isCorruptedStackedStores = this.stores && this.stores.length > 5 && this.stores.filter(s => Math.abs(s.latitude - (-8.36)) < 0.01 && Math.abs(s.longitude - 114.15) < 0.01).length > this.stores.length * 0.8;
+      if (!this.stores || this.stores.length === 0 || isCorruptedStackedStores) {
+        this.stores = [...INITIAL_STORES];
         this.saveToStorage(STORAGE_KEYS.STORES, this.stores);
+      } else {
+        let storesUpdated = false;
+        const filteredStores = this.stores.filter(s => !isAreaRouteItem(s));
+        if (filteredStores.length !== this.stores.length) {
+          storesUpdated = true;
+        }
+        this.stores = filteredStores.map((s, idx) => {
+          const ref = INITIAL_STORES.find(initS => initS.id === s.id || initS.storeCode === s.storeCode || initS.storeName.toLowerCase() === (s.storeName || '').toLowerCase());
+          const nextKecamatan = s.kecamatan || ref?.kecamatan || ((s.city || '').match(/\((.*?)\)/)?.[1]) || s.city || 'Genteng';
+          const nextKabupaten = s.kabupaten || ref?.kabupaten || (s.city || '').replace(/\s*\(.*?\)/g, '').replace(/^Kota\s+/i, '') || 'Banyuwangi';
+          const nextNomor = s.nomor ?? ref?.nomor ?? idx + 1;
+          if (s.kecamatan !== nextKecamatan || s.kabupaten !== nextKabupaten || s.nomor !== nextNomor) {
+            storesUpdated = true;
+            return {
+              ...s,
+              nomor: nextNomor,
+              kecamatan: nextKecamatan,
+              kabupaten: nextKabupaten
+            };
+          }
+          return s;
+        });
+
+        INITIAL_STORES.forEach(initStore => {
+          const exists = this.stores.some(
+            s => s.id === initStore.id || s.storeCode === initStore.storeCode || (s.storeName || '').trim().toLowerCase() === initStore.storeName.trim().toLowerCase()
+          );
+          if (!exists) {
+            this.stores.push({ ...initStore });
+            storesUpdated = true;
+          }
+        });
+
+        if (storesUpdated) {
+          this.saveToStorage(STORAGE_KEYS.STORES, this.stores);
+        }
       }
+    } else {
+      this.stores = Array.isArray(this.stores) ? this.stores.filter(s => !isAreaRouteItem(s)) : [];
     }
 
     this.runDataMigrations();
@@ -691,14 +696,16 @@ class LogisticsStore {
       updatedFleets = true;
     }
 
-    // Merge any missing fleets
-    INITIAL_FLEETS.forEach(initF => {
-      const exists = this.fleets.some(f => f.id === initF.id || f.plateNumber === initF.plateNumber);
-      if (!exists && !(initF.plateNumber || '').toUpperCase().endsWith('AKK')) {
-        this.fleets.push({ ...initF });
-        updatedFleets = true;
-      }
-    });
+    // Merge initial fleets only in development preview mode
+    if (!import.meta.env.PROD) {
+      INITIAL_FLEETS.forEach(initF => {
+        const exists = this.fleets.some(f => f.id === initF.id || f.plateNumber === initF.plateNumber);
+        if (!exists && !(initF.plateNumber || '').toUpperCase().endsWith('AKK')) {
+          this.fleets.push({ ...initF });
+          updatedFleets = true;
+        }
+      });
+    }
 
     this.fleets = this.fleets.map((f, idx) => {
       let changed = false;
@@ -956,27 +963,29 @@ class LogisticsStore {
       }
     }
 
-    // Ensure latest Tracksolid devices matching Tracksolid console
-    const hasLeadDevice = this.devices.some(d => d.imei === '353701090461274');
-    if (!hasLeadDevice || this.devices.length !== INITIAL_TRACKSOLID_DEVICES.length) {
-      this.devices = [...INITIAL_TRACKSOLID_DEVICES];
-      this.saveToStorage(STORAGE_KEYS.DEVICES, this.devices);
-    } else {
-      let updatedDevices = false;
-      this.devices = this.devices.map(d => {
-        if (d.latitude === -6.3262 && d.longitude === 107.1518) {
-          updatedDevices = true;
-          return {
-            ...d,
-            latitude: -8.1906,
-            longitude: 114.3708,
-            address: 'Staging Area Gudang Pusat Banyuwangi DC (Gate 2, Jl. Argopuro No.60)'
-          };
-        }
-        return d;
-      });
-      if (updatedDevices) {
+    // Ensure GPS devices in development preview mode only (do not inject mock devices in production)
+    if (!import.meta.env.PROD) {
+      const hasLeadDevice = this.devices.some(d => d.imei === '353701090461274');
+      if (!hasLeadDevice || this.devices.length !== INITIAL_TRACKSOLID_DEVICES.length) {
+        this.devices = [...INITIAL_TRACKSOLID_DEVICES];
         this.saveToStorage(STORAGE_KEYS.DEVICES, this.devices);
+      } else {
+        let updatedDevices = false;
+        this.devices = this.devices.map(d => {
+          if (d.latitude === -6.3262 && d.longitude === 107.1518) {
+            updatedDevices = true;
+            return {
+              ...d,
+              latitude: -8.1906,
+              longitude: 114.3708,
+              address: 'Staging Area Gudang Pusat Banyuwangi DC (Gate 2, Jl. Argopuro No.60)'
+            };
+          }
+          return d;
+        });
+        if (updatedDevices) {
+          this.saveToStorage(STORAGE_KEYS.DEVICES, this.devices);
+        }
       }
     }
 
@@ -1648,14 +1657,14 @@ class LogisticsStore {
       const crewItem: Crew = {
         id: crewId,
         name: cleanName,
-        phone: u.phone && u.phone !== '-' ? u.phone : (refCrew?.phone || '0812-3456-7890'),
+        phone: u.phone && u.phone !== '-' ? u.phone : (refCrew?.phone || ''),
         role: crewRole,
-        licenseNumber: refCrew?.licenseNumber || 'SIM-920418',
+        licenseNumber: refCrew?.licenseNumber || '',
         licenseType: u.role === 'crew_helper' ? 'SIM A' : (refCrew?.licenseType || 'SIM B1 Umum'),
         status: crewStatus,
-        currentFleetId: existingInStore?.currentFleetId || refCrew?.currentFleetId || defaultFleetId,
-        tripsCompleted: refCrew?.tripsCompleted ?? 18,
-        rating: refCrew?.rating ?? 4.9
+        currentFleetId: existingInStore?.currentFleetId || refCrew?.currentFleetId || undefined,
+        tripsCompleted: refCrew?.tripsCompleted ?? 0,
+        rating: refCrew?.rating ?? 0
       };
 
       seenNames.add(lowerName);
@@ -2894,8 +2903,7 @@ class LogisticsStore {
     // Jika user yang login BUKAN driver atau helper (misal: Super Admin, SPV Logistik, dll.),
     // JANGAN membuat entri Crew baru atas nama Super Admin agar tidak mengotori daftar Kru Supir/Helper!
     if (!isCrewRole) {
-      const fallbackCrew = this.crews.find(c => c.name.toLowerCase().includes('budiono')) || this.crews[0];
-      return fallbackCrew;
+      return this.crews[0];
     }
 
     const expectedCrewId = `crw-${user?.id || 'usr'}`;
@@ -2919,30 +2927,25 @@ class LogisticsStore {
         matchedCrew.name = cleanUserName;
         changed = true;
       }
-      if (!matchedCrew.currentFleetId && this.fleets.length > 0) {
-        matchedCrew.currentFleetId = this.fleets[0].id;
-        changed = true;
-      }
       if (changed) {
         try {
           safeSetItem(STORAGE_KEYS.CREWS, JSON.stringify(this.crews));
         } catch {}
       }
     } else {
-      const defaultFleet = this.fleets.find(f => f.plateNumber === 'P 8509 VQ') || this.fleets[0];
       matchedCrew = {
         id: expectedCrewId,
         name: cleanUserName || 'Driver Operasional',
-        phone: user?.phone || '+62 812-3344-5566',
+        phone: user?.phone && user.phone !== '-' ? user.phone : '',
         role: user?.role === 'crew_helper' ? 'Kernet / Helper' : 'Driver Utama',
-        licenseNumber: '9204-1823-00010',
-        licenseType: 'SIM B2 Umum',
+        licenseNumber: '',
+        licenseType: user?.role === 'crew_helper' ? 'SIM A' : 'SIM B1 Umum',
         status: 'available',
-        currentFleetId: defaultFleet?.id,
-        tripsCompleted: 150,
-        rating: 4.9,
-        certifications: ['SIM B2 Umum Terverifikasi', 'Defensive Driving Senior'],
-        routeExperience: ['Lintas Jawa - Bali', 'Banyuwangi Hub']
+        currentFleetId: undefined,
+        tripsCompleted: 0,
+        rating: 0,
+        certifications: [],
+        routeExperience: []
       };
       const existingIdx = this.crews.findIndex(c => c.id === expectedCrewId);
       if (existingIdx !== -1) {

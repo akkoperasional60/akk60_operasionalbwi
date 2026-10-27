@@ -51,17 +51,17 @@ export const DocumentScannerModal: React.FC<DocumentScannerModalProps> = ({
   const [documentType, setDocumentType] = useState<ScannedDocumentType>(initialType);
   const [documentNumber, setDocumentNumber] = useState<string>('');
   const [documentDate, setDocumentDate] = useState<string>(new Date().toISOString().split('T')[0]);
-  const [vehiclePlate, setVehiclePlate] = useState<string>('P 8848 U');
-  const [driverName, setDriverName] = useState<string>('Ach Taufiq');
+  const [vehiclePlate, setVehiclePlate] = useState<string>('');
+  const [driverName, setDriverName] = useState<string>('');
   const [destinationOrStore, setDestinationOrStore] = useState<string>('');
   const [cargoSummary, setCargoSummary] = useState<string>('');
   const [quantityOrWeight, setQuantityOrWeight] = useState<string>('');
   const [inspectionScore, setInspectionScore] = useState<string>('');
   const [notes, setNotes] = useState<string>('');
-  const [signaturesDetected, setSignaturesDetected] = useState<boolean>(true);
+  const [signaturesDetected, setSignaturesDetected] = useState<boolean>(false);
   const [rawExtractedText, setRawExtractedText] = useState<string>('');
-  const [confidenceScore, setConfidenceScore] = useState<number>(0.95);
-  const [verificationStatus, setVerificationStatus] = useState<'verified' | 'pending_review'>('verified');
+  const [confidenceScore, setConfidenceScore] = useState<number>(0);
+  const [verificationStatus, setVerificationStatus] = useState<'verified' | 'pending_review'>('pending_review');
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -274,44 +274,46 @@ export const DocumentScannerModal: React.FC<DocumentScannerModalProps> = ({
     reader.readAsDataURL(file);
   };
 
-  // Pre-configured mock samples for rapid testing
+  // Pre-configured demo samples clearly labeled as DEMO (not verified operational records)
   const loadDemoSample = (type: 'slip' | 'inspection') => {
     stopCamera();
+    const defaultFleetPlate = registeredFleets[0]?.plateNumber || 'DEMO-ARMADA';
+    const defaultCrewName = registeredCrews[0]?.name || 'DEMO DRIVER';
     if (type === 'slip') {
       const demoImg = 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=800&q=80';
       setCapturedImage(demoImg);
       setDocumentType('delivery_slip');
-      setDocumentNumber(`SJ-AKK/2026/10/${Math.floor(1000 + Math.random() * 9000)}`);
+      setDocumentNumber(`DEMO-SJ-AKK/${new Date().getFullYear()}/${Math.floor(1000 + Math.random() * 9000)}`);
       setDocumentDate(new Date().toISOString().split('T')[0]);
-      setVehiclePlate('P 8848 U');
-      setDriverName('Ach Taufiq');
-      setDestinationOrStore('Toko Mahkota Jaya (Banyuwangi Kota)');
-      setCargoSummary('280 Box Master Karton Corrugated (K125/M125/K125 B-Flute)');
-      setQuantityOrWeight('280 Box (2.4 Ton)');
-      setInspectionScore('Lengkap & Terverifikasi');
-      setNotes('Karton box diterima dalam kondisi utuh & kering, segel valid.');
-      setSignaturesDetected(true);
-      setRawExtractedText('PT ANUGRAH KEMASAN KREATIF SURAT JALAN PENGIRIMAN BANYUWANGI TOKO MAHKOTA JAYA KARTON BOX ACH TAUFIQ P 8848 U DITERIMA LENGKAP');
-      setConfidenceScore(0.98);
-      setVerificationStatus('verified');
+      setVehiclePlate(defaultFleetPlate);
+      setDriverName(defaultCrewName);
+      setDestinationOrStore('[DEMO] Contoh Toko Tujuan');
+      setCargoSummary('[DEMO] Contoh Muatan Karton Box Corrugated');
+      setQuantityOrWeight('[DEMO] Contoh Kuantitas');
+      setInspectionScore('Demo Sample');
+      setNotes('[CONTOH DEMO — BUKAN DOKUMEN OPERASIONAL] Sampel antarmuka untuk uji tampilan pratinjau OCR.');
+      setSignaturesDetected(false);
+      setRawExtractedText('[DEMO SAMPLE] CONTOH TEKS EKSTRAKSI SURAT JALAN');
+      setConfidenceScore(0);
+      setVerificationStatus('pending_review');
       setStep('review');
     } else {
       const demoImg = 'https://images.unsplash.com/photo-1618042164219-62c820f10723?auto=format&fit=crop&w=800&q=80';
       setCapturedImage(demoImg);
       setDocumentType('inspection_form');
-      setDocumentNumber(`INSP-AKK/2026/10/${Math.floor(1000 + Math.random() * 9000)}`);
+      setDocumentNumber(`DEMO-INSP-AKK/${new Date().getFullYear()}/${Math.floor(1000 + Math.random() * 9000)}`);
       setDocumentDate(new Date().toISOString().split('T')[0]);
-      setVehiclePlate('P 9281 VA');
-      setDriverName('Zainul Agustiar');
-      setDestinationOrStore('Rute Lintas Jawa - Bali Hub (Ketapang)');
-      setCargoSummary('Pemeriksaan 18 Titik: Sistem Rem Angin, Tekanan Ban 110 PSI, Oli Meditran SX, Lampu Hazard, APAR');
-      setQuantityOrWeight('Checklist 18/18 Lulus');
-      setInspectionScore('Grade A - Layak Jalan');
-      setNotes('Armada prima untuk penyeberangan fery Ketapang - Gilimanuk.');
-      setSignaturesDetected(true);
-      setRawExtractedText('FORMULIR CHECKLIST INSPEKSI HARIAN ARMADA PT AKK DC SUKOWIDI TRUK HINO DOUBLE P 9281 VA ZAINUL AGUSTIAR CHECKLIST REM OK STATUS LAYAK JALAN');
-      setConfidenceScore(0.96);
-      setVerificationStatus('verified');
+      setVehiclePlate(defaultFleetPlate);
+      setDriverName(defaultCrewName);
+      setDestinationOrStore('[DEMO] Contoh Rute Inspeksi');
+      setCargoSummary('[DEMO] Contoh Pemeriksaan Pre-Trip Armada');
+      setQuantityOrWeight('[DEMO] Contoh Checklist');
+      setInspectionScore('Demo Sample');
+      setNotes('[CONTOH DEMO — BUKAN DOKUMEN OPERASIONAL] Sampel antarmuka untuk uji tampilan formulir inspeksi.');
+      setSignaturesDetected(false);
+      setRawExtractedText('[DEMO SAMPLE] CONTOH TEKS EKSTRAKSI FORMULIR INSPEKSI');
+      setConfidenceScore(0);
+      setVerificationStatus('pending_review');
       setStep('review');
     }
   };
@@ -329,30 +331,33 @@ export const DocumentScannerModal: React.FC<DocumentScannerModalProps> = ({
         })
       });
 
-      const res = await response.json();
-      if (res && res.success && res.data) {
+      const res = await response.json().catch(() => null);
+      if (response.ok && res && res.success && res.data) {
         const d = res.data;
         setDocumentType(d.documentType || documentType);
-        setDocumentNumber(d.documentNumber || `DOC-${Date.now()}`);
+        setDocumentNumber(d.documentNumber || '');
         setDocumentDate(d.date || new Date().toISOString().split('T')[0]);
-        setVehiclePlate(d.vehiclePlate || 'P 8848 U');
-        setDriverName(d.driverName || 'Ach Taufiq');
-        setDestinationOrStore(d.destinationOrStore || 'Toko Retail Mitra');
-        setCargoSummary(d.cargoOrItemsSummary || 'Kemasan Karton Box AKK');
-        setQuantityOrWeight(d.quantityOrWeight || '1 Koli / 2.5 Ton');
-        setInspectionScore(d.inspectionScore || 'Terverifikasi');
-        setNotes(d.notes || 'Dokumen diproses via OCR');
+        setVehiclePlate(d.vehiclePlate || '');
+        setDriverName(d.driverName || '');
+        setDestinationOrStore(d.destinationOrStore || '');
+        setCargoSummary(d.cargoOrItemsSummary || '');
+        setQuantityOrWeight(d.quantityOrWeight || '');
+        setInspectionScore(d.inspectionScore || '');
+        setNotes(d.notes || '');
         setSignaturesDetected(Boolean(d.signaturesDetected));
         setRawExtractedText(d.rawExtractedText || '');
-        setConfidenceScore(Number(d.confidenceScore) || 0.95);
-        setVerificationStatus('verified');
+        setConfidenceScore(Number(d.confidenceScore) || 0);
+        setVerificationStatus('pending_review');
       } else {
-        // Fallback default populated fields
-        setDocumentNumber(`DOC-SCAN-${Date.now().toString().slice(-6)}`);
+        setDocumentNumber('');
+        setVerificationStatus('pending_review');
+        setNotes(res?.error || 'Ekstraksi OCR otomatis belum tersedia. Silakan lengkapi data dokumen secara manual.');
       }
     } catch (err) {
-      console.warn('[DocScanner] OCR request notice, using fallback values:', err);
-      setDocumentNumber(`DOC-SCAN-${Date.now().toString().slice(-6)}`);
+      console.warn('[DocScanner] OCR request error:', err);
+      setDocumentNumber('');
+      setVerificationStatus('pending_review');
+      setNotes('Gagal menghubungi layanan OCR. Silakan lengkapi data dokumen secara manual.');
     } finally {
       setIsProcessing(false);
       setStep('review');

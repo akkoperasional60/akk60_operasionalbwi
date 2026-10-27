@@ -68,10 +68,10 @@ class DriverWaybillService {
       delivered: 'Selesai (Tiba di Gudang)'
     };
 
-    const crewName = schedule.crew?.name || 'Ach Taufiq';
-    const crewPhone = schedule.crew?.phone || '0812-3456-7890';
-    const fleetPlate = schedule.fleet?.plateNumber || 'P 8848 U';
-    const fleetType = schedule.fleet?.vehicleType || 'Engkel Long Box';
+    const crewName = schedule.crew?.name || '-';
+    const crewPhone = schedule.crew?.phone || '-';
+    const fleetPlate = schedule.fleet?.plateNumber || '-';
+    const fleetType = schedule.fleet?.vehicleType || '-';
 
     return {
       id: `WB-${schedule.id}`,
@@ -80,35 +80,35 @@ class DriverWaybillService {
       trackingNumber: schedule.trackingNumber,
       poNumber: `PO-AKK-${cleanNum}`,
       date: rawDate,
-      gateOutTime: '07:30 WIB',
-      estimatedArrival: schedule.estimatedArrival || '14:00 WIB',
+      gateOutTime: '-',
+      estimatedArrival: schedule.estimatedArrival || '-',
       originWarehouse: {
         name: 'Distribution Center (DC) PT Anugrah Kemasan Kreatif',
-        address: 'Kawasan Pergudangan Logistik Industri Banyuwangi KM 12, Jawa Timur',
-        phone: '(0333) 412890',
-        gateNumber: 'Gate Keluar Outbound Bay 03'
+        address: 'Jl. Argopuro No.60, Lingkungan Sukowidi, Klatak, Kec. Kalipuro, Kab. Banyuwangi, Jawa Timur 68421',
+        phone: '-',
+        gateNumber: 'Gate Keluar Outbound DC'
       },
       destination: {
-        storeName: schedule.store?.storeName || schedule.areaName || 'Toko Mitra Distribusi',
-        areaName: schedule.areaName || schedule.store?.city || 'Area Banyuwangi & Sekitarnya',
-        city: schedule.store?.city || 'Banyuwangi',
-        province: schedule.store?.province || 'Jawa Timur',
-        address: schedule.store?.address || 'Jl. Raya Distribusi Logistik No. 45',
-        contactPerson: schedule.store?.contactPerson || 'Bpk. Herman (Staff Penerima Gudang)',
-        phone: schedule.store?.phone || '0821-9876-5432'
+        storeName: schedule.store?.storeName || schedule.areaName || '-',
+        areaName: schedule.areaName || schedule.store?.city || '-',
+        city: schedule.store?.city || '-',
+        province: schedule.store?.province || '-',
+        address: schedule.store?.address || '-',
+        contactPerson: schedule.store?.contactPerson || '-',
+        phone: schedule.store?.phone || '-'
       },
       fleet: {
         id: schedule.fleetId,
         plateNumber: fleetPlate,
         vehicleType: fleetType,
-        initialCode: schedule.fleet?.initialCode || 'WB-01'
+        initialCode: schedule.fleet?.initialCode || '-'
       },
       crew: {
         driverId: schedule.crewId,
         driverName: crewName,
         driverPhone: crewPhone,
-        licenseType: schedule.crew?.licenseType || 'SIM B1 Umum',
-        helperName: schedule.crewHelper?.name || 'Budi Santoso',
+        licenseType: schedule.crew?.licenseType || '-',
+        helperName: schedule.crewHelper?.name || '-',
         helper2Name: schedule.crewHelper2?.name
       },
       cargoItems,

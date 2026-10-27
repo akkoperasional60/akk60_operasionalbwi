@@ -1,4 +1,4 @@
-AKK OPERASIONAL - HOSTINGER MYSQL REVISI FINAL
+AKK OPERASIONAL - HOSTINGER MYSQL AUDIT FINAL V2 (2026-10-27)
 
 ==============================================================================
 1. ENVIRONMENT VARIABLES WEBSITE HOSTINGER (PERTAHANKAN / TAMBAHKAN)
@@ -25,10 +25,13 @@ WHATSAPP_API_KEY=<secret>
 GEMINI_API_KEY=<opsional secret>
 
 ==============================================================================
-2. ATURAN PENTING BOOTSTRAP SUPER ADMIN
+2. ATURAN PENTING BOOTSTRAP SUPER ADMIN (TERMASUK RESET PASSWORD V2)
 ==============================================================================
-- BOOTSTRAP_ADMIN_* hanya digunakan untuk membuat Super Admin pertama pada database baru.
-- Setelah database berhasil membuat Super Admin dan login pertama berhasil:
+- BOOTSTRAP_ADMIN_* digunakan untuk membuat Super Admin pertama atau mereset
+  password Super Admin jika email tersebut sudah ada di tabel users.
+- Pada V2, ON DUPLICATE KEY UPDATE juga memperbarui password_hash = VALUES(password_hash),
+  role = 'super_admin', dan status = 'approved'.
+- Setelah login Super Admin berhasil:
   WAJIB HAPUS BOOTSTRAP_ADMIN_PASSWORD dari Environment Variables Hostinger.
   BOOTSTRAP_ADMIN_EMAIL dan BOOTSTRAP_ADMIN_NAME juga boleh dihapus setelah bootstrap selesai.
 
@@ -63,17 +66,19 @@ VALIDASI SETELAH DEPLOY:
 1. GET /api/db-status -> success=true
 2. Login Super Admin -> /api/auth/me harus valid
 3. Setelah login Super Admin berhasil, hapus BOOTSTRAP_ADMIN_PASSWORD dari Hostinger ENV
-4. Test CRUD Armada, Crew, Toko, Jadwal
+4. Test CRUD Armada, Crew, Toko, Jadwal, dan Attendance
 5. Pastikan refresh browser tetap mengambil data dari MySQL
 
-
 ==============================================================================
-5. CATATAN REVISI AUDIT PRODUKSI
+5. CATATAN REVISI AUDIT PRODUKSI V2
 ==============================================================================
-- DB_HOST menggunakan localhost sesuai Hostinger Web/Cloud.
-- schema.sql TIDAK lagi memasukkan seed Armada, Crew, Toko, atau Jadwal contoh.
-- Folder public/assets/aistudio/ WAJIB tidak ikut deploy karena berisi artefak/screenshot internal.
-- Jadwal driver/helper difilter server-side berdasarkan penugasan; driver tidak menerima fallback jadwal demo.
-- API write Armada/Crew/Toko/Jadwal memiliki pemeriksaan role server-side.
-- Google Sheets auto-sync default NONAKTIF dan tidak memiliki URL/data contoh bawaan.
-- Jika Google Sheets gagal dibaca, sistem mengembalikan error dan tidak mengisi data toko palsu.
+- Bootstrap Super Admin memperbarui hash password jika email sudah terdaftar.
+- AI/OCR mengambil konteks armada & kru secara dinamis dari MySQL Hostinger.
+- Seluruh fallback kru palsu (nomor HP, nomor SIM, 150 trip, rating 4.9, sertifikasi, armada pertama) dihapus.
+- Data mock produksi (profil user, armada, kru, toko, jadwal, GPS, checklist/report driver) tidak lagi dijadikan fallback produksi.
+- PIN default 1234 dihapus dan PIN disamarkan (****) pada log/notifikasi.
+- Driver Waybill tidak mengarang nomor telepon, plat, jenis kendaraan, jam gate-out 07:30, atau ETA 14:00 ketika data asli kosong.
+- Sampel OCR berlabel DEMO dan berstatus pending_review.
+- Koordinat toko invalid ditolak/dilewati (tidak diganti koordinat palsu).
+- RBAC backend diperketat untuk Armada, Crew, Toko, Jadwal, Attendance, dan validasi/upload spreadsheet.
+- Mode production fail-fast apabila DB, SESSION_SECRET, atau dist/index.html belum siap.

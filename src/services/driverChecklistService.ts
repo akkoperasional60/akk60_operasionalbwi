@@ -197,9 +197,8 @@ class DriverChecklistService {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       let list: DriverVehicleChecklist[] = raw ? JSON.parse(raw) : [];
-      if (!list || list.length === 0) {
-        list = this.generateInitialSampleChecklists();
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+      if (!Array.isArray(list)) {
+        list = [];
       }
 
       if (driverId) {

@@ -1,49 +1,33 @@
-AKK OPERASIONAL - AUDIT REVISI HOSTINGER + MYSQL
+AKK OPERASIONAL - LAPORAN AUDIT FINAL V2 (HOSTINGER + MYSQL)
 Tanggal audit: 27 Oktober 2026
 Domain produksi: https://akkoperasional.com
 
-TEMUAN YANG DIREVISI
-1. public/assets/aistudio berisi 234 artefak publik (screenshot internal, SQL, checklist) dan akan ikut ke dist.
-   -> Folder dikeluarkan dari source deploy.
-2. DB_HOST memakai 127.0.0.1.
-   -> Diganti menjadi localhost pada .env.example, dokumentasi, dan default server/db.ts.
-3. schema.sql memasukkan seed Armada/Crew/Toko/Jadwal contoh.
-   -> Seluruh seed operasional dihapus. Schema produksi hanya membuat/upgrade struktur tabel.
-4. Jadwal mock/local dapat tetap tampil jika snapshot MySQL belum ada.
-   -> Saat API Hostinger berhasil tetapi snapshot kosong, jadwal browser dikosongkan.
-5. Portal Driver memberi fallback sampai 5 jadwal lokal saat driver tidak punya assignment.
-   -> Dihapus. Tidak ada assignment = daftar kosong.
-6. GET /api/schedules/persisted memberikan seluruh jadwal ke semua user login.
-   -> Driver/helper sekarang difilter server-side berdasarkan assignment.
-7. PATCH status jadwal dapat diarahkan ke jadwal user lain.
-   -> Driver/helper hanya boleh mengubah jadwal yang ditugaskan kepadanya.
-8. API write Armada/Crew/Toko/Jadwal hanya requireAuth.
-   -> Ditambah RBAC server-side berdasarkan role.
-9. Endpoint validasi spreadsheet 50 MB dapat dipanggil tanpa login.
-   -> Sekarang requireAuth.
-10. Google Sheets sync default memakai URL contoh/public sample dan fallback dataset toko buatan.
-    -> Auto-sync default OFF, URL default kosong, gagal fetch tidak lagi memasukkan data contoh.
-11. Modal Google Sheets membuka 312 toko preset/generatif secara default.
-    -> Default preview kosong; data hanya dari URL/paste yang diberikan user.
-12. Notifikasi admin realtime memiliki seed kejadian contoh yang terlihat operasional.
-    -> Seed notifikasi dihapus.
-13. Domain lama honeydew/hostingersite dan URL Google Cloud lama.
-    -> Tidak ditemukan lagi pada paket revisi final.
-14. Legacy Supabase client stub yang tidak dipakai.
-    -> src/supabaseClient.js dan src/supabaseClient.d.ts dihapus. Nama internal legacy lain dipertahankan agar import existing tidak rusak; runtime database tetap Hostinger MySQL.
-
-VALIDASI
-- 150 file TypeScript/TSX: 0 syntax error (TypeScript transpile check).
-- 0 relative import yang hilang.
-- 0 referensi honeydew-capybara / hostingersite.com / ais-dev / run.app.
-- 0 dependency @supabase pada package.json.
-- public/ hanya menyisakan version.json.
-- schema.sql tidak memiliki seed Armada/Crew/Toko/Jadwal dan tidak memakai DROP/TRUNCATE.
-- Full npm install/build belum dapat diverifikasi di sandbox karena pengunduhan dependency timeout; lakukan final npm build di Hostinger.
-
-DEPLOY
-Node.js: 22.x
-Build: npm run build
-Start: npm start
-DB_HOST: localhost
-APP_URL: https://akkoperasional.com
+RINGKASAN TEMUAN & PERBAIKAN V2
+1. Bootstrap Super Admin (server.ts):
+   - Sebelumnya: jika email sudah pernah ada di tabel users, ON DUPLICATE KEY UPDATE hanya mengubah role & status tanpa memperbarui password_hash.
+   - Sekarang: password_hash = VALUES(password_hash) ikut diperbarui dengan hash bcrypt dari BOOTSTRAP_ADMIN_PASSWORD.
+2. Konteks AI & OCR Dinamis (server.ts):
+   - Sebelumnya: daftar nama driver dan plat nomor armada tertulis statis di prompt AI/OCR.
+   - Sekarang: buildLiveOperationalContext() mengambil daftar armada dan kru langsung dari MySQL Hostinger.
+3. Penghapusan Fallback Data Kru Palsu (src/services/store.ts):
+   - Sebelumnya: frontend dapat mengarang nomor HP, nomor SIM, 18/150 trip, rating 4.9, sertifikasi, dan memilih armada pertama secara otomatis.
+   - Sekarang: seluruh nilai mengarang dihapus; field yang belum diisi tetap kosong/'-' dan dinilai dari data aktual.
+4. Penghapusan Data Mock Produksi (src/data/mockData.ts, store.ts, driverChecklistService.ts, driverReportService.ts, attendanceService.ts):
+   - Sebelumnya: profil user, armada, kru, toko, jadwal, GPS, checklist, dan report contoh masih bisa muncul sebagai fallback.
+   - Sekarang: seluruh INITIAL_* di-gate pada mode development saja (!IS_PROD_BUILD) dan service tidak lagi melakukan auto-seed data sampel.
+5. Pembersihan PIN 1234 & Masking PIN (src/services/driverShiftService.ts, src/components/DriverCheckinModal.tsx, src/services/e2eTestRunner.ts):
+   - Sebelumnya: PIN default '1234' aktif bila driver belum membuat PIN, dan nilai PIN tampil terang di catatan laporan.
+   - Sekarang: driver wajib membuat PIN terlebih dahulu, dan nilai PIN disamarkan menjadi '****' di seluruh log/notifikasi.
+6. Driver Waybill Jujur terhadap Data Kosong (src/services/driverWaybillService.ts):
+   - Sebelumnya: mengarang 'Ach Taufiq', '0812-3456-7890', 'P 8848 U', 'Engkel Long Box', gate-out '07:30 WIB', ETA '14:00 WIB', dan 'Bpk. Herman'.
+   - Sekarang: menggunakan '-' atau '' jika data jadwal/armada/kru belum diisi.
+7. Pelabelan Demo OCR (src/components/DocumentScannerModal.tsx):
+   - Sebelumnya: tombol sampel mengisi nomor surat jalan terlihat operasional dengan status 'verified'.
+   - Sekarang: berawalan DEMO-, diberi catatan [CONTOH DEMO — BUKAN DOKUMEN OPERASIONAL], dan berstatus 'pending_review'.
+8. Validasi Koordinat Toko (server.ts, src/components/CustomerMapping.tsx):
+   - Sebelumnya: koordinat kosong/invalid diganti koordinat default (-8.219, 114.369) atau offset acak.
+   - Sekarang: API backend menolak koordinat invalid (HTTP 400) dan import Excel melewati/menolak baris tanpa koordinat valid.
+9. Penguatan RBAC Backend (server.ts):
+   - Endpoint Armada (requireFleetWrite), Crew (requireCrewWrite), Toko (requireStoreWrite), Jadwal (requireScheduleWrite), Attendance (requireAttendanceWrite), dan validasi spreadsheet (/api/validate-schedule-spreadsheet) dilindungi RBAC server-side.
+10. Production Fail-Fast (server.ts):
+    - Jika NODE_ENV=production dan konfigurasi MySQL Hostinger, SESSION_SECRET, atau hasil build dist/index.html belum tersedia, server langsung keluar dengan kode error (exit 1) dan tidak diam-diam masuk ke mode development.

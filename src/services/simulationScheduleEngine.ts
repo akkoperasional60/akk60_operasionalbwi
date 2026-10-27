@@ -82,29 +82,7 @@ export function buildWeekSchedule(
   const hList = helpersList.length > 0 ? helpersList : crews;
   const fList = fleets.length > 0 ? fleets : [];
 
-  // Drivers pool reference:
-  // dList[0]: Zainul Agustiar (Driver Utama)
-  // dList[1]: Ach Taufiq (Driver Utama)
-  // dList[2]: Faisol Arifin (Driver Utama)
-  // dList[3]: Aldi Wahyu Pradana (Driver Utama)
-  // dList[4]: Arif Bagus Muhammad Iqbal (Driver Utama)
-  // dList[5]: Budiono (Driver Utama)
-  // dList[6]: Suwarno (Driver Cadangan)
-  // dList[7]: Supriyanto (Driver Cadangan)
-  // dList[8]: Adit (Driver Cadangan)
-  // dList[9]: Rudin (Driver Cadangan)
-  // dList[10]: Nanda (Driver Cadangan)
-
-  // Helpers pool reference:
-  // hList[0]: Aan Adi Saputra
-  // hList[1]: Bintang Wahyu Pratama
-  // hList[2]: Alphian Bayu Nugraha
-  // hList[3]: Mohamad Rohman
-  // hList[4]: Riki Novandito Ardiansyah
-  // hList[5]: Saiful Bahri
-  // hList[6]: Angga
-  // hList[7]: Rifaldi
-
+  // Dynamic crew & fleet pools hydrated from Hostinger MySQL (logisticsStore)
   return INITIAL_STRUCTURED_WEEKLY_ROUTES.map((item, index) => {
     let assignedDriver = dList[0]?.id || '';
     let assignedHelper = hList[0]?.id || '';

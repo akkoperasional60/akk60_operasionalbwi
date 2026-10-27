@@ -14,7 +14,9 @@ export const CENTRAL_WAREHOUSE = {
   rating: '4.7 (55 ulasan)'
 };
 
-export const INITIAL_PROFILES: UserProfile[] = [
+const IS_PROD_BUILD = typeof import.meta !== 'undefined' && Boolean((import.meta as any).env?.PROD);
+
+export const INITIAL_PROFILES: UserProfile[] = IS_PROD_BUILD ? [] : [
   {
     id: 'usr-001',
     email: 'admin@gmail.com',
@@ -186,7 +188,7 @@ export const INITIAL_PROFILES: UserProfile[] = [
   }
 ];
 
-export const INITIAL_FLEETS: Fleet[] = [
+export const INITIAL_FLEETS: Fleet[] = IS_PROD_BUILD ? [] : [
   {
     id: 'flt-01',
     plateNumber: 'P 8125 VC',
@@ -468,7 +470,7 @@ export const INITIAL_FLEETS: Fleet[] = [
   }
 ];
 
-export const INITIAL_CREWS: Crew[] = [
+export const INITIAL_CREWS: Crew[] = IS_PROD_BUILD ? [] : [
   {
     id: 'crw-01',
     name: 'Zainul Agustiar',
@@ -722,9 +724,9 @@ export const INITIAL_CREWS: Crew[] = [
   }
 ];
 
-export const INITIAL_STORES: RetailStore[] = [...VERIFIED_DATA_FIX_STORES];
+export const INITIAL_STORES: RetailStore[] = IS_PROD_BUILD ? [] : [...VERIFIED_DATA_FIX_STORES];
 
-export const INITIAL_SCHEDULES: Schedule[] = [
+export const INITIAL_SCHEDULES: Schedule[] = IS_PROD_BUILD ? [] : [
   {
     id: 'sch-budiono-dps',
     trackingNumber: 'TRK-2026-DPS-BUDIONO',
@@ -844,7 +846,7 @@ export const INITIAL_SCHEDULES: Schedule[] = [
   }
 ];
 
-export const INITIAL_TRACKSOLID_DEVICES: TracksolidDevice[] = [
+export const INITIAL_TRACKSOLID_DEVICES: TracksolidDevice[] = IS_PROD_BUILD ? [] : [
   {
     imei: '353701090461274',
     vehiclePlate: 'B 9128 UYX',
@@ -1086,7 +1088,7 @@ export const SAMPLE_ROUTE_POINTS: TrackingPoint[] = [
   { timestamp: '2026-09-17 15:30:00', latitude: -5.3812, longitude: 105.2589, speed: 15, engineStatus: 'RUNNING', locationName: 'Area Masuk Retail Mall Boemi Kedaton Hypermart Lampung' }
 ];
 
-export const INITIAL_CREW_HISTORY: CrewDeliveryHistory[] = [
+export const INITIAL_CREW_HISTORY: CrewDeliveryHistory[] = IS_PROD_BUILD ? [] : [
   {
     id: 'cdh-01',
     crewId: 'crw-01',
@@ -1410,7 +1412,7 @@ export const INITIAL_CREW_HISTORY: CrewDeliveryHistory[] = [
   }
 ];
 
-export const INITIAL_AREA_APPROVALS: AreaApprovalRequest[] = [
+export const INITIAL_AREA_APPROVALS: AreaApprovalRequest[] = IS_PROD_BUILD ? [] : [
   {
     id: 'appr-01',
     crewId: 'crw-01',
@@ -1431,7 +1433,7 @@ export const INITIAL_AREA_APPROVALS: AreaApprovalRequest[] = [
   }
 ];
 
-export const INITIAL_SCANNED_DOCUMENTS: ScannedDocumentLog[] = [
+export const INITIAL_SCANNED_DOCUMENTS: ScannedDocumentLog[] = IS_PROD_BUILD ? [] : [
   {
     id: 'DOC-SCAN-1728391001',
     documentType: 'delivery_slip',

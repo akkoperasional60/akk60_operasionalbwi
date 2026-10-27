@@ -50,15 +50,15 @@ class DriverShiftService {
   }
 
   /**
-   * Get current PIN for driver
+   * Get current PIN for driver (returns empty string if not configured yet)
    */
   public getPin(driverId: string): string {
     try {
       const rawPins = localStorage.getItem(PINS_STORAGE_KEY);
       const pins: Record<string, string> = rawPins ? JSON.parse(rawPins) : {};
-      return pins[driverId] || '1234';
+      return pins[driverId] || '';
     } catch {
-      return '1234';
+      return '';
     }
   }
 
@@ -72,11 +72,11 @@ class DriverShiftService {
       const expectedPin = pins[driverId];
       // Jika pengguna baru belum pernah mengatur PIN, izinkan PIN 4 digit yang dikonfirmasi 2x dan simpan sebagai PIN mereka
       if (!expectedPin) {
-        return inputPin.trim().length === 4;
+        return /^\d{4}$/.test(inputPin.trim());
       }
       return inputPin.trim() === expectedPin.trim();
     } catch {
-      return inputPin.trim().length === 4;
+      return false;
     }
   }
 
@@ -95,6 +95,7 @@ class DriverShiftService {
   ): boolean {
     try {
       const cleanPin = newPin.trim();
+      if (!/^\d{4}$/.test(cleanPin)) return false;
       const rawPins = localStorage.getItem(PINS_STORAGE_KEY);
       const pins: Record<string, string> = rawPins ? JSON.parse(rawPins) : {};
       pins[driverId] = cleanPin;
@@ -107,9 +108,9 @@ class DriverShiftService {
         driverId,
         driverName: meta?.driverName || currentUser?.fullName || 'Kru Pengemudi',
         userRole: roleLabel,
-        plateNumber: meta?.plateNumber || 'P 8848 U',
+        plateNumber: meta?.plateNumber || '-',
         areaName: meta?.areaName || 'Otentikasi Keamanan Kru DC',
-        newPin: cleanPin
+        newPin: '****'
       });
 
       return true;
@@ -175,8 +176,8 @@ class DriverShiftService {
       driverId: params.driverId,
       driverName: params.driverName,
       fleetId: params.fleetId,
-      plateNumber: params.plateNumber || 'P 8848 U',
-      vehicleType: params.vehicleType || 'Engkel Long Box',
+      plateNumber: params.plateNumber || '-',
+      vehicleType: params.vehicleType || '-',
       date: dateStr,
       checkinTime: now.toISOString(),
       checkinTimeFormatted: timeFormatted,
@@ -187,7 +188,7 @@ class DriverShiftService {
       status: 'checked_in',
       shiftName: params.shiftName || 'Shift Operasional Harian',
       odometerStartKm: 0,
-      notes: params.notes || `Presensi masuk resmi via PIN Keamanan (2x Verifikasi): ${cleanPin}`,
+      notes: params.notes || 'Presensi masuk resmi via PIN Keamanan (2x Verifikasi)',
       synced: false,
       createdAt: now.toISOString()
     };
@@ -203,10 +204,10 @@ class DriverShiftService {
       driverId: params.driverId,
       driverName: params.driverName,
       userRole: roleLabel,
-      plateNumber: newShift.plateNumber || 'P 8848 U',
+      plateNumber: newShift.plateNumber || '-',
       areaName: params.areaName || 'Presensi Masuk Shift DC',
       checkinTimeFormatted: timeFormatted,
-      securityPin: cleanPin
+      securityPin: '****'
     });
 
     // Persist attendance to Hostinger MySQL
@@ -272,11 +273,11 @@ class DriverShiftService {
         driverId,
         driverName: meta?.driverName || currentUser?.fullName || 'Kru Pengemudi',
         userRole: roleLabel,
-        plateNumber: meta?.plateNumber || 'P 8848 U',
+        plateNumber: meta?.plateNumber || '-',
         areaName: meta?.areaName || 'Presensi Shift Operasional DC',
-        checkinTimeFormatted: '07:30 WIB',
+        checkinTimeFormatted: '-',
         checkoutTimeFormatted: checkoutFormatted,
-        securityPin: currentPin
+        securityPin: '****'
       });
       return {
         success: true,
@@ -299,11 +300,11 @@ class DriverShiftService {
       driverId: active.driverId,
       driverName: meta?.driverName || active.driverName,
       userRole: roleLabel,
-      plateNumber: meta?.plateNumber || active.plateNumber || 'P 8848 U',
+      plateNumber: meta?.plateNumber || active.plateNumber || '-',
       areaName: meta?.areaName || 'Presensi Shift Operasional DC',
       checkinTimeFormatted: active.checkinTimeFormatted,
       checkoutTimeFormatted: checkoutFormatted,
-      securityPin: currentPin
+      securityPin: '****'
     });
 
     if (typeof window !== 'undefined') {

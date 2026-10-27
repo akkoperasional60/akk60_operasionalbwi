@@ -376,8 +376,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       driver: defaultDriver,
       helper: defaultHelper,
       helper2: '',
-      area: 'DENPASAR 1',
-      armada: 'DS3',
+      area: '',
+      armada: '',
       target: '',
       departureTime: '07:30',
       targetReturnTime: '17:00',
@@ -385,13 +385,13 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     });
   };
 
-  // Real-Time Auto-Sync State (Persisted in localStorage, default: true)
+  // Real-Time Auto-Sync State (Persisted in localStorage, default: false)
   const [isAutoSyncEnabled, setIsAutoSyncEnabled] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('akk_auto_sync_enabled');
-      return saved !== null ? saved === 'true' : true;
+      return saved === 'true';
     } catch {
-      return true;
+      return false;
     }
   });
 
@@ -791,9 +791,9 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       const dateString = `${String(dayNum).padStart(2, '0')} ${monthNameDisplay} ${yr}`;
       lastFocusedDateString = dateString;
 
-      const stdArea = standardizeAreaName(t.area || 'DENPASAR 1');
-      const armadaCode = (t.armada || 'DS3').trim().toUpperCase();
-      const driverName = (t.driver || 'Supri').trim();
+      const stdArea = standardizeAreaName(t.area || '-');
+      const armadaCode = (t.armada || '-').trim().toUpperCase();
+      const driverName = (t.driver || '-').trim();
       const helperName = t.helper && t.helper.trim() && t.helper.trim() !== '-' ? t.helper.trim() : '-';
       const helper2Name = t.helper2 && t.helper2.trim() && t.helper2.trim() !== '-' ? t.helper2.trim() : '-';
 

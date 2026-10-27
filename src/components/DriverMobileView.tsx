@@ -686,7 +686,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   const handleToggleOfflineMode = (enableOffline: boolean) => {
     driverOfflineSyncService.setSimulatedOffline(enableOffline);
     const activeDel = activeDeliveries[0] || scheduledDeliveries[0] || deliveries[0];
-    const plateStr = assignedFleet?.plateNumber || activeDel?.fleet?.plateNumber || 'P 8848 U';
+    const plateStr = assignedFleet?.plateNumber || activeDel?.fleet?.plateNumber || '-';
     const areaStr = activeDel?.areaName || activeDel?.store?.storeName || 'Rute Pengiriman Aktif';
     const helperStr = activeDel?.crewHelper?.name || undefined;
 
@@ -730,7 +730,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         driverName: portalDisplayName,
         userRole: syncedUserRoleInfo.roleLabel,
         helperName: activeDel?.crewHelper?.name,
-        plateNumber: assignedFleet?.plateNumber || activeDel?.fleet?.plateNumber || 'P 8848 U',
+        plateNumber: assignedFleet?.plateNumber || activeDel?.fleet?.plateNumber || '-',
         areaName: activeDel?.areaName || activeDel?.store?.storeName || 'Rute Pengiriman Aktif',
         modeType: 'simulasi'
       });
@@ -1740,9 +1740,9 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       const fresh = driverChecklistService.createNewChecklistTemplate(
         selectedDriverId,
         currentDriver?.name || portalDisplayName || 'Driver',
-        assignedFleet?.id || 'fl-01',
-        assignedFleet?.plateNumber || 'P 8848 U',
-        assignedFleet?.vehicleType || 'Engkel Long Box'
+        assignedFleet?.id || '',
+        assignedFleet?.plateNumber || '-',
+        assignedFleet?.vehicleType || '-'
       );
       setActiveChecklistToEdit(fresh);
       setChecklistInspectionType('pre_trip');
@@ -1762,8 +1762,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
     updateSharedScheduleFlow([delivery.id], {
       fleetId: assignedFleet?.id || delivery.fleetId,
-      plateNumber: assignedFleet?.plateNumber || delivery.fleet?.plateNumber || 'P 8848 U',
-      vehicleType: assignedFleet?.vehicleType || delivery.fleet?.vehicleType || 'Engkel Long Box',
+      plateNumber: assignedFleet?.plateNumber || delivery.fleet?.plateNumber || '-',
+      vehicleType: assignedFleet?.vehicleType || delivery.fleet?.vehicleType || '-',
       checklistCompleted: true,
       checklistCompletedBy: sharedCrewPreTripState.completedBy || portalDisplayName,
       preparedForGateOut: true,
@@ -1808,8 +1808,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
     updateSharedScheduleFlow([delivery.id], {
       fleetId: preparedSchedule.fleetId,
-      plateNumber: preparedSchedule.fleet?.plateNumber || 'P 8848 U',
-      vehicleType: preparedSchedule.fleet?.vehicleType || 'Engkel Long Box',
+      plateNumber: preparedSchedule.fleet?.plateNumber || '-',
+      vehicleType: preparedSchedule.fleet?.vehicleType || '-',
       checklistCompleted: true,
       preparedForGateOut: true,
       gateOutConfirmed: true,
@@ -1842,7 +1842,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       driverId: selectedDriverId,
       driverName: currentDriver?.name || 'Driver',
       helperName: delayModal.delivery?.crewHelper?.name,
-      plateNumber: assignedFleet?.plateNumber || 'P 8125 VC',
+      plateNumber: assignedFleet?.plateNumber || delayModal.delivery?.fleet?.plateNumber || '-',
       category: 'kendala_jalan',
       areaName: delayModal.delivery.areaName || delayModal.delivery.store?.storeName || 'Area Distribusi',
       deliveryId: delayModal.delivery.id,
@@ -1894,7 +1894,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       driverId: selectedDriverId,
       driverName,
       helperName: transferModal.delivery?.crewHelper?.name,
-      plateNumber: assignedFleet?.plateNumber || 'P 8125 VC',
+      plateNumber: assignedFleet?.plateNumber || transferModal.delivery?.fleet?.plateNumber || '-',
       category: 'kendala_jalan',
       areaName: targetArea,
       deliveryId: transferModal.delivery.id,
@@ -2032,7 +2032,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       driverName: currentDriver?.name || portalDisplayName,
       userRole: syncedUserRoleInfo.roleLabel,
       helperName: targetDelivery?.crewHelper?.name,
-      plateNumber: assignedFleet?.plateNumber || targetDelivery?.fleet?.plateNumber || 'P 8125 VC',
+      plateNumber: assignedFleet?.plateNumber || targetDelivery?.fleet?.plateNumber || '-',
       category: 'akhir_kiriman',
       areaName: targetDelivery.areaName || targetDelivery.store?.storeName || 'Gudang Argo',
       deliveryId: targetDelivery.id,
@@ -2051,7 +2051,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         {
           driverName: currentDriver?.name || currentActiveShift.driverName || portalDisplayName,
           userRole: syncedUserRoleInfo.roleLabel,
-          plateNumber: assignedFleet?.plateNumber || currentActiveShift.plateNumber || targetDelivery?.fleet?.plateNumber || 'P 8125 VC',
+          plateNumber: assignedFleet?.plateNumber || currentActiveShift.plateNumber || targetDelivery?.fleet?.plateNumber || '-',
           areaName: targetDelivery.areaName || targetDelivery.store?.storeName || 'Gudang Argo'
         }
       );
@@ -2084,9 +2084,9 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     const postTripTemplate = driverChecklistService.createNewChecklistTemplate(
       selectedDriverId,
       currentDriver?.name || portalDisplayName || 'Driver',
-      assignedFleet?.id || targetDelivery.fleet?.id || 'fl-01',
-      assignedFleet?.plateNumber || targetDelivery.fleet?.plateNumber || 'P 8848 U',
-      assignedFleet?.vehicleType || targetDelivery.fleet?.vehicleType || 'Engkel Long Box',
+      assignedFleet?.id || targetDelivery.fleet?.id || '',
+      assignedFleet?.plateNumber || targetDelivery.fleet?.plateNumber || '-',
+      assignedFleet?.vehicleType || targetDelivery.fleet?.vehicleType || '-',
       0
     );
     postTripTemplate.inspectionType = 'post_trip';

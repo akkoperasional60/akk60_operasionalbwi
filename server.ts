@@ -14,23 +14,12 @@ dotenv.config();
 const apiKey = process.env.GEMINI_API_KEY;
 const genAI = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
-const SYSTEM_INSTRUCTION = `
+const BASE_SYSTEM_INSTRUCTION = `
 Anda adalah "Operasional AI Assistant" untuk PT Anugrah Kemasan Kreatif (PT AKK Logistics Banyuwangi DC).
 Anda bertugas menjawab pertanyaan seputar operasional logistik, armada truk, jadwal pengiriman, sopir/helper, BBM, tiket kapal penyeberangan, sparepart, dan SOP perusahaan secara profesional, cepat, ramah, dan akurat dalam bahasa Indonesia.
 
 Informasi Utama PT AKK Logistics:
 - Gudang Pusat (DC): Jl. Argopuro No.60, Lingkungan Sukowidi, Klatak, Kec. Kalipuro, Kab. Banyuwangi, Jawa Timur 68421.
-- Penanggung Jawab: Bambang Sudiro, S.T. (Head of Logistics AKK) & Bayu Novianto Dimas Permana, S.Si (Direksi Operasional & Supply Chain).
-- Total Armada Aktif (12 Unit): 
-  • Pick Up Box L300 (P 8125 VC - N1/NP1) - Driver: Zainul Agustiar, Helper: Aan Adi Saputra
-  • Pick Up Box Traga (P 8509 VQ - A3/NP3) - Driver: Ach Taufiq
-  • Engkel STD Mitsubishi Canter (P 8848 U - N3/NS1, P 9677 VB - N4/NS2, P 8801 UV - N5/NS3)
-  • Engkel Long Hino (P 8381 VE - N20/NL1, P 8711 UW - N21/NL2)
-  • Double STD Hino / Isuzu NMR (P 9281 VA - N22/DS1, P 8928 UR - N23/DS2, P 9194 SA - S5/DS3, W 8229 US - NMR/DS4, W 8603 PG - NMR/DS5)
-- Tim Sopir & Helper Terdaftar (19 Personel):
-  • Driver Utama: Zainul Agustiar (SIM B2 Umum), Ach Taufiq, Aldi Wahyu Pradana, Arif Bagus Muhammad Iqbal, Faisol Arifin, Budiono, Nanda Tegar, Rudin Slamet, Supriyanto.
-  • Helper / Kernet: Aan Adi Saputra, Bintang Wahyu Pratama, Alphian Bayu Nugraha, Mohamad Rohman, Riki Novandito, Saiful Rizal, Rifaldi Aminullah, Angga Arrohmad.
-  • Driver Cadangan: Suwarno, Adit.
 - SOP & Aturan Utama:
   1. Rotasi Jeda Istirahat 24 Jam: Pengemudi yang telah menyelesaikan perjalanan luar kota jarak jauh (>300 km) atau rute penyeberangan antar-pulau wajib menjalani jeda istirahat 24 jam sebelum diperbolehkan bertugas kembali.
   2. Batas Maksimal 3x Area Berturut-turut: Driver yang ditugaskan di rute luar pulau (misal Lampung/Bali) selama 3 kali berturut-turut wajib mendapatkan persetujuan (approval) khusus dari Manager Logistik sebelum penugasan ke-4 demi mencegah kelelahan (fatigue audit).
@@ -39,14 +28,44 @@ Informasi Utama PT AKK Logistics:
   5. Perbaikan & Sparepart: Komponen kritis (kampas rem, oli, ban) diajukan melalui SPK Bengkel ke bagian Manajemen Sparepart.
   6. Pelacakan & Evaluasi Rute: Evaluasi jalur pengiriman armada terintegrasi melalui unggahan data rute GPS Excel dan pemetaan Jaringan Toko & Mitra.
 
-Jawablah pertanyaan pengguna secara langsung, spesifik, padat, dan solutif. Sertakan angka, nama sopir, atau langkah SOP jika relevan. Formatlah jawaban dengan poin-poin yang rapi dan mudah dibaca.
+Jawablah pertanyaan pengguna secara langsung, spesifik, padat, dan solutif berdasarkan konteks database MySQL aktif. Jangan mengarang plat nomor atau nama personel yang tidak ada di konteks database.
 `;
+
+async function buildLiveOperationalContext(): Promise<{ fleetContext: string; crewContext: string }> {
+  if (!isDatabaseConfigured()) {
+    return {
+      fleetContext: 'Belum ada data armada dari Hostinger MySQL.',
+      crewContext: 'Belum ada data kru dari Hostinger MySQL.'
+    };
+  }
+  try {
+    const [fleetRows, crewRows] = await Promise.all([
+      mysqlQuery<any[]>("SELECT plate_number, vehicle_type, status FROM fleets ORDER BY plate_number ASC LIMIT 50"),
+      mysqlQuery<any[]>("SELECT name, role, license_type, status FROM crews ORDER BY name ASC LIMIT 100")
+    ]);
+    const fleetContext = Array.isArray(fleetRows) && fleetRows.length > 0
+      ? fleetRows.map(f => `- ${f.plate_number} (${f.vehicle_type || 'Armada'} • Status: ${f.status || 'available'})`).join('\n')
+      : 'Belum ada armada terdaftar di database.';
+    const crewContext = Array.isArray(crewRows) && crewRows.length > 0
+      ? crewRows.map(c => `- ${c.name} (${c.role || 'Kru'} • ${c.license_type || '-'} • Status: ${c.status || 'available'})`).join('\n')
+      : 'Belum ada personel kru terdaftar di database.';
+    return { fleetContext, crewContext };
+  } catch {
+    return {
+      fleetContext: 'Konteks armada MySQL sedang tidak dapat dibaca.',
+      crewContext: 'Konteks kru MySQL sedang tidak dapat dibaca.'
+    };
+  }
+}
 
 const MODELS_TO_TRY = ['gemini-3.8-flash', 'gemini-flash-latest'];
 
 async function generateChatReply(message: string, contextTab?: string, history?: any[]): Promise<string> {
   // Try calling Gemini API if SDK is available
   if (genAI) {
+    const liveCtx = await buildLiveOperationalContext();
+    const dynamicSystemInstruction = `${BASE_SYSTEM_INSTRUCTION}\n\nData Armada Aktif (Hostinger MySQL):\n${liveCtx.fleetContext}\n\nData Kru Terdaftar (Hostinger MySQL):\n${liveCtx.crewContext}`;
+
     const formattedHistory = Array.isArray(history) 
       ? history.map(h => ({
           role: h.role === 'assistant' ? 'model' : 'user',
@@ -65,7 +84,7 @@ async function generateChatReply(message: string, contextTab?: string, history?:
           model: modelName,
           contents,
           config: {
-            systemInstruction: SYSTEM_INSTRUCTION,
+            systemInstruction: dynamicSystemInstruction,
             temperature: 0.7,
           }
         });
@@ -312,6 +331,27 @@ async function startServer() {
   const requireScheduleStatusWrite = requireAnyRole('super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'driver', 'crew_helper');
   const requireStoreWrite = requireAnyRole('super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'sales_admin', 'marketing_offline');
   const requireWarehouseAccess = requireAnyRole('super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'warehouse_admin');
+  const requireAttendanceWrite = requireAnyRole('super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'hr_admin', 'driver', 'crew_helper');
+
+  const isValidCoordinatePair = (rawLat: any, rawLng: any): { valid: boolean; lat: number; lng: number } => {
+    const lat = typeof rawLat === 'string' ? Number(rawLat.replace(',', '.').trim()) : Number(rawLat);
+    const lng = typeof rawLng === 'string' ? Number(rawLng.replace(',', '.').trim()) : Number(rawLng);
+    const valid =
+      rawLat !== null &&
+      rawLat !== undefined &&
+      rawLat !== '' &&
+      rawLng !== null &&
+      rawLng !== undefined &&
+      rawLng !== '' &&
+      Number.isFinite(lat) &&
+      Number.isFinite(lng) &&
+      lat >= -90 &&
+      lat <= 90 &&
+      lng >= -180 &&
+      lng <= 180 &&
+      !(lat === 0 && lng === 0);
+    return { valid, lat, lng };
+  };
 
   const ensureBootstrapAdmin = async (): Promise<void> => {
     if (!isDatabaseConfigured()) return;
@@ -340,13 +380,14 @@ async function startServer() {
         `INSERT INTO users (id, email, password_hash, full_name, role, department, status, approved_at, notes)
          VALUES (?, ?, ?, ?, 'super_admin', 'Manajemen & Direksi', 'approved', NOW(), 'Bootstrap Hostinger')
          ON DUPLICATE KEY UPDATE
+           password_hash = VALUES(password_hash),
            full_name = VALUES(full_name),
            role = 'super_admin',
            status = 'approved',
            approved_at = COALESCE(approved_at, NOW())`,
         [id, email, hashPassword(password), fullName]
       );
-      console.warn('[Bootstrap Admin] Super Admin pertama berhasil dibuat. Setelah login berhasil, segera HAPUS BOOTSTRAP_ADMIN_PASSWORD (dan boleh hapus BOOTSTRAP_ADMIN_EMAIL & BOOTSTRAP_ADMIN_NAME) dari Hostinger ENV.');
+      console.warn('[Bootstrap Admin] Super Admin pertama berhasil dibuat/diperbarui. Setelah login berhasil, segera HAPUS BOOTSTRAP_ADMIN_PASSWORD (dan boleh hapus BOOTSTRAP_ADMIN_EMAIL & BOOTSTRAP_ADMIN_NAME) dari Hostinger ENV.');
     } catch (err: any) {
       console.warn('[Bootstrap Admin] Gagal memastikan Super Admin:', err?.message || err);
     }
@@ -1128,7 +1169,16 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   });
 
-  app.post("/api/attendance", requireAuth, express.json(), async (req, res) => {
+  app.get("/api/attendance", requireAuth, async (_req, res) => {
+    try {
+      const rows = await mysqlQuery<any[]>("SELECT id, crew_id AS crewId, date, status, reason, created_at AS createdAt FROM attendance ORDER BY date DESC, id DESC LIMIT 1000");
+      return res.json({ success: true, source: 'hostinger_mysql', count: rows.length, data: rows });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal membaca presensi' });
+    }
+  });
+
+  app.post("/api/attendance", requireAttendanceWrite, express.json(), async (req, res) => {
     try {
       const { crewId, date, status, reason } = req.body || {};
       if (!crewId || !date) return res.status(400).json({ success: false, error: 'crewId dan date wajib diisi' });
@@ -1170,6 +1220,13 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
   app.post("/api/stores", requireStoreWrite, express.json(), async (req, res) => {
     const store = req.body || {};
     if (!store.storeName) return res.status(400).json({ success: false, error: 'Nama toko wajib diisi' });
+    const coordCheck = isValidCoordinatePair(store.latitude, store.longitude);
+    if (!coordCheck.valid) {
+      return res.status(400).json({
+        success: false,
+        error: 'Koordinat toko (latitude/longitude) tidak valid. Sistem tidak mengganti dengan koordinat palsu.'
+      });
+    }
     const id = store.id || `str-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const storeCode = String(store.storeCode || `STR-${id.slice(-6)}`).trim().toUpperCase();
     try {
@@ -1179,11 +1236,11 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
          ON DUPLICATE KEY UPDATE store_name=VALUES(store_name), island=VALUES(island), province=VALUES(province), city=VALUES(city), address=VALUES(address), latitude=VALUES(latitude), longitude=VALUES(longitude), contact_person=VALUES(contact_person), phone=VALUES(phone), delivery_window=VALUES(delivery_window), store_category=VALUES(store_category), payload_json=VALUES(payload_json)`,
         [
           id, storeCode, String(store.storeName).trim(), store.island || 'Jawa', store.province || 'Jawa Timur', store.city || 'Banyuwangi',
-          store.address || '-', Number(store.latitude || -8.219), Number(store.longitude || 114.369), store.contactPerson || 'PIC Distribusi',
-          store.phone || '-', store.deliveryWindow || '08:00 - 17:00', store.storeCategory || 'Supermarket', JSON.stringify({ ...store, id, storeCode })
+          store.address || '-', coordCheck.lat, coordCheck.lng, store.contactPerson || '-',
+          store.phone || '-', store.deliveryWindow || '08:00 - 17:00', store.storeCategory || 'Supermarket', JSON.stringify({ ...store, id, storeCode, latitude: coordCheck.lat, longitude: coordCheck.lng })
         ]
       );
-      return res.json({ success: true, source: 'hostinger_mysql', data: { ...store, id, storeCode } });
+      return res.json({ success: true, source: 'hostinger_mysql', data: { ...store, id, storeCode, latitude: coordCheck.lat, longitude: coordCheck.lng } });
     } catch (err: any) {
       return res.status(503).json({ success: false, error: err?.message || 'Gagal menyimpan toko' });
     }
@@ -1196,13 +1253,22 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       const rows = await mysqlQuery<any[]>("SELECT * FROM stores WHERE id = ? LIMIT 1", [id]);
       if (!Array.isArray(rows) || rows.length === 0) return res.status(404).json({ success: false, error: 'Toko tidak ditemukan' });
       const current = rows[0];
-      const mergedPayload = { ...(parseJsonColumn(current.payload_json) || {}), ...store, id };
+      const nextLatRaw = store.latitude ?? current.latitude;
+      const nextLngRaw = store.longitude ?? current.longitude;
+      const coordCheck = isValidCoordinatePair(nextLatRaw, nextLngRaw);
+      if (!coordCheck.valid) {
+        return res.status(400).json({
+          success: false,
+          error: 'Koordinat toko (latitude/longitude) tidak valid. Perubahan ditolak.'
+        });
+      }
+      const mergedPayload = { ...(parseJsonColumn(current.payload_json) || {}), ...store, id, latitude: coordCheck.lat, longitude: coordCheck.lng };
       await mysqlQuery(
         `UPDATE stores SET store_code=?, store_name=?, island=?, province=?, city=?, address=?, latitude=?, longitude=?, contact_person=?, phone=?, delivery_window=?, store_category=?, payload_json=? WHERE id=?`,
         [
           String(store.storeCode || current.store_code).trim().toUpperCase(), store.storeName || current.store_name, store.island || current.island,
           store.province || current.province, store.city || current.city, store.address || current.address,
-          Number(store.latitude ?? current.latitude), Number(store.longitude ?? current.longitude), store.contactPerson || current.contact_person,
+          coordCheck.lat, coordCheck.lng, store.contactPerson || current.contact_person,
           store.phone || current.phone, store.deliveryWindow || current.delivery_window, store.storeCategory || current.store_category,
           JSON.stringify(mergedPayload), id
         ]
@@ -1226,9 +1292,15 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     const stores = Array.isArray(req.body?.stores) ? req.body.stores : [];
     if (stores.length > 5000) return res.status(413).json({ success: false, error: 'Maksimal 5000 toko per batch' });
     let saved = 0;
+    let skippedInvalidCoords = 0;
     try {
       for (const store of stores) {
         if (!store?.storeName) continue;
+        const coordCheck = isValidCoordinatePair(store.latitude, store.longitude);
+        if (!coordCheck.valid) {
+          skippedInvalidCoords++;
+          continue;
+        }
         const id = store.id || `str-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         const storeCode = String(store.storeCode || `STR-${id.slice(-6)}`).trim().toUpperCase();
         await mysqlQuery(
@@ -1237,15 +1309,15 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
            ON DUPLICATE KEY UPDATE store_name=VALUES(store_name), island=VALUES(island), province=VALUES(province), city=VALUES(city), address=VALUES(address), latitude=VALUES(latitude), longitude=VALUES(longitude), contact_person=VALUES(contact_person), phone=VALUES(phone), delivery_window=VALUES(delivery_window), store_category=VALUES(store_category), payload_json=VALUES(payload_json)`,
           [
             id, storeCode, String(store.storeName).trim(), store.island || 'Jawa', store.province || 'Jawa Timur', store.city || 'Banyuwangi',
-            store.address || '-', Number(store.latitude || -8.219), Number(store.longitude || 114.369), store.contactPerson || 'PIC Distribusi',
-            store.phone || '-', store.deliveryWindow || '08:00 - 17:00', store.storeCategory || 'Supermarket', JSON.stringify({ ...store, id, storeCode })
+            store.address || '-', coordCheck.lat, coordCheck.lng, store.contactPerson || '-',
+            store.phone || '-', store.deliveryWindow || '08:00 - 17:00', store.storeCategory || 'Supermarket', JSON.stringify({ ...store, id, storeCode, latitude: coordCheck.lat, longitude: coordCheck.lng })
           ]
         );
         saved++;
       }
-      return res.json({ success: true, source: 'hostinger_mysql', saved });
+      return res.json({ success: true, source: 'hostinger_mysql', saved, skippedInvalidCoords });
     } catch (err: any) {
-      return res.status(503).json({ success: false, error: err?.message || 'Gagal menyimpan batch toko', saved });
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal menyimpan batch toko', saved, skippedInvalidCoords });
     }
   });
 
@@ -1282,27 +1354,20 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
         });
       }
 
+      const liveCtx = await buildLiveOperationalContext();
       const promptText = `Anda adalah asisten AI OCR pengenal dokumen logistik resmi PT Anugrah Kemasan Kreatif (PT AKK Banyuwangi DC).
 Analisis foto dokumen yang dilampirkan ini (biasanya berupa Surat Jalan / Bukti Pengiriman / DO / Delivery Slip atau Formulir Inspeksi Harian / Checklist Pra-Jalan Armada Truk / SPK Service Bengkel / Nota BBM).
 ${documentHint ? `Petunjuk jenis dokumen yang dipilih pengguna: ${documentHint}` : ''}
 
-Daftar Armada PT AKK Banyuwangi:
-- P 8125 VC (Pick Up L300 - Zainul Agustiar)
-- P 8509 VQ (Pick Up Traga - Ach Taufiq)
-- P 8848 U (Engkel Canter N3 - Aan Adi Saputra)
-- P 9677 VB (Engkel Canter N4)
-- P 8801 UV (Engkel Canter N5)
-- P 8381 VE (Engkel Long Hino)
-- P 8711 UW (Engkel Long Hino)
-- P 9281 VA (Double Hino N22 - Zainul Agustiar)
-- P 8928 UR (Double Hino N23)
-- P 9194 SA (Double Hino S5)
-- W 8229 US (Double Isuzu NMR)
-- W 8603 PG (Double Isuzu NMR)
+Daftar Armada Aktif dari Database MySQL:
+${liveCtx.fleetContext}
+
+Daftar Kru dari Database MySQL:
+${liveCtx.crewContext}
 
 Tugas Anda:
 1. Kenali apakah ini "delivery_slip" (Surat Jalan), "inspection_form" (Formulir Inspeksi Checklist), "service_order" (Formulir Service/SPK), atau "fuel_receipt" (Nota BBM).
-2. Ekstrak teks penting: Nomor Dokumen, Tanggal, Plat Nomor Truk, Nama Supir/Pemeriksa, Tujuan/Toko/Outlet, Rincian Muatan (Karton Box) atau Poin Pemeriksaan Kendaraan, Total Koli/Tonase/Hasil Inspeksi, Catatan atau Kondisi, dan apakah tanda tangan/stempel terdeteksi.
+2. Ekstrak teks penting sesuai yang tertulis di dokumen asli (jangan mengarang plat nomor atau nama supir jika tidak tertulis): Nomor Dokumen, Tanggal, Plat Nomor Truk, Nama Supir/Pemeriksa, Tujuan/Toko/Outlet, Rincian Muatan (Karton Box) atau Poin Pemeriksaan Kendaraan, Total Koli/Tonase/Hasil Inspeksi, Catatan atau Kondisi, dan apakah tanda tangan/stempel terdeteksi.
 3. Kembalikan HANYA format JSON valid tanpa format markdown:
 {
   "documentType": "delivery_slip" | "inspection_form" | "service_order" | "fuel_receipt" | "other",
@@ -1423,7 +1488,7 @@ Tugas Anda:
   });
 
   // 🔍 Server-side Spreadsheet Schema Validation Endpoint
-  app.post('/api/validate-schedule-spreadsheet', requireAuth, express.json({ limit: '50mb' }), (req, res) => {
+  app.post('/api/validate-schedule-spreadsheet', requireScheduleWrite, express.json({ limit: '50mb' }), (req, res) => {
     try {
       const { fileBase64 } = req.body;
       if (!fileBase64) {
@@ -1548,10 +1613,12 @@ Tugas Anda:
   const indexHtmlPath = path.join(distPath, 'index.html');
   const hasDist = fs.existsSync(indexHtmlPath);
 
-  if (isProduction && hasDist) {
-    if (fs.existsSync(distPath)) {
-      app.use(express.static(distPath));
+  if (isProduction) {
+    if (!hasDist) {
+      console.error('[Startup Production] Build frontend (dist/index.html) tidak ditemukan. Jalankan "npm run build" sebelum memulai server production.');
+      process.exit(1);
     }
+    app.use(express.static(distPath));
     app.get('*', (req, res, next) => {
       if (req.path.startsWith('/api/') || req.path.startsWith('/downloads/')) return next();
       res.sendFile(indexHtmlPath, (err) => {
@@ -1562,7 +1629,7 @@ Tugas Anda:
       });
     });
   } else {
-    // In development mode or if dist is not yet built, Vite middleware compiles and serves on-the-fly
+    // In development mode, Vite middleware compiles and serves on-the-fly
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
@@ -1570,9 +1637,25 @@ Tugas Anda:
     app.use(vite.middlewares);
   }
 
-  // Cek koneksi database dan bootstrap Super Admin jika database telah dikonfigurasi
+  // Cek koneksi database dan bootstrap Super Admin
   try {
-    if (isDatabaseConfigured()) {
+    const isHostingerEnv = isProduction && !process.env.K_SERVICE;
+    if (isHostingerEnv) {
+      if (!String(process.env.SESSION_SECRET || '').trim() || String(process.env.SESSION_SECRET || '').trim().length < 32) {
+        console.error('[Startup Production] SESSION_SECRET wajib diisi minimal 32 karakter pada Environment Variables Hostinger.');
+        process.exit(1);
+      }
+      if (!isDatabaseConfigured()) {
+        console.error('[Startup Production] Konfigurasi database Hostinger MySQL (DB_NAME, DB_USER, DB_PASSWORD) belum lengkap.');
+        process.exit(1);
+      }
+      const conn = await testMysqlConnection();
+      if (!conn.success) {
+        console.error('[Startup Production] Gagal terhubung ke Hostinger MySQL:', conn.message);
+        process.exit(1);
+      }
+      await ensureBootstrapAdmin();
+    } else if (isDatabaseConfigured()) {
       const conn = await testMysqlConnection();
       if (conn.success) {
         await ensureBootstrapAdmin();
@@ -1580,10 +1663,13 @@ Tugas Anda:
         console.warn('[Startup Database] Hostinger MySQL belum terhubung:', conn.message);
       }
     } else {
-      console.warn('[Startup Database] Hostinger MySQL credentials (DB_NAME, DB_USER, DB_PASSWORD) belum dikonfigurasi. Server tetap berjalan melayani web & API.');
+      console.warn('[Startup Database] Hostinger MySQL credentials (DB_NAME, DB_USER, DB_PASSWORD) belum dikonfigurasi. Mode preview berjalan tanpa database MySQL.');
     }
   } catch (err: any) {
     console.error('[Startup Database] Peringatan koneksi database saat startup:', err?.message || err);
+    if (isProduction && !process.env.K_SERVICE) {
+      process.exit(1);
+    }
   }
 
   const preferredPort = Number(process.env.PORT) || 3000;
