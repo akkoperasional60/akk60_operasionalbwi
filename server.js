@@ -1,3 +1,6 @@
 import 'tsx';
 
-await import('./server.ts');
+import('./server.ts').catch((error) => {
+  console.error('Gagal menjalankan server.ts:', error);
+  process.exit(1);
+});
