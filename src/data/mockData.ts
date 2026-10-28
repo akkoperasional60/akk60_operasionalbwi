@@ -19,7 +19,7 @@ const IS_PROD_BUILD = typeof import.meta !== 'undefined' && Boolean((import.meta
 export const INITIAL_PROFILES: UserProfile[] = IS_PROD_BUILD ? [] : [
   {
     id: 'usr-001',
-    email: 'admin@gmail.com',
+    email: 'akkoperasional60@gmail.com',
     fullName: 'Super Admin',
     role: 'super_admin',
     department: 'Manajemen & Direksi',
@@ -112,14 +112,14 @@ export const INITIAL_PROFILES: UserProfile[] = IS_PROD_BUILD ? [] : [
     id: 'usr-hendri',
     email: 'hendri.st@gmail.com',
     fullName: 'Hendri ST',
-    role: 'super_admin',
-    department: 'Manajemen & Direksi',
+    role: 'operasional',
+    department: 'Manajemen & Operasional',
     phone: '0813-4455-6655',
     status: 'approved',
     createdAt: '2026-01-10T08:00:00Z',
     approvedAt: '2026-01-10T08:30:00Z',
     approvedBy: 'Super Admin',
-    notes: 'Super Admin / Head Management AKK (Full Akses Semua Menu)'
+    notes: 'Operasional / Head Management AKK'
   },
   {
     id: 'usr-sales',

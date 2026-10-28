@@ -234,15 +234,36 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       const roleDefaults = getDefaultPermissionsForRole(selectedUser.role);
       const initialPerms: UserPermissions['modules'] = {};
       const nextExpanded: Record<string, boolean> = {};
+      const isLogisticsLead =
+        selectedUser.role === 'spv_logistik' ||
+        selectedUser.role === 'operasional' ||
+        selectedUser.role === 'pengiriman' ||
+        selectedUser.role === 'dispatcher';
 
       MODULE_DEFINITIONS.forEach(mod => {
         const userMod = selectedUser.permissions?.modules?.[mod.id];
         const defaultMod = roleDefaults[mod.id];
         const subMenuPerms: Record<string, 'read_only' | 'full_access' | 'none'> = {};
+
+        // Detect if a logistics staff user had partial/unassigned 'none' submenus in 'logistics'
+        const savedSubValues = Object.values(userMod?.subMenus || {});
+        const savedActiveCount = savedSubValues.filter(v => v === 'full_access' || v === 'read_only').length;
+        const shouldUseRoleDefaultForLogistics =
+          mod.id === 'logistics' && isLogisticsLead && savedActiveCount <= 1;
+
         mod.subMenus.forEach(sub => {
-          subMenuPerms[sub.id] = userMod?.subMenus?.[sub.id] || defaultMod?.subMenus?.[sub.id] || 'read_only';
+          if (shouldUseRoleDefaultForLogistics) {
+            subMenuPerms[sub.id] = defaultMod?.subMenus?.[sub.id] || 'full_access';
+          } else {
+            const savedVal = userMod?.subMenus?.[sub.id];
+            subMenuPerms[sub.id] = savedVal !== undefined ? savedVal : (defaultMod?.subMenus?.[sub.id] || 'none');
+          }
         });
-        const isEnabled = userMod !== undefined ? userMod.enabled : (defaultMod ? defaultMod.enabled : false);
+        const isEnabled = shouldUseRoleDefaultForLogistics
+          ? true
+          : userMod !== undefined
+          ? userMod.enabled
+          : (defaultMod ? defaultMod.enabled : false);
         initialPerms[mod.id] = {
           enabled: isEnabled,
           subMenus: subMenuPerms
@@ -254,13 +275,14 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       setEditingPermissions(initialPerms);
       setExpandedModules(nextExpanded);
     }
-  }, [selectedUser?.id, selectedUser?.role]);
+  }, [selectedUser?.id, selectedUser?.role, selectedUser?.permissions]);
 
   const ROLE_LABELS: Record<UserRole, string> = {
     super_admin: 'Super Admin / Manager',
     dispatcher: 'Dispatcher / SPV Logistik',
     spv_logistik: 'SPV Logistik',
     operasional: 'Operasional (Operational Lead)',
+    pengiriman: 'Pengiriman',
     security: 'Security (Pos Satpam & Keamanan)',
     sales_admin: 'Adm. Penjualan',
     purchasing_admin: 'Adm. Pembelian',
@@ -283,13 +305,35 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
       showNotification('Akses Ditolak', 'Hanya Super Admin yang berwenang mengubah hak akses modul.', 'warning');
       return;
     }
-    setEditingPermissions(prev => ({
-      ...prev,
-      [modId]: {
-        ...(prev[modId] || { subMenus: {} }),
-        enabled
+    const modDef = MODULE_DEFINITIONS.find(m => m.id === modId);
+    setEditingPermissions(prev => {
+      const existingSubMenus = { ...(prev[modId]?.subMenus || {}) };
+      if (modDef) {
+        const hasAnyActive = modDef.subMenus.some(
+          sub => existingSubMenus[sub.id] === 'full_access' || existingSubMenus[sub.id] === 'read_only'
+        );
+        modDef.subMenus.forEach(sub => {
+          if (enabled) {
+            // If enabling module (or if only <=1 submenu was active), grant full_access to all submenus
+            if (!hasAnyActive || existingSubMenus[sub.id] === 'none' || !existingSubMenus[sub.id]) {
+              existingSubMenus[sub.id] = 'full_access';
+            }
+          } else {
+            existingSubMenus[sub.id] = 'none';
+          }
+        });
       }
-    }));
+      return {
+        ...prev,
+        [modId]: {
+          enabled,
+          subMenus: existingSubMenus
+        }
+      };
+    });
+    if (enabled) {
+      setExpandedModules(prev => ({ ...prev, [modId]: true }));
+    }
   };
 
   const handleSubMenuPermissionChange = (modId: string, subId: string, accessLevel: 'none' | 'read_only' | 'full_access') => {
@@ -547,7 +591,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
     const role = (u.role || '').toLowerCase();
     switch (filterKey) {
       case 'logistics':
-        return role === 'spv_logistik' || role === 'operasional' || role === 'driver' || role === 'crew_helper' || /logistik|pengiriman|distribusi|armada|supir|operasional/i.test(dept);
+        return role === 'spv_logistik' || role === 'operasional' || role === 'pengiriman' || role === 'driver' || role === 'crew_helper' || /logistik|pengiriman|distribusi|armada|supir|operasional/i.test(dept);
       case 'sales':
         return role === 'sales_admin' || /sales|penjualan/i.test(dept);
       case 'warehouse':
@@ -906,7 +950,14 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                   <div className="flex items-center gap-2 self-end sm:self-auto flex-wrap">
                     {selectedUser.status === 'approved' && (
                       <button
-                        onClick={() => logisticsStore.switchCurrentUser(selectedUser.id)}
+                        onClick={() => {
+                          if (isSuperAdmin && Object.keys(editingPermissions).length > 0) {
+                            logisticsStore.updateUserProfile(selectedUser.id, {
+                              permissions: { modules: editingPermissions }
+                            });
+                          }
+                          logisticsStore.switchCurrentUser(selectedUser.id);
+                        }}
                         className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs active:scale-95"
                         title={`Masuk sebagai ${selectedUser.fullName} dan buka menu ${ROLE_LABELS[selectedUser.role] || selectedUser.role}`}
                       >
@@ -1504,8 +1555,10 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                       setNewUser({
                         ...newUser,
                         role: r,
-                        department: (r === 'driver' || r === 'crew_helper' || r === 'spv_logistik' || r === 'operasional')
-                          ? 'Logistik & Pengiriman'
+                        department: r === 'pengiriman'
+                          ? 'Pengiriman'
+                          : (r === 'driver' || r === 'crew_helper' || r === 'spv_logistik' || r === 'operasional')
+                          ? 'Logistik'
                           : newUser.department
                       });
                     }}
@@ -1515,6 +1568,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                     <option value="crew_helper">🤝 Kru Helper / Kernet</option>
                     <option value="spv_logistik">🚛 SPV Logistik</option>
                     <option value="operasional">📋 Operasional</option>
+                    <option value="pengiriman">📦 Pengiriman</option>
                     <option value="security">🛡️ Security</option>
                     <option value="sales_admin">💼 Adm. Penjualan</option>
                     <option value="purchasing_admin">🛒 Adm. Pembelian</option>
@@ -1668,6 +1722,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigateToE2E 
                     <option value="super_admin">👑 Super Admin / Manager</option>
                     <option value="spv_logistik">🚛 SPV Logistik</option>
                     <option value="operasional">📋 Operasional (Operational Lead)</option>
+                    <option value="pengiriman">📦 Pengiriman</option>
                     <option value="security">🛡️ Security (Pos Satpam &amp; Keamanan)</option>
                     <option value="driver">🚚 Kru Supir / Driver</option>
                     <option value="crew_helper">🤝 Kru Helper / Kernet</option>

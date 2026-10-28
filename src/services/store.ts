@@ -651,8 +651,82 @@ class LogisticsStore {
     this.runDataMigrations();
   }
 
+  private deduplicateSuperAdmins(usersList: UserProfile[]): UserProfile[] {
+    let primarySuperAdmin: UserProfile | null = null;
+    const filtered: UserProfile[] = [];
+
+    for (const u of usersList) {
+      // Fix legacy usr-hendri role if still super_admin
+      if (u.id === 'usr-hendri' && u.role === 'super_admin') {
+        filtered.push({
+          ...u,
+          role: 'operasional',
+          permissions: { modules: getDefaultPermissionsForRole('operasional') }
+        });
+        continue;
+      }
+
+      const isDuplicateSuperAdmin =
+        u.role === 'super_admin' ||
+        u.id === 'usr-001' ||
+        u.id.startsWith('usr-preview-') ||
+        u.id.startsWith('usr-bootstrap-') ||
+        (u.fullName || '').trim().toLowerCase().startsWith('super admin') ||
+        (u.email || '').trim().toLowerCase() === 'admin@gmail.com' ||
+        (u.email || '').trim().toLowerCase() === 'akkoperasional60@gmail.com';
+
+      if (isDuplicateSuperAdmin) {
+        if (!primarySuperAdmin) {
+          primarySuperAdmin = {
+            ...u,
+            id: u.id.startsWith('usr-bootstrap-') ? u.id : 'usr-001',
+            fullName: 'Super Admin',
+            email: (u.email && u.email.toLowerCase() !== 'admin@gmail.com' && !u.email.endsWith('@akkoperasional.com'))
+              ? u.email
+              : 'akkoperasional60@gmail.com',
+            role: 'super_admin',
+            department: 'Manajemen & Direksi',
+            status: 'approved',
+            permissions: { modules: getDefaultPermissionsForRole('super_admin') }
+          };
+          filtered.push(primarySuperAdmin);
+        } else if (u.email?.toLowerCase() === 'akkoperasional60@gmail.com') {
+          primarySuperAdmin.email = 'akkoperasional60@gmail.com';
+          if (u.id.startsWith('usr-bootstrap-')) {
+            primarySuperAdmin.id = u.id;
+          }
+        }
+        continue;
+      }
+
+      filtered.push(u);
+    }
+
+    if (!primarySuperAdmin) {
+      filtered.unshift({
+        id: 'usr-001',
+        fullName: 'Super Admin',
+        email: 'akkoperasional60@gmail.com',
+        role: 'super_admin',
+        department: 'Manajemen & Direksi',
+        phone: '0811-3000-0001',
+        status: 'approved',
+        createdAt: '2025-01-01T08:00:00.000Z',
+        approvedAt: '2025-01-01T08:00:00.000Z',
+        approvedBy: 'System Initializer',
+        permissions: { modules: getDefaultPermissionsForRole('super_admin') }
+      });
+    }
+
+    return filtered;
+  }
+
   private runDataMigrations() {
-    // Ensure each user has default permissions initialized for their role if not already customized
+    // 1. Deduplicate Super Admin accounts so only 1 primary Super Admin exists
+    this.users = this.deduplicateSuperAdmins(this.users);
+
+    // 2. Ensure each user has valid permissions initialized for their role (and fix partial logistics submenus for SPV Logistik / Operasional / Pengiriman)
+    const primaryLogisticsRoles = ['spv_logistik', 'operasional', 'pengiriman', 'dispatcher'];
     this.users = this.users.map(u => {
       if (!u.permissions || !u.permissions.modules || Object.keys(u.permissions.modules).length === 0) {
         return {
@@ -661,6 +735,25 @@ class LogisticsStore {
             modules: getDefaultPermissionsForRole(u.role)
           }
         };
+      }
+      if (primaryLogisticsRoles.includes(u.role)) {
+        const logMod = u.permissions.modules.logistics;
+        const activeSubCount = logMod?.subMenus
+          ? Object.values(logMod.subMenus).filter(lvl => lvl !== 'none').length
+          : 0;
+        if (!logMod || !logMod.enabled || activeSubCount <= 1) {
+          const defaultMods = getDefaultPermissionsForRole(u.role);
+          return {
+            ...u,
+            permissions: {
+              modules: {
+                ...defaultMods,
+                ...u.permissions.modules,
+                logistics: defaultMods.logistics
+              }
+            }
+          };
+        }
       }
       return u;
     });
@@ -1032,7 +1125,7 @@ class LogisticsStore {
   public hasSubMenuAccess(role?: string, module?: string, subMenu?: string, accessLevel?: string): boolean {
     if (!role) return true;
     const r = String(role).toLowerCase();
-    if (r === 'super_admin' || r === 'spv_logistik' || r === 'operasional' || r === 'dispatcher' || r === 'admin') {
+    if (r === 'super_admin' || r === 'spv_logistik' || r === 'operasional' || r === 'pengiriman' || r === 'dispatcher' || r === 'admin') {
       return true;
     }
     if (r === 'driver' || r === 'crew_helper' || r === 'helper') {
@@ -1044,7 +1137,7 @@ class LogisticsStore {
   public hasMenuAccess(role?: string, menuId?: string): boolean {
     if (!role) return true;
     const r = String(role).toLowerCase();
-    if (r === 'super_admin' || r === 'spv_logistik' || r === 'operasional' || r === 'dispatcher' || r === 'admin') {
+    if (r === 'super_admin' || r === 'spv_logistik' || r === 'operasional' || r === 'pengiriman' || r === 'dispatcher' || r === 'admin') {
       return true;
     }
     if (r === 'driver' || r === 'crew_helper' || r === 'helper') {
@@ -1742,6 +1835,7 @@ class LogisticsStore {
     const roleLabelMap: Record<string, string> = {
       super_admin: 'Super Admin',
       spv_logistik: 'SPV Logistik',
+      pengiriman: 'Pengiriman',
       driver: 'Kru Supir',
       crew_helper: 'Kru Helper',
       admin_penjualan: 'Admin Penjualan',
@@ -2166,9 +2260,10 @@ class LogisticsStore {
       const payload = await response.json();
       if (!Array.isArray(payload?.data)) return false;
       const localById = new Map(this.users.map(u => [u.id, u]));
-      this.users = payload.data.map((r: any) => {
+      const mappedUsers = payload.data.map((r: any) => {
         const local = localById.get(r.id);
         const role = (r.role || local?.role || 'unassigned') as UserRole;
+        const remotePerms = r.permissions && r.permissions.modules ? r.permissions : undefined;
         return {
           ...(local || {} as UserProfile),
           id: r.id,
@@ -2183,9 +2278,10 @@ class LogisticsStore {
           approvedBy: r.approvedBy || local?.approvedBy,
           notes: r.notes ?? local?.notes,
           password: undefined,
-          permissions: local?.permissions || { modules: getDefaultPermissionsForRole(role) }
+          permissions: remotePerms || local?.permissions || { modules: getDefaultPermissionsForRole(role) }
         } as UserProfile;
       });
+      this.users = this.deduplicateSuperAdmins(mappedUsers);
       this.saveToStorage(STORAGE_KEYS.USERS, this.users);
       this.syncUsersWithCrews();
       this.notify();
@@ -2199,7 +2295,6 @@ class LogisticsStore {
   private syncUserToHostinger(userId: string, data: Partial<UserProfile>): void {
     const payload: Record<string, any> = { ...data };
     delete payload.password;
-    delete payload.permissions;
     fetch(`/api/users/${encodeURIComponent(userId)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -2353,12 +2448,31 @@ class LogisticsStore {
 
     const existing = this.users[userIndex];
     const oldName = existing.fullName;
+    const targetRole = (data.role || existing.role) as UserRole;
+    const isLogisticsLead = ['spv_logistik', 'operasional', 'pengiriman', 'dispatcher'].includes(targetRole);
 
-    const nextPermissions = data.permissions
+    let nextPermissions = data.permissions
       ? data.permissions
       : (data.role && data.role !== existing.role)
       ? { modules: getDefaultPermissionsForRole(data.role) }
-      : existing.permissions || { modules: getDefaultPermissionsForRole(data.role || existing.role) };
+      : existing.permissions || { modules: getDefaultPermissionsForRole(targetRole) };
+
+    if (isLogisticsLead && nextPermissions?.modules?.logistics) {
+      const logMod = nextPermissions.modules.logistics;
+      const activeSubCount = logMod.subMenus
+        ? Object.values(logMod.subMenus).filter(lvl => lvl !== 'none').length
+        : 0;
+      if (logMod.enabled && activeSubCount <= 1 && !data.permissions) {
+        const defaultMods = getDefaultPermissionsForRole(targetRole);
+        nextPermissions = {
+          modules: {
+            ...defaultMods,
+            ...nextPermissions.modules,
+            logistics: defaultMods.logistics
+          }
+        };
+      }
+    }
 
     const updatedUser: UserProfile = {
       ...existing,
@@ -2599,7 +2713,14 @@ class LogisticsStore {
     return existing;
   }
 
+  private lastAuthError: { status: number; message: string } | null = null;
+
+  public getLastAuthError(): { status: number; message: string } | null {
+    return this.lastAuthError;
+  }
+
   public async loginUserRemote(identifier: string, password: string): Promise<UserProfile | null> {
+    this.lastAuthError = null;
     try {
       const response = await fetch('/api/auth/login', {
         method: 'POST',
@@ -2607,32 +2728,56 @@ class LogisticsStore {
         credentials: 'same-origin',
         body: JSON.stringify({ identifier: identifier.trim(), password })
       });
-      if (!response.ok) return null;
-      const payload = await response.json();
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        this.lastAuthError = {
+          status: response.status,
+          message: String(payload?.error || 'Gagal memproses login ke server.')
+        };
+        return null;
+      }
       const remote = payload?.user;
       if (!remote?.id) return null;
 
-      const existing = this.users.find(u => u.id === remote.id || u.email?.toLowerCase() === String(remote.email || '').toLowerCase());
+      const isRemoteSuperAdmin = remote.role === 'super_admin';
+      const existing = this.users.find(u =>
+        u.id === remote.id ||
+        u.email?.toLowerCase() === String(remote.email || '').toLowerCase() ||
+        (isRemoteSuperAdmin && u.role === 'super_admin')
+      );
+      const role = (remote.role || existing?.role || 'unassigned') as UserRole;
       const user: UserProfile = {
         ...(existing || {} as UserProfile),
-        id: remote.id,
+        id: isRemoteSuperAdmin ? (existing?.id || remote.id) : remote.id,
         email: remote.email || existing?.email || '',
-        fullName: remote.name || existing?.fullName || remote.email || 'User',
-        role: remote.role || existing?.role || 'unassigned',
+        fullName: isRemoteSuperAdmin ? 'Super Admin' : (remote.name || existing?.fullName || remote.email || 'User'),
+        role,
         department: remote.department || existing?.department || 'Logistics Operations',
         phone: remote.phone || existing?.phone || '',
-        status: remote.status || existing?.status || 'approved'
+        status: remote.status || existing?.status || 'approved',
+        permissions: (remote.permissions && remote.permissions.modules)
+          ? remote.permissions
+          : (existing?.permissions || { modules: getDefaultPermissionsForRole(role) })
       } as UserProfile;
 
-      const idx = this.users.findIndex(u => u.id === user.id);
+      const idx = this.users.findIndex(u =>
+        u.id === user.id ||
+        (isRemoteSuperAdmin && u.role === 'super_admin') ||
+        (user.email && u.email?.toLowerCase() === user.email.toLowerCase())
+      );
       if (idx >= 0) this.users[idx] = { ...this.users[idx], ...user, password: undefined } as UserProfile;
       else this.users = [{ ...user, password: undefined } as UserProfile, ...this.users];
+      this.users = this.deduplicateSuperAdmins(this.users);
       this.saveToStorage(STORAGE_KEYS.USERS, this.users);
       this.setCurrentUser({ ...user, password: undefined } as UserProfile);
       void this.hydrateOperationalDataFromHostinger();
       if (user.role === 'super_admin') await this.refreshUsersFromHostinger();
       return user;
-    } catch (err) {
+    } catch (err: any) {
+      this.lastAuthError = {
+        status: 503,
+        message: 'Tidak dapat terhubung ke server autentikasi. Periksa koneksi jaringan atau status server.'
+      };
       console.warn('[Hostinger Auth] Login gagal:', err);
       return null;
     }
@@ -2700,25 +2845,39 @@ class LogisticsStore {
 
       const remote = payload.user;
       const role = (remote.role || 'unassigned') as UserRole;
+      const isRemoteSuperAdmin = role === 'super_admin';
+      const existing = this.users.find(u =>
+        u.id === remote.id ||
+        u.email?.toLowerCase() === String(remote.email || '').toLowerCase() ||
+        (isRemoteSuperAdmin && u.role === 'super_admin')
+      );
       const user: UserProfile = {
-        id: remote.id,
-        email: remote.email,
-        fullName: remote.name || remote.fullName || 'Pengguna',
+        ...(existing || {} as UserProfile),
+        id: isRemoteSuperAdmin ? (existing?.id || remote.id) : remote.id,
+        email: remote.email || existing?.email || '',
+        fullName: isRemoteSuperAdmin ? 'Super Admin' : (remote.name || remote.fullName || existing?.fullName || 'Pengguna'),
         role,
-        department: remote.department || 'Logistik',
-        phone: remote.phone || '',
-        status: remote.status || 'approved',
-        createdAt: remote.createdAt || new Date().toISOString(),
-        approvedAt: remote.approvedAt,
-        approvedBy: remote.approvedBy,
-        notes: remote.notes,
-        permissions: { modules: getDefaultPermissionsForRole(role) },
+        department: remote.department || existing?.department || 'Logistik',
+        phone: remote.phone || existing?.phone || '',
+        status: remote.status || existing?.status || 'approved',
+        createdAt: remote.createdAt || existing?.createdAt || new Date().toISOString(),
+        approvedAt: remote.approvedAt || existing?.approvedAt,
+        approvedBy: remote.approvedBy || existing?.approvedBy,
+        notes: remote.notes ?? existing?.notes,
+        permissions: (remote.permissions && remote.permissions.modules)
+          ? remote.permissions
+          : (existing?.permissions || { modules: getDefaultPermissionsForRole(role) }),
         password: undefined
       } as UserProfile;
 
-      const idx = this.users.findIndex(u => u.id === user.id || u.email?.toLowerCase() === user.email?.toLowerCase());
+      const idx = this.users.findIndex(u =>
+        u.id === user.id ||
+        (isRemoteSuperAdmin && u.role === 'super_admin') ||
+        (user.email && u.email?.toLowerCase() === user.email.toLowerCase())
+      );
       if (idx >= 0) this.users[idx] = { ...this.users[idx], ...user, password: undefined } as UserProfile;
       else this.users = [user, ...this.users];
+      this.users = this.deduplicateSuperAdmins(this.users);
       this.saveToStorage(STORAGE_KEYS.USERS, this.users);
       this.setCurrentUser(user);
       void this.hydrateOperationalDataFromHostinger();

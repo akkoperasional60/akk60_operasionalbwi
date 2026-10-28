@@ -1,13 +1,13 @@
 {
-  "name": "react-example",
+  "name": "akk60_operasionalbwi",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
+  "main": "server.js",
   "scripts": {
     "prebuild": "tsx scripts/validate_env.ts",
     "dev": "tsx server.ts",
-    "build:server": "esbuild server.ts --bundle --platform=node --packages=external --format=esm --outfile=server.js",
-    "build": "vite build && npm run build:server",
+    "build": "vite build",
     "build:portal": "BUILD_TARGET=portal vite build",
     "build:driver": "BUILD_TARGET=driver vite build",
     "build:both": "BUILD_TARGET=portal vite build && BUILD_TARGET=driver vite build",
@@ -18,7 +18,7 @@
     "test": "tsx scripts/run_e2e_tests.ts"
   },
   "engines": {
-    "node": "22.x"
+    "node": "24.x"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

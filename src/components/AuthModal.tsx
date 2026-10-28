@@ -10,8 +10,8 @@ const USERNAME_REGEX = /^[a-zA-Z0-9._\-\s]{3,35}$/;
 
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_DURATION_SECONDS = 60;
-const STORAGE_FAILED_KEY = 'akk_auth_failed_attempts';
-const STORAGE_LOCKOUT_KEY = 'akk_auth_lockout_until';
+const STORAGE_FAILED_KEY = 'akk_auth_v2_failed_attempts';
+const STORAGE_LOCKOUT_KEY = 'akk_auth_v2_lockout_until';
 
 export interface RecoverySession {
   user: UserProfile;
@@ -43,6 +43,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   // 🛡️ Proteksi Brute-Force: Melacak percobaan gagal & waktu penguncian
   const [failedAttempts, setFailedAttempts] = useState<number>(() => {
     try {
+      localStorage.removeItem('akk_auth_failed_attempts');
+      localStorage.removeItem('akk_auth_lockout_until');
       const saved = localStorage.getItem(STORAGE_FAILED_KEY);
       return saved ? parseInt(saved, 10) || 0 : 0;
     } catch {
@@ -195,6 +197,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     const user = await logisticsStore.loginUserRemote(trimmedInput, loginPassword.trim());
     if (!user) {
+      const authError = logisticsStore.getLastAuthError();
+      if (authError && authError.status === 503) {
+        setErrorMsg(authError.message);
+        return;
+      }
+      if (authError && authError.status === 403) {
+        setErrorMsg(authError.message);
+        return;
+      }
       const nextFailed = failedAttempts + 1;
       setFailedAttempts(nextFailed);
       try { localStorage.setItem(STORAGE_FAILED_KEY, String(nextFailed)); } catch {}
@@ -205,7 +216,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         try { localStorage.setItem(STORAGE_LOCKOUT_KEY, String(lockoutTime)); } catch {}
         setErrorMsg(`Terlalu banyak percobaan gagal (${MAX_FAILED_ATTEMPTS}x). Login dikunci sementara selama ${LOCKOUT_DURATION_SECONDS} detik.`);
       } else {
-        setErrorMsg(`${inputType === 'email' ? 'Email' : 'Username'} atau Password salah / akun belum disetujui.`);
+        const remaining = MAX_FAILED_ATTEMPTS - nextFailed;
+        setErrorMsg(`${authError?.message || `${inputType === 'email' ? 'Email' : 'Username'} atau Password salah.`} (Sisa kesempatan: ${remaining}x)`);
       }
       return;
     }

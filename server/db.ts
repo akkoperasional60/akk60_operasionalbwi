@@ -1,33 +1,7 @@
 import mysql from 'mysql2/promise';
 import dotenv from 'dotenv';
-import fs from 'fs';
-import path from 'path';
 
 dotenv.config();
-
-// Load .env.example as fallback when variables are not set in process.env / .env
-const envExamplePath = path.resolve(process.cwd(), '.env.example');
-if (fs.existsSync(envExamplePath)) {
-  try {
-    const isCloudRunPreview = Boolean(process.env.K_SERVICE);
-    const parsed = dotenv.parse(fs.readFileSync(envExamplePath, 'utf-8'));
-    const hostVal = String(parsed.DB_HOST || 'localhost').trim().toLowerCase();
-    const isLocalDbHost = hostVal === 'localhost' || hostVal === '127.0.0.1';
-    for (const [key, val] of Object.entries(parsed)) {
-      const cleanVal = String(val || '').trim();
-      if (!cleanVal) continue;
-      // In AI Studio Cloud Run preview, localhost:3306 MySQL does not exist, so skip DB_* pointing to localhost
-      if (isCloudRunPreview && isLocalDbHost && key.startsWith('DB_')) {
-        continue;
-      }
-      if (!process.env[key]) {
-        process.env[key] = cleanVal;
-      }
-    }
-  } catch {
-    // Ignore .env.example parse errors
-  }
-}
 
 let pool: mysql.Pool | null = null;
 

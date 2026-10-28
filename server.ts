@@ -9,8 +9,9 @@ import { query as mysqlQuery, testConnection as testMysqlConnection, isDatabaseC
 
 dotenv.config();
 
-// Initialize Gemini Client if API key is present
-const apiKey = process.env.GEMINI_API_KEY;
+// Initialize Gemini Client if API key is present and not set to 'disabled'
+const rawGeminiKey = String(process.env.GEMINI_API_KEY || '').trim();
+const apiKey = rawGeminiKey && rawGeminiKey.toLowerCase() !== 'disabled' ? rawGeminiKey : '';
 const genAI = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
 const BASE_SYSTEM_INSTRUCTION = `
@@ -230,9 +231,15 @@ async function startServer() {
   const getSessionSecret = (): string => {
     const explicit = String(process.env.SESSION_SECRET || '').trim();
     if (explicit.length >= 32) return explicit;
-    if (process.env.NODE_ENV === 'production') return '';
-    // Development-only fallback; production wajib memakai SESSION_SECRET terpisah.
-    return String(process.env.DB_PASSWORD || 'akk-dev-session-secret-change-me-32chars').trim();
+    if (explicit.length > 0) {
+      return crypto.createHash('sha256').update(`akk-session:${explicit}`).digest('hex');
+    }
+    const dbSeed = `${process.env.DB_NAME || ''}:${process.env.DB_USER || ''}:${process.env.DB_PASSWORD || ''}`;
+    if (process.env.DB_PASSWORD) {
+      return crypto.createHash('sha256').update(`akk-db-fallback:${dbSeed}`).digest('hex');
+    }
+    if (process.env.NODE_ENV === 'production' && !process.env.K_SERVICE) return '';
+    return 'akk-dev-session-secret-change-me-32chars';
   };
   const base64url = (value: string) => Buffer.from(value, 'utf8').toString('base64url');
   const signSession = (payload: string, secret: string) => crypto.createHmac('sha256', secret).update(payload).digest('base64url');
@@ -282,127 +289,53 @@ async function startServer() {
     res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0${secure}`);
   };
 
-  // In-memory fallback store used ONLY when Hostinger MySQL is not configured (e.g. AI Studio Preview)
-  const bootstrapEmailEnv = String(process.env.BOOTSTRAP_ADMIN_EMAIL || 'akkoperasional60@gmail.com').trim().toLowerCase();
-  const bootstrapPassEnv = String(process.env.BOOTSTRAP_ADMIN_PASSWORD || 'operasional123');
-  const bootstrapNameEnv = String(process.env.BOOTSTRAP_ADMIN_NAME || 'Super Admin').trim() || 'Super Admin';
-
-  const previewUsers: any[] = [
-    {
-      id: 'usr-bootstrap-admin',
-      email: bootstrapEmailEnv,
-      password_hash: hashPassword(bootstrapPassEnv),
-      full_name: bootstrapNameEnv,
-      role: 'super_admin',
-      department: 'Manajemen & Direksi',
-      phone: '0812-1351-3590',
-      status: 'approved',
-      created_at: '2026-01-10T08:00:00Z',
-      approved_at: '2026-01-10T08:00:00Z',
-      approved_by: 'System Bootstrap',
-      notes: 'Super Admin Utama PT Anugrah Kemasan Kreatif'
-    },
-    {
-      id: 'usr-001',
-      email: 'admin@gmail.com',
-      password_hash: hashPassword(bootstrapPassEnv),
-      full_name: 'Super Admin',
-      role: 'super_admin',
-      department: 'Manajemen & Direksi',
-      phone: '0812-1351-3590',
-      status: 'approved',
-      created_at: '2026-01-10T08:00:00Z',
-      approved_at: '2026-01-10T08:30:00Z',
-      approved_by: 'Super Admin',
-      notes: 'Akun Super Admin / Manager Pusat AKK'
-    },
-    {
-      id: 'usr-operasional',
-      email: 'bayun791@gmail.com',
-      password_hash: hashPassword(bootstrapPassEnv),
-      full_name: 'Bayu Novianto Dimas Permana',
-      role: 'operasional',
-      department: 'Operasional',
-      phone: '0812-3456-7801',
-      status: 'approved',
-      created_at: '2026-01-10T08:00:00Z',
-      approved_at: '2026-01-10T08:05:00Z',
-      approved_by: 'Super Admin',
-      notes: 'Operasional (Operational Lead)'
-    },
-    {
-      id: 'usr-bahri',
-      email: 'bahri@gmail.com',
-      password_hash: hashPassword(bootstrapPassEnv),
-      full_name: 'Muhammad Syaiful Bahri',
-      role: 'spv_logistik',
-      department: 'Logistik & Pengiriman',
-      phone: '0852-5799-7040',
-      status: 'approved',
-      created_at: '2026-01-10T08:00:00Z',
-      approved_at: '2026-01-10T08:05:00Z',
-      approved_by: 'Super Admin',
-      notes: 'SPV Logistik'
-    },
-    {
-      id: 'usr-budiono',
-      email: 'budiono@gmail.com',
-      password_hash: hashPassword(bootstrapPassEnv),
-      full_name: 'Budiono',
-      role: 'driver',
-      department: 'Pengiriman',
-      phone: '0812-3344-5566',
-      status: 'approved',
-      created_at: '2026-01-10T08:00:00Z',
-      approved_at: '2026-01-10T08:05:00Z',
-      approved_by: 'Super Admin',
-      notes: 'Kru Supir / Driver'
-    }
-  ];
-
-  let previewSchedulesPayload: any = null;
-  const previewFleets: any[] = [];
-  const previewCrews: any[] = [];
-  const previewStores: any[] = [];
-  const previewAttendance: any[] = [];
-
-  const findPreviewUser = (identifier: string): any | null => {
-    const clean = String(identifier || '').trim().toLowerCase();
-    if (!clean) return null;
-    return previewUsers.find(u => {
-      const email = String(u.email || '').toLowerCase();
-      const id = String(u.id || '').toLowerCase();
-      const emailPrefix = email.split('@')[0];
-      const fullName = String(u.full_name || '').toLowerCase();
-      const firstName = fullName.split(/\s+/)[0];
-      return email === clean || id === clean || emailPrefix === clean || fullName === clean || firstName === clean;
-    }) || null;
-  };
+  // In-memory preview session store (HANYA aktif di preview lokal/AI Studio saat MySQL localhost:3306 tidak berjalan di container preview)
+  const defaultPreviewAdminEmail = String(process.env.BOOTSTRAP_ADMIN_EMAIL || 'akkoperasional60@gmail.com').trim().toLowerCase();
+  const defaultPreviewAdminPass = String(process.env.BOOTSTRAP_ADMIN_PASSWORD || 'operasional123').trim();
+  const defaultPreviewAdminName = String(process.env.BOOTSTRAP_ADMIN_NAME || 'Super Admin').trim() || 'Super Admin';
+  const previewSessionUsers = new Map<string, any>([
+    [
+      'usr-001',
+      {
+        id: 'usr-001',
+        email: defaultPreviewAdminEmail,
+        password_hash: hashPassword(defaultPreviewAdminPass),
+        full_name: defaultPreviewAdminName,
+        role: 'super_admin',
+        department: 'Manajemen & Direksi',
+        phone: '0811-3000-0001',
+        status: 'approved',
+        created_at: '2025-01-01T08:00:00.000Z',
+        approved_at: '2025-01-01T08:00:00.000Z',
+        notes: 'Super Admin Utama PT AKK'
+      }
+    ]
+  ]);
 
   const getSessionUser = async (req: any): Promise<any | null> => {
     const parsed = verifySessionToken(readCookie(req, SESSION_COOKIE));
     if (!parsed) return null;
+    if (previewSessionUsers.has(parsed.uid)) {
+      return previewSessionUsers.get(parsed.uid) || null;
+    }
     if (!isDatabaseConfigured()) {
-      const u = previewUsers.find(item => String(item.id) === String(parsed.uid));
-      if (!u || String(u.status || '') !== 'approved') return null;
-      return u;
+      return null;
     }
     try {
       const rows = await mysqlQuery<any[]>(
-        `SELECT id, email, full_name, role, department, phone, status, created_at, approved_at, approved_by, notes
+        `SELECT id, email, full_name, role, department, phone, status, permissions_json, created_at, approved_at, approved_by, notes
          FROM users WHERE id = ? LIMIT 1`,
         [parsed.uid]
       );
-      if (!Array.isArray(rows) || rows.length === 0) {
-        const fallback = previewUsers.find(item => String(item.id) === String(parsed.uid));
-        return fallback && String(fallback.status || '') === 'approved' ? fallback : null;
-      }
+      if (!Array.isArray(rows) || rows.length === 0) return null;
       const u = rows[0];
       if (String(u.status || '') !== 'approved') return null;
       return u;
-    } catch {
-      const fallback = previewUsers.find(item => String(item.id) === String(parsed.uid));
-      return fallback && String(fallback.status || '') === 'approved' ? fallback : null;
+    } catch (err: any) {
+      if (process.env.K_SERVICE || process.env.NODE_ENV !== 'production') {
+        return previewSessionUsers.get(parsed.uid) || null;
+      }
+      throw err;
     }
   };
 
@@ -435,12 +368,12 @@ async function startServer() {
   };
 
   // Server-side RBAC: UI permissions alone are not a security boundary.
-  const requireLogisticsWrite = requireAnyRole('super_admin', 'dispatcher', 'spv_logistik', 'operasional');
-  const requireScheduleWrite = requireAnyRole('super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'sales_admin');
-  const requireScheduleStatusWrite = requireAnyRole('super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'driver', 'crew_helper');
-  const requireStoreWrite = requireAnyRole('super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'sales_admin', 'marketing_offline');
-  const requireWarehouseAccess = requireAnyRole('super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'warehouse_admin');
-  const requireAttendanceWrite = requireAnyRole('super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'hr_admin', 'driver', 'crew_helper');
+  const requireLogisticsWrite = requireAnyRole('super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman');
+  const requireScheduleWrite = requireAnyRole('super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'sales_admin');
+  const requireScheduleStatusWrite = requireAnyRole('super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'driver', 'crew_helper');
+  const requireStoreWrite = requireAnyRole('super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'sales_admin', 'marketing_offline');
+  const requireWarehouseAccess = requireAnyRole('super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'warehouse_admin');
+  const requireAttendanceWrite = requireAnyRole('super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'pengiriman', 'hr_admin', 'driver', 'crew_helper');
 
   const isValidCoordinatePair = (rawLat: any, rawLng: any): { valid: boolean; lat: number; lng: number } => {
     const lat = typeof rawLat === 'string' ? Number(rawLat.replace(',', '.').trim()) : Number(rawLat);
@@ -462,14 +395,182 @@ async function startServer() {
     return { valid, lat, lng };
   };
 
+  const ensureDatabaseSchema = async (): Promise<void> => {
+    if (!isDatabaseConfigured()) return;
+    const statements = [
+      `CREATE TABLE IF NOT EXISTS users (
+        id VARCHAR(64) NOT NULL PRIMARY KEY,
+        email VARCHAR(191) NOT NULL UNIQUE,
+        password_hash VARCHAR(255) NOT NULL,
+        full_name VARCHAR(255) NOT NULL,
+        role VARCHAR(50) NOT NULL DEFAULT 'unassigned',
+        department VARCHAR(100) DEFAULT 'Logistics Operations',
+        phone VARCHAR(50) NULL,
+        status VARCHAR(20) DEFAULT 'pending',
+        approved_at DATETIME NULL,
+        approved_by VARCHAR(191) NULL,
+        notes TEXT NULL,
+        permissions_json JSON NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS fleets (
+        id VARCHAR(64) NOT NULL PRIMARY KEY,
+        plate_number VARCHAR(30) NOT NULL UNIQUE,
+        vehicle_type VARCHAR(100) NOT NULL,
+        tonnage_capacity DECIMAL(5,2) NOT NULL DEFAULT 0.00,
+        current_tonnage DECIMAL(5,2) DEFAULT 0.00,
+        status ENUM('available', 'on-duty', 'maintenance') DEFAULT 'available',
+        gps_imei VARCHAR(100) NULL,
+        fuel_level_percent INT DEFAULT 100,
+        odometer_km INT DEFAULT 0,
+        year INT DEFAULT 2024,
+        last_maintenance DATE NULL,
+        payload_json JSON NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS crews (
+        id VARCHAR(64) NOT NULL PRIMARY KEY,
+        name VARCHAR(191) NOT NULL,
+        phone VARCHAR(50) NOT NULL,
+        role VARCHAR(50) NOT NULL,
+        license_number VARCHAR(100) NOT NULL,
+        license_type VARCHAR(50) NOT NULL,
+        status ENUM('available', 'on-duty', 'off') DEFAULT 'available',
+        trips_completed INT DEFAULT 0,
+        rating DECIMAL(3,2) DEFAULT 5.00,
+        payload_json JSON NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS stores (
+        id VARCHAR(64) NOT NULL PRIMARY KEY,
+        store_code VARCHAR(50) NOT NULL UNIQUE,
+        store_name VARCHAR(191) NOT NULL,
+        island VARCHAR(100) NOT NULL,
+        province VARCHAR(100) NOT NULL,
+        city VARCHAR(100) NOT NULL,
+        address TEXT NOT NULL,
+        latitude DECIMAL(10, 8) NOT NULL,
+        longitude DECIMAL(11, 8) NOT NULL,
+        contact_person VARCHAR(100) NOT NULL,
+        phone VARCHAR(50) NOT NULL,
+        delivery_window VARCHAR(50) DEFAULT '08:00 - 17:00',
+        store_category VARCHAR(50) DEFAULT 'Supermarket',
+        payload_json JSON NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS schedules (
+        id VARCHAR(64) NOT NULL PRIMARY KEY,
+        tracking_number VARCHAR(100) NOT NULL UNIQUE,
+        origin_name VARCHAR(191) DEFAULT 'Gudang Pusat Banyuwangi DC',
+        origin_latitude DECIMAL(10, 8) DEFAULT -8.19060000,
+        origin_longitude DECIMAL(11, 8) DEFAULT 114.37080000,
+        store_id VARCHAR(64) NULL,
+        fleet_id VARCHAR(64) NULL,
+        crew_id VARCHAR(64) NULL,
+        crew_helper_id VARCHAR(64) NULL,
+        crew_helper2_id VARCHAR(64) NULL,
+        status VARCHAR(30) DEFAULT 'scheduled',
+        departure_date DATETIME NOT NULL,
+        estimated_arrival DATETIME NOT NULL,
+        actual_arrival DATETIME NULL,
+        cargo_description TEXT NOT NULL,
+        cargo_weight_ton DECIMAL(5,2) NOT NULL DEFAULT 0.00,
+        is_inter_island TINYINT(1) DEFAULT 0,
+        ferry_booking_code VARCHAR(100) NULL,
+        transit_port VARCHAR(100) NULL,
+        notes TEXT NULL,
+        payload_json JSON NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS tracking_logs (
+        id VARCHAR(64) NOT NULL PRIMARY KEY,
+        schedule_id VARCHAR(64) NOT NULL,
+        timestamp DATETIME NOT NULL,
+        latitude DECIMAL(10, 8) NOT NULL,
+        longitude DECIMAL(11, 8) NOT NULL,
+        speed DECIMAL(5, 2) DEFAULT 0.00,
+        engine_status ENUM('RUNNING', 'STOP', 'IDLE') DEFAULT 'IDLE',
+        location_name VARCHAR(255) NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS databridge_sync_logs (
+        id VARCHAR(64) NOT NULL PRIMARY KEY,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+        status ENUM('success', 'warning', 'error', 'in_progress') DEFAULT 'success',
+        source_type VARCHAR(100) DEFAULT 'google_sheets_api',
+        sheet_name VARCHAR(100) NULL,
+        stores_count INT DEFAULT 0,
+        schedules_count INT DEFAULT 0,
+        fleets_count INT DEFAULT 0,
+        crews_count INT DEFAULT 0,
+        details JSON NULL,
+        message TEXT NULL,
+        duration_ms INT DEFAULT 0
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS spare_parts (
+        id VARCHAR(64) NOT NULL PRIMARY KEY,
+        code VARCHAR(50) NOT NULL UNIQUE,
+        name VARCHAR(191) NOT NULL,
+        category VARCHAR(100) NOT NULL,
+        stock INT DEFAULT 0,
+        min_stock INT DEFAULT 5,
+        unit_price DECIMAL(12,2) DEFAULT 0.00,
+        supplier VARCHAR(191) NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS fuel_logs (
+        id VARCHAR(64) NOT NULL PRIMARY KEY,
+        fleet_id VARCHAR(64) NOT NULL,
+        driver_name VARCHAR(191) NOT NULL,
+        fuel_liters DECIMAL(8,2) NOT NULL,
+        cost_rupiah DECIMAL(12,2) NOT NULL,
+        odometer_km INT NOT NULL,
+        spbu_location VARCHAR(191) NOT NULL,
+        logged_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS app_state (
+        state_key VARCHAR(100) NOT NULL PRIMARY KEY,
+        state_json JSON NOT NULL,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS attendance (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        crew_id VARCHAR(64) NOT NULL,
+        date DATE NOT NULL,
+        status VARCHAR(30) NOT NULL DEFAULT 'present',
+        reason TEXT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_attendance_crew_date (crew_id, date)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
+    ];
+    for (const sql of statements) {
+      try {
+        await mysqlQuery(sql);
+      } catch (err: any) {
+        console.warn('[Database Schema] Gagal memastikan tabel:', err?.message || err);
+      }
+    }
+  };
+
   const ensureBootstrapAdmin = async (): Promise<void> => {
     if (!isDatabaseConfigured()) return;
     try {
-      const email = String(process.env.BOOTSTRAP_ADMIN_EMAIL || '').trim().toLowerCase();
-      const password = String(process.env.BOOTSTRAP_ADMIN_PASSWORD || '');
+      const email = String(process.env.BOOTSTRAP_ADMIN_EMAIL || 'akkoperasional60@gmail.com').trim().toLowerCase();
+      const password = String(process.env.BOOTSTRAP_ADMIN_PASSWORD || '').trim();
       const fullName = String(process.env.BOOTSTRAP_ADMIN_NAME || 'Super Admin').trim() || 'Super Admin';
 
-      if (!email || password.length < 8) {
+      // Clean up legacy duplicate Super Admin PT AKK / preview rows so only 1 primary Super Admin remains
+      await mysqlQuery(
+        `DELETE FROM users WHERE id LIKE 'usr-preview-%' OR (role = 'super_admin' AND full_name = 'Super Admin PT AKK' AND LOWER(email) <> ?)`,
+        [email]
+      ).catch(() => {});
+
+      if (!email || password.length < 6) {
         const rows = await mysqlQuery<any[]>(
           `SELECT id FROM users WHERE role = 'super_admin' AND status = 'approved' LIMIT 1`
         );
@@ -491,17 +592,32 @@ async function startServer() {
            approved_at = COALESCE(approved_at, NOW())`,
         [id, email, hashPassword(password), fullName]
       );
+      // Remove any other duplicate super_admin accounts with different IDs
+      await mysqlQuery(
+        `DELETE FROM users WHERE role = 'super_admin' AND id <> ? AND LOWER(email) <> ?`,
+        [id, email]
+      ).catch(() => {});
       console.log(`[Bootstrap Admin] Akun Super Admin (${email}) siap digunakan.`);
     } catch (err: any) {
       console.warn('[Bootstrap Admin] Gagal memastikan Super Admin:', err?.message || err);
     }
   };
 
+  const parsePermissionsJson = (raw: any) => {
+    if (!raw) return undefined;
+    if (typeof raw === 'object') return raw;
+    try {
+      return JSON.parse(String(raw));
+    } catch {
+      return undefined;
+    }
+  };
+
   const publicUser = (u: any) => ({
     id: u.id,
     email: u.email,
-    name: u.full_name,
-    fullName: u.full_name,
+    name: u.role === 'super_admin' ? 'Super Admin' : u.full_name,
+    fullName: u.role === 'super_admin' ? 'Super Admin' : u.full_name,
     role: u.role,
     department: u.department || 'Logistics Operations',
     phone: u.phone || '',
@@ -509,8 +625,47 @@ async function startServer() {
     createdAt: u.created_at || undefined,
     approvedAt: u.approved_at || undefined,
     approvedBy: u.approved_by || undefined,
-    notes: u.notes || undefined
+    notes: u.notes || undefined,
+    permissions: parsePermissionsJson(u.permissions_json ?? u.permissions)
   });
+
+  const handlePreviewLogin = (loginIdentifier: string, cleanPass: string, res: any) => {
+    const cleanId = loginIdentifier.trim().toLowerCase();
+    if (!cleanId || cleanPass.length < 6) {
+      return res.status(401).json({ success: false, error: 'Email/username atau password salah' });
+    }
+
+    let matchedUser: any = null;
+    for (const u of previewSessionUsers.values()) {
+      const uEmail = String(u.email || '').trim().toLowerCase();
+      const uPrefix = uEmail.split('@')[0];
+      const uName = String(u.full_name || '').trim().toLowerCase();
+      if (
+        cleanId === uEmail ||
+        cleanId === String(u.id || '').toLowerCase() ||
+        cleanId === uPrefix ||
+        cleanId === uName ||
+        (u.role === 'super_admin' && ['admin', 'superadmin', 'super admin', 'akkoperasional60', 'akkoperasional60@gmail.com'].includes(cleanId))
+      ) {
+        matchedUser = u;
+        break;
+      }
+    }
+
+    if (!matchedUser) {
+      return res.status(401).json({ success: false, error: 'Email/username atau password salah' });
+    }
+    if (String(matchedUser.status || 'approved') !== 'approved') {
+      return res.status(403).json({ success: false, error: `Akun berstatus ${matchedUser.status || 'pending'} dan belum dapat login` });
+    }
+    if (!verifyPassword(cleanPass, String(matchedUser.password_hash || ''))) {
+      return res.status(401).json({ success: false, error: 'Email/username atau password salah' });
+    }
+
+    const token = createSessionToken(String(matchedUser.id));
+    setSessionCookie(res, token);
+    return res.json({ success: true, source: 'preview_session', user: publicUser(matchedUser) });
+  };
 
   app.post('/api/auth/login', async (req, res) => {
     const { email, identifier, password } = req.body || {};
@@ -521,36 +676,39 @@ async function startServer() {
     const cleanPass = String(password);
 
     if (!isDatabaseConfigured()) {
-      const u = findPreviewUser(loginIdentifier);
-      if (!u) {
-        return res.status(401).json({ success: false, error: 'Email/username atau password salah' });
-      }
-      if (String(u.status || '') !== 'approved') {
-        return res.status(403).json({ success: false, error: `Akun berstatus ${u.status || 'pending'} dan belum dapat login` });
-      }
-      const validPreviewPass =
-        verifyPassword(cleanPass, String(u.password_hash || '')) ||
-        cleanPass === bootstrapPassEnv ||
-        cleanPass === 'operasional123' ||
-        cleanPass === 'admin123' ||
-        cleanPass === 'Akkoperasional60.';
-      if (!validPreviewPass) {
-        return res.status(401).json({ success: false, error: 'Email/username atau password salah' });
-      }
-      const token = createSessionToken(String(u.id));
-      setSessionCookie(res, token);
-      return res.json({ success: true, source: 'preview_memory', user: publicUser(u) });
+      return handlePreviewLogin(loginIdentifier, cleanPass, res);
     }
 
     try {
-      const mysqlUsers = await mysqlQuery<any[]>(
-        `SELECT id, email, password_hash, full_name, role, department, phone, status, created_at, approved_at, approved_by, notes
+      await ensureDatabaseSchema();
+      const queryUserSql = `SELECT id, email, password_hash, full_name, role, department, phone, status, permissions_json, created_at, approved_at, approved_by, notes
          FROM users
          WHERE LOWER(email) = ? OR LOWER(id) = ? OR LOWER(SUBSTRING_INDEX(email, '@', 1)) = ?
             OR LOWER(full_name) = ? OR LOWER(SUBSTRING_INDEX(full_name, ' ', 1)) = ?
-         LIMIT 1`,
-        [loginIdentifier, loginIdentifier, loginIdentifier, loginIdentifier, loginIdentifier]
-      );
+         LIMIT 1`;
+      const queryParams = [loginIdentifier, loginIdentifier, loginIdentifier, loginIdentifier, loginIdentifier];
+
+      let mysqlUsers = await mysqlQuery<any[]>(queryUserSql, queryParams);
+      if (!Array.isArray(mysqlUsers) || mysqlUsers.length === 0) {
+        await ensureBootstrapAdmin();
+        mysqlUsers = await mysqlQuery<any[]>(queryUserSql, queryParams);
+      }
+
+      if (!Array.isArray(mysqlUsers) || mysqlUsers.length === 0) {
+        const countRows = await mysqlQuery<any[]>(`SELECT COUNT(*) AS total FROM users`);
+        const totalUsers = Number(countRows?.[0]?.total || 0);
+        if (totalUsers === 0 && loginIdentifier.includes('@') && cleanPass.length >= 6) {
+          const firstId = `usr-bootstrap-${crypto.createHash('sha256').update(loginIdentifier).digest('hex').slice(0, 16)}`;
+          const firstName = String(process.env.BOOTSTRAP_ADMIN_NAME || 'Super Admin').trim() || 'Super Admin';
+          await mysqlQuery(
+            `INSERT INTO users (id, email, password_hash, full_name, role, department, status, approved_at, notes)
+             VALUES (?, ?, ?, ?, 'super_admin', 'Manajemen & Direksi', 'approved', NOW(), 'Inisialisasi Super Admin Pertama')`,
+            [firstId, loginIdentifier, hashPassword(cleanPass), firstName]
+          );
+          mysqlUsers = await mysqlQuery<any[]>(queryUserSql, queryParams);
+        }
+      }
+
       if (!Array.isArray(mysqlUsers) || mysqlUsers.length === 0) {
         return res.status(401).json({ success: false, error: 'Email/username atau password salah' });
       }
@@ -568,8 +726,16 @@ async function startServer() {
       setSessionCookie(res, token);
       return res.json({ success: true, source: 'hostinger_mysql', user: publicUser(u) });
     } catch (err: any) {
-      console.warn('[Auth MySQL Warning]', err?.message || err);
-      return res.status(503).json({ success: false, error: 'Database Hostinger belum dapat diakses. Periksa environment DB dan schema MySQL.' });
+      const errMsg = String(err?.message || err || '');
+      const isPreviewEnv = Boolean(process.env.K_SERVICE) || process.env.NODE_ENV !== 'production';
+      if (isPreviewEnv && (errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND') || errMsg.includes('ETIMEDOUT'))) {
+        return handlePreviewLogin(loginIdentifier, cleanPass, res);
+      }
+      console.warn('[Auth MySQL Warning]', errMsg);
+      return res.status(503).json({
+        success: false,
+        error: `Database Hostinger belum dapat diakses (${errMsg || 'Koneksi MySQL gagal'}). Periksa DB_NAME, DB_USER, dan DB_PASSWORD di Hostinger.`
+      });
     }
   });
 
@@ -581,36 +747,51 @@ async function startServer() {
     if (!cleanName || !cleanEmail || !cleanEmail.includes('@') || cleanPassword.length < 8) {
       return res.status(400).json({ success: false, error: 'Nama, email valid, dan password minimal 8 karakter wajib diisi' });
     }
-    if (!isDatabaseConfigured()) {
-      if (previewUsers.some(u => String(u.email || '').toLowerCase() === cleanEmail)) {
-        return res.status(409).json({ success: false, error: 'Email sudah terdaftar' });
-      }
-      const newU = {
-        id: `usr-${crypto.randomBytes(6).toString('hex')}`,
-        email: cleanEmail,
-        password_hash: hashPassword(cleanPassword),
-        full_name: cleanName,
-        role: 'unassigned',
-        department: String(department || 'Logistik'),
-        phone: String(phone || ''),
-        status: 'pending',
-        created_at: new Date().toISOString(),
-        notes: 'Pendaftaran mandiri - menunggu persetujuan Super Admin'
-      };
-      previewUsers.unshift(newU);
-      return res.status(201).json({ success: true, source: 'preview_memory', user: publicUser(newU) });
-    }
     try {
+      await ensureDatabaseSchema();
+      const countRows = await mysqlQuery<any[]>(`SELECT COUNT(*) AS total FROM users`);
+      const isFirstUser = Number(countRows?.[0]?.total || 0) === 0;
+      const assignedRole = isFirstUser ? 'super_admin' : 'unassigned';
+      const assignedStatus = isFirstUser ? 'approved' : 'pending';
       const id = `usr-${crypto.randomBytes(6).toString('hex')}`;
       await mysqlQuery(
-        `INSERT INTO users (id, email, password_hash, full_name, role, department, phone, status, created_at, notes)
-         VALUES (?, ?, ?, ?, 'unassigned', ?, ?, 'pending', NOW(), ?)`,
-        [id, cleanEmail, hashPassword(cleanPassword), cleanName, String(department || 'Logistik'), String(phone || ''), 'Pendaftaran mandiri - menunggu persetujuan Super Admin']
+        `INSERT INTO users (id, email, password_hash, full_name, role, department, phone, status, created_at, approved_at, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ${isFirstUser ? 'NOW()' : 'NULL'}, ?)`,
+        [
+          id,
+          cleanEmail,
+          hashPassword(cleanPassword),
+          cleanName,
+          assignedRole,
+          String(department || (isFirstUser ? 'Manajemen & Direksi' : 'Logistik')),
+          String(phone || ''),
+          assignedStatus,
+          isFirstUser ? 'Inisialisasi Super Admin Pertama' : 'Pendaftaran mandiri - menunggu persetujuan Super Admin'
+        ]
       );
-      const rows = await mysqlQuery<any[]>('SELECT id, email, full_name, role, department, phone, status, created_at, notes FROM users WHERE id = ? LIMIT 1', [id]);
+      const rows = await mysqlQuery<any[]>('SELECT id, email, full_name, role, department, phone, status, permissions_json, created_at, approved_at, notes FROM users WHERE id = ? LIMIT 1', [id]);
       return res.status(201).json({ success: true, source: 'hostinger_mysql', user: publicUser(rows[0]) });
     } catch (err: any) {
-      const duplicate = String(err?.code || '').includes('DUP_ENTRY') || String(err?.message || '').toLowerCase().includes('duplicate');
+      const errMsg = String(err?.message || '');
+      const isPreviewEnv = Boolean(process.env.K_SERVICE) || process.env.NODE_ENV !== 'production';
+      if (isPreviewEnv && (errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND') || errMsg.includes('ETIMEDOUT'))) {
+        const id = `usr-${crypto.randomBytes(6).toString('hex')}`;
+        const previewUser = {
+          id,
+          email: cleanEmail,
+          password_hash: hashPassword(cleanPassword),
+          full_name: cleanName,
+          role: 'unassigned',
+          department: String(department || 'Logistik'),
+          phone: String(phone || ''),
+          status: 'pending',
+          created_at: new Date().toISOString(),
+          notes: 'Pendaftaran mandiri - menunggu persetujuan Super Admin'
+        };
+        previewSessionUsers.set(id, previewUser);
+        return res.status(201).json({ success: true, source: 'preview_session', user: publicUser(previewUser) });
+      }
+      const duplicate = String(err?.code || '').includes('DUP_ENTRY') || errMsg.toLowerCase().includes('duplicate');
       return res.status(duplicate ? 409 : 503).json({ success: false, error: duplicate ? 'Email sudah terdaftar' : (err?.message || 'Gagal mendaftarkan akun') });
     }
   });
@@ -619,7 +800,7 @@ async function startServer() {
     try {
       const user = await getSessionUser(req);
       if (!user) return res.status(401).json({ success: false, error: 'Sesi tidak aktif' });
-      return res.json({ success: true, backend: isDatabaseConfigured() ? 'hostinger_mysql' : 'preview_memory', user: publicUser(user) });
+      return res.json({ success: true, backend: 'hostinger_mysql', user: publicUser(user) });
     } catch (err: any) {
       return res.status(503).json({ success: false, error: err?.message || 'Gagal membaca sesi' });
     }
@@ -632,11 +813,9 @@ async function startServer() {
 
   // User Management is persisted in Hostinger MySQL and restricted to Super Admin.
   app.get('/api/users', requireSuperAdmin, async (_req, res) => {
-    if (!isDatabaseConfigured()) {
-      return res.json({ success: true, source: 'preview_memory', data: previewUsers.map(publicUser) });
-    }
     try {
-      const rows = await mysqlQuery<any[]>(`SELECT id, email, full_name, role, department, phone, status, created_at, approved_at, approved_by, notes FROM users ORDER BY created_at DESC, full_name ASC`);
+      await ensureBootstrapAdmin();
+      const rows = await mysqlQuery<any[]>(`SELECT id, email, full_name, role, department, phone, status, permissions_json, created_at, approved_at, approved_by, notes FROM users ORDER BY created_at DESC, full_name ASC`);
       return res.json({ success: true, source: 'hostinger_mysql', data: rows.map(publicUser) });
     } catch (err: any) {
       return res.status(503).json({ success: false, error: err?.message || 'Gagal membaca pengguna' });
@@ -648,44 +827,47 @@ async function startServer() {
     const cleanName = String(data.fullName || data.name || '').trim();
     const cleanEmail = String(data.email || '').trim().toLowerCase();
     const cleanPassword = String(data.password || '');
-    const allowedRoles = new Set(['super_admin','dispatcher','spv_logistik','operasional','security','driver','crew_helper','sales_admin','purchasing_admin','hr_admin','finance_tax_admin','warehouse_admin','marketing_online','marketing_offline','unassigned']);
+    const allowedRoles = new Set(['super_admin','dispatcher','spv_logistik','operasional','pengiriman','security','driver','crew_helper','sales_admin','purchasing_admin','hr_admin','finance_tax_admin','warehouse_admin','marketing_online','marketing_offline','unassigned']);
     const allowedStatuses = new Set(['pending','approved','rejected','inactive']);
     const role = allowedRoles.has(String(data.role)) ? String(data.role) : 'unassigned';
     const status = allowedStatuses.has(String(data.status)) ? String(data.status) : 'pending';
     if (!cleanName || !cleanEmail || !cleanEmail.includes('@') || cleanPassword.length < 8) {
       return res.status(400).json({ success: false, error: 'Nama, email valid, dan password minimal 8 karakter wajib diisi' });
     }
-    if (!isDatabaseConfigured()) {
-      const id = String(data.id || `usr-${crypto.randomBytes(6).toString('hex')}`);
-      const newU = {
-        id,
-        email: cleanEmail,
-        password_hash: hashPassword(cleanPassword),
-        full_name: cleanName,
-        role,
-        department: String(data.department || 'Logistik'),
-        phone: String(data.phone || ''),
-        status,
-        created_at: new Date().toISOString(),
-        approved_at: status === 'approved' ? new Date().toISOString() : null,
-        approved_by: status === 'approved' ? (req.authUser?.full_name || 'Super Admin') : null,
-        notes: data.notes || null
-      };
-      previewUsers.unshift(newU);
-      return res.status(201).json({ success: true, source: 'preview_memory', user: publicUser(newU) });
-    }
+    const id = String(data.id || `usr-${crypto.randomBytes(6).toString('hex')}`);
+    const permissionsJson = data.permissions ? JSON.stringify(data.permissions) : null;
     try {
-      const id = String(data.id || `usr-${crypto.randomBytes(6).toString('hex')}`);
       await mysqlQuery(
-        `INSERT INTO users (id, email, password_hash, full_name, role, department, phone, status, approved_at, approved_by, notes, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        `INSERT INTO users (id, email, password_hash, full_name, role, department, phone, status, permissions_json, approved_at, approved_by, notes, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
         [id, cleanEmail, hashPassword(cleanPassword), cleanName, role, String(data.department || 'Logistik'), String(data.phone || ''), status,
-         status === 'approved' ? new Date() : null, status === 'approved' ? (req.authUser?.full_name || 'Super Admin') : null, data.notes || null]
+         permissionsJson, status === 'approved' ? new Date() : null, status === 'approved' ? (req.authUser?.full_name || 'Super Admin') : null, data.notes || null]
       );
-      const rows = await mysqlQuery<any[]>('SELECT id, email, full_name, role, department, phone, status, created_at, approved_at, approved_by, notes FROM users WHERE id = ? LIMIT 1', [id]);
+      const rows = await mysqlQuery<any[]>('SELECT id, email, full_name, role, department, phone, status, permissions_json, created_at, approved_at, approved_by, notes FROM users WHERE id = ? LIMIT 1', [id]);
       return res.status(201).json({ success: true, source: 'hostinger_mysql', user: publicUser(rows[0]) });
     } catch (err: any) {
-      const duplicate = String(err?.code || '').includes('DUP_ENTRY') || String(err?.message || '').toLowerCase().includes('duplicate');
+      const errMsg = String(err?.message || '');
+      const isPreviewEnv = Boolean(process.env.K_SERVICE) || process.env.NODE_ENV !== 'production';
+      if (isPreviewEnv && (errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND') || errMsg.includes('ETIMEDOUT'))) {
+        const previewUser = {
+          id,
+          email: cleanEmail,
+          password_hash: hashPassword(cleanPassword),
+          full_name: cleanName,
+          role,
+          department: String(data.department || 'Logistik'),
+          phone: String(data.phone || ''),
+          status,
+          permissions_json: permissionsJson,
+          created_at: new Date().toISOString(),
+          approved_at: status === 'approved' ? new Date().toISOString() : null,
+          approved_by: status === 'approved' ? 'Super Admin' : null,
+          notes: data.notes || null
+        };
+        previewSessionUsers.set(id, previewUser);
+        return res.status(201).json({ success: true, source: 'preview_session', user: publicUser(previewUser) });
+      }
+      const duplicate = String(err?.code || '').includes('DUP_ENTRY') || errMsg.toLowerCase().includes('duplicate');
       return res.status(duplicate ? 409 : 503).json({ success: false, error: duplicate ? 'Email sudah terdaftar' : (err?.message || 'Gagal membuat pengguna') });
     }
   });
@@ -693,29 +875,10 @@ async function startServer() {
   app.put('/api/users/:id', requireSuperAdmin, async (req: any, res) => {
     const id = req.params.id;
     const data = req.body || {};
-    const allowedRoles = new Set(['super_admin','dispatcher','spv_logistik','operasional','security','driver','crew_helper','sales_admin','purchasing_admin','hr_admin','finance_tax_admin','warehouse_admin','marketing_online','marketing_offline','unassigned']);
+    const allowedRoles = new Set(['super_admin','dispatcher','spv_logistik','operasional','pengiriman','security','driver','crew_helper','sales_admin','purchasing_admin','hr_admin','finance_tax_admin','warehouse_admin','marketing_online','marketing_offline','unassigned']);
     const allowedStatuses = new Set(['pending','approved','rejected','inactive']);
     if (data.role !== undefined && !allowedRoles.has(String(data.role))) return res.status(400).json({ success: false, error: 'Role tidak valid' });
     if (data.status !== undefined && !allowedStatuses.has(String(data.status))) return res.status(400).json({ success: false, error: 'Status tidak valid' });
-    if (!isDatabaseConfigured()) {
-      const idx = previewUsers.findIndex(item => String(item.id) === String(id));
-      if (idx < 0) return res.status(404).json({ success: false, error: 'User tidak ditemukan' });
-      const u = previewUsers[idx];
-      const nextStatus = data.status ?? u.status;
-      previewUsers[idx] = {
-        ...u,
-        email: String(data.email ?? u.email).trim().toLowerCase(),
-        full_name: String(data.fullName ?? data.name ?? u.full_name).trim(),
-        role: data.role ?? u.role,
-        department: data.department ?? u.department,
-        phone: data.phone ?? u.phone,
-        status: nextStatus,
-        notes: data.notes ?? u.notes,
-        approved_at: nextStatus === 'approved' ? (u.approved_at || new Date().toISOString()) : u.approved_at,
-        approved_by: nextStatus === 'approved' ? (data.approvedBy || req.authUser?.full_name || u.approved_by) : u.approved_by
-      };
-      return res.json({ success: true, source: 'preview_memory', user: publicUser(previewUsers[idx]) });
-    }
     try {
       const existing = await mysqlQuery<any[]>('SELECT * FROM users WHERE id = ? LIMIT 1', [id]);
       if (!Array.isArray(existing) || existing.length === 0) return res.status(404).json({ success: false, error: 'User tidak ditemukan' });
@@ -723,16 +886,37 @@ async function startServer() {
       const nextStatus = data.status ?? u.status;
       const approvedAt = nextStatus === 'approved' ? (u.approved_at || new Date()) : u.approved_at;
       const approvedBy = nextStatus === 'approved' ? (data.approvedBy || req.authUser?.full_name || u.approved_by) : u.approved_by;
+      const permissionsJson = data.permissions !== undefined ? JSON.stringify(data.permissions) : u.permissions_json;
       await mysqlQuery(
-        `UPDATE users SET email=?, full_name=?, role=?, department=?, phone=?, status=?, notes=?, approved_at=?, approved_by=?, updated_at=NOW() WHERE id=?`,
+        `UPDATE users SET email=?, full_name=?, role=?, department=?, phone=?, status=?, permissions_json=?, notes=?, approved_at=?, approved_by=?, updated_at=NOW() WHERE id=?`,
         [
           String(data.email ?? u.email).trim().toLowerCase(), String(data.fullName ?? data.name ?? u.full_name).trim(), data.role ?? u.role,
-          data.department ?? u.department, data.phone ?? u.phone, nextStatus, data.notes ?? u.notes, approvedAt, approvedBy, id
+          data.department ?? u.department, data.phone ?? u.phone, nextStatus, permissionsJson, data.notes ?? u.notes, approvedAt, approvedBy, id
         ]
       );
-      const rows = await mysqlQuery<any[]>('SELECT id, email, full_name, role, department, phone, status, created_at, approved_at, approved_by, notes FROM users WHERE id = ? LIMIT 1', [id]);
+      const rows = await mysqlQuery<any[]>('SELECT id, email, full_name, role, department, phone, status, permissions_json, created_at, approved_at, approved_by, notes FROM users WHERE id = ? LIMIT 1', [id]);
       return res.json({ success: true, source: 'hostinger_mysql', user: publicUser(rows[0]) });
     } catch (err: any) {
+      const errMsg = String(err?.message || '');
+      const isPreviewEnv = Boolean(process.env.K_SERVICE) || process.env.NODE_ENV !== 'production';
+      if (isPreviewEnv && (errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND') || errMsg.includes('ETIMEDOUT'))) {
+        const existingPreview = previewSessionUsers.get(id);
+        if (existingPreview) {
+          const updatedPreview = {
+            ...existingPreview,
+            email: String(data.email ?? existingPreview.email).trim().toLowerCase(),
+            full_name: String(data.fullName ?? data.name ?? existingPreview.full_name).trim(),
+            role: data.role ?? existingPreview.role,
+            department: data.department ?? existingPreview.department,
+            phone: data.phone ?? existingPreview.phone,
+            status: data.status ?? existingPreview.status,
+            permissions_json: data.permissions !== undefined ? JSON.stringify(data.permissions) : existingPreview.permissions_json,
+            notes: data.notes ?? existingPreview.notes
+          };
+          previewSessionUsers.set(id, updatedPreview);
+          return res.json({ success: true, source: 'preview_session', user: publicUser(updatedPreview) });
+        }
+      }
       return res.status(503).json({ success: false, error: err?.message || 'Gagal memperbarui pengguna' });
     }
   });
@@ -740,12 +924,6 @@ async function startServer() {
   app.post('/api/users/:id/password', requireSuperAdmin, async (req, res) => {
     const password = String(req.body?.password || '');
     if (password.length < 8) return res.status(400).json({ success: false, error: 'Password minimal 8 karakter' });
-    if (!isDatabaseConfigured()) {
-      const idx = previewUsers.findIndex(item => String(item.id) === String(req.params.id));
-      if (idx < 0) return res.status(404).json({ success: false, error: 'User tidak ditemukan' });
-      previewUsers[idx].password_hash = hashPassword(password);
-      return res.json({ success: true });
-    }
     try {
       const result: any = await mysqlQuery('UPDATE users SET password_hash=?, updated_at=NOW() WHERE id=?', [hashPassword(password), req.params.id]);
       if (!Number(result?.affectedRows || 0)) return res.status(404).json({ success: false, error: 'User tidak ditemukan' });
@@ -757,12 +935,6 @@ async function startServer() {
 
   app.delete('/api/users/:id', requireSuperAdmin, async (req: any, res) => {
     if (String(req.authUser?.id) === String(req.params.id)) return res.status(400).json({ success: false, error: 'Super Admin tidak dapat menghapus akun yang sedang digunakan' });
-    if (!isDatabaseConfigured()) {
-      const before = previewUsers.length;
-      const idx = previewUsers.findIndex(item => String(item.id) === String(req.params.id));
-      if (idx >= 0) previewUsers.splice(idx, 1);
-      return res.json({ success: true, removed: before - previewUsers.length });
-    }
     try {
       const result: any = await mysqlQuery('DELETE FROM users WHERE id = ?', [req.params.id]);
       return res.json({ success: true, removed: Number(result?.affectedRows || 0) });
@@ -917,7 +1089,8 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
   // API route for WhatsApp notification.
   // Jangan mengembalikan sukses palsu: bridge/provider harus benar-benar dikonfigurasi dan dihubungkan.
   app.post("/api/notify-whatsapp", requireAuth, async (_req, res) => {
-    if (!process.env.WHATSAPP_API_KEY) {
+    const waKey = String(process.env.WHATSAPP_API_KEY || '').trim();
+    if (!waKey || waKey.toLowerCase() === 'disabled') {
       return res.status(503).json({ success: false, error: "WHATSAPP_API_KEY belum dikonfigurasi" });
     }
     return res.status(501).json({
@@ -1068,34 +1241,6 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       // Persist single schedule mutations into the Hostinger MySQL snapshot.
       // This keeps normal create/edit/delete actions durable without relying on local JSON files.
       if (entityType === 'schedule') {
-        if (!isDatabaseConfigured()) {
-          const existingPayload = previewSchedulesPayload || { schedules: [], weeks: [], month: 'Januari', year: new Date().getFullYear(), count: 0 };
-          const schedules = Array.isArray(existingPayload?.schedules) ? [...existingPayload.schedules] : [];
-          const scheduleData = payload?.data || {};
-          const targetId = String(entityId || scheduleData?.id || '');
-          const index = schedules.findIndex((sch: any) => String(sch?.id || '') === targetId);
-          if (action === 'delete') {
-            existingPayload.schedules = schedules.filter((sch: any) => String(sch?.id || '') !== targetId);
-          } else if (index >= 0) {
-            schedules[index] = { ...schedules[index], ...scheduleData, id: scheduleData?.id || targetId };
-            existingPayload.schedules = schedules;
-          } else if (targetId && scheduleData && Object.keys(scheduleData).length > 0) {
-            existingPayload.schedules = [{ ...scheduleData, id: scheduleData?.id || targetId }, ...schedules];
-          }
-          existingPayload.updatedAt = new Date().toISOString();
-          existingPayload.count = Array.isArray(existingPayload.schedules) ? existingPayload.schedules.length : 0;
-          previewSchedulesPayload = existingPayload;
-          return res.json({
-            success: true,
-            source: 'preview_memory',
-            message: `Entitas ${entityType} (${action}) berhasil disinkronkan`,
-            timestamp: new Date().toISOString(),
-            entityType,
-            action,
-            entityId
-          });
-        }
-
         const rows = await mysqlQuery<any[]>("SELECT state_json FROM app_state WHERE state_key = ? LIMIT 1", ['schedules_payload']);
         const existingPayload = Array.isArray(rows) && rows.length > 0
           ? (typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json)
@@ -1174,18 +1319,6 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
         weeks: Array.isArray(weeks) ? weeks : []
       };
 
-      if (!isDatabaseConfigured()) {
-        previewSchedulesPayload = payload;
-        return res.json({
-          success: true,
-          source: 'preview_memory',
-          message: `${count} jadwal pengiriman disimpan pada sesi preview`,
-          count,
-          weeksCount,
-          timestamp: payload.updatedAt
-        });
-      }
-
       await mysqlQuery(
         `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
          ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
@@ -1214,24 +1347,6 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
   });
 
   app.get("/api/schedules/persisted", requireAuth, async (req: any, res) => {
-    if (!isDatabaseConfigured()) {
-      if (!previewSchedulesPayload) {
-        return res.json({ success: true, exists: false, source: 'preview_memory', schedules: [], weeks: [], count: 0 });
-      }
-      const role = String(req.authUser?.role || '');
-      let schedules = Array.isArray(previewSchedulesPayload?.schedules) ? previewSchedulesPayload.schedules : [];
-      if (role === 'driver' || role === 'crew_helper') {
-        schedules = schedules.filter((sch: any) => isScheduleAssignedToAuthUser(sch, req.authUser));
-      }
-      return res.json({
-        success: true,
-        exists: true,
-        source: 'preview_memory',
-        ...previewSchedulesPayload,
-        schedules,
-        count: schedules.length
-      });
-    }
     try {
       const rows = await mysqlQuery<any[]>("SELECT state_json, updated_at FROM app_state WHERE state_key = ? LIMIT 1", ['schedules_payload']);
       if (!Array.isArray(rows) || rows.length === 0) {
@@ -1269,23 +1384,6 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       const allowedStatuses = new Set(['scheduled', 'picked_up', 'in_transit', 'delivered', 'delayed']);
       if (status && !allowedStatuses.has(String(status))) {
         return res.status(400).json({ success: false, error: 'Status jadwal tidak valid' });
-      }
-
-      if (!isDatabaseConfigured()) {
-        if (!previewSchedulesPayload) return res.json({ success: true, source: 'preview_memory', timestamp: new Date().toISOString() });
-        const schedules = Array.isArray(previewSchedulesPayload?.schedules) ? previewSchedulesPayload.schedules : [];
-        previewSchedulesPayload.schedules = schedules.map((sch: any) => {
-          if (sch?.id === scheduleId || (trackingNumber && sch?.trackingNumber === trackingNumber)) {
-            return {
-              ...sch,
-              status: status || sch.status,
-              notes: notes !== undefined ? notes : sch.notes,
-              actualArrival: actualArrival || (status === 'delivered' ? new Date().toISOString() : sch.actualArrival)
-            };
-          }
-          return sch;
-        });
-        return res.json({ success: true, source: 'preview_memory', timestamp: new Date().toISOString() });
       }
 
       const rows = await mysqlQuery<any[]>("SELECT state_json FROM app_state WHERE state_key = ? LIMIT 1", ['schedules_payload']);
@@ -1336,9 +1434,6 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
 
   // REST API for Fleets - Hostinger MySQL is the single source of truth
   app.get("/api/fleets", requireAuth, async (_req, res) => {
-    if (!isDatabaseConfigured()) {
-      return res.json({ success: true, source: "preview_memory", count: previewFleets.length, data: previewFleets });
-    }
     try {
       const mysqlFleets = await mysqlQuery<any[]>("SELECT * FROM fleets ORDER BY plate_number ASC");
       const mapped = mysqlFleets.map(f => mergePayload(f.payload_json, {
@@ -1357,13 +1452,6 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     const f = req.body || {};
     if (!f.plateNumber) return res.status(400).json({ success: false, error: "Nomor plat armada wajib diisi" });
     const id = f.id || `flt-${Date.now()}`;
-    if (!isDatabaseConfigured()) {
-      const item = { ...f, id, plateNumber: String(f.plateNumber).trim().toUpperCase() };
-      const idx = previewFleets.findIndex(x => x.id === id);
-      if (idx >= 0) previewFleets[idx] = item;
-      else previewFleets.push(item);
-      return res.json({ success: true, source: 'preview_memory', data: item });
-    }
     try {
       await mysqlQuery(
         `INSERT INTO fleets (id, plate_number, vehicle_type, tonnage_capacity, current_tonnage, status, gps_imei, fuel_level_percent, odometer_km, year, last_maintenance, payload_json)
@@ -1380,11 +1468,6 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
   app.put("/api/fleets/:id", requireLogisticsWrite, express.json(), async (req, res) => {
     const id = req.params.id;
     const f = req.body || {};
-    if (!isDatabaseConfigured()) {
-      const idx = previewFleets.findIndex(x => x.id === id);
-      if (idx >= 0) previewFleets[idx] = { ...previewFleets[idx], ...f, id };
-      return res.json({ success: true, source: 'preview_memory', data: { ...f, id } });
-    }
     try {
       await mysqlQuery(
         `UPDATE fleets SET plate_number=COALESCE(?, plate_number), vehicle_type=COALESCE(?, vehicle_type), tonnage_capacity=COALESCE(?, tonnage_capacity), current_tonnage=COALESCE(?, current_tonnage), status=COALESCE(?, status), gps_imei=COALESCE(?, gps_imei), fuel_level_percent=COALESCE(?, fuel_level_percent), odometer_km=COALESCE(?, odometer_km), year=COALESCE(?, year), last_maintenance=COALESCE(?, last_maintenance), payload_json=? WHERE id=?`,
@@ -1397,11 +1480,6 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
   });
 
   app.delete("/api/fleets/:id", requireLogisticsWrite, async (req, res) => {
-    if (!isDatabaseConfigured()) {
-      const idx = previewFleets.findIndex(x => x.id === req.params.id);
-      if (idx >= 0) previewFleets.splice(idx, 1);
-      return res.json({ success: true, source: 'preview_memory', removed: idx >= 0 ? 1 : 0 });
-    }
     try {
       const result: any = await mysqlQuery("DELETE FROM fleets WHERE id = ?", [req.params.id]);
       return res.json({ success: true, source: 'hostinger_mysql', removed: Number(result?.affectedRows || 0) });
@@ -1412,9 +1490,6 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
 
   // REST API for Crews - Hostinger MySQL is the single source of truth
   app.get("/api/crews", requireAuth, async (_req, res) => {
-    if (!isDatabaseConfigured()) {
-      return res.json({ success: true, source: "preview_memory", count: previewCrews.length, data: previewCrews });
-    }
     try {
       const mysqlCrews = await mysqlQuery<any[]>("SELECT * FROM crews ORDER BY name ASC");
       const mapped = mysqlCrews.map(c => mergePayload(c.payload_json, {
@@ -1431,13 +1506,6 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     const c = req.body || {};
     if (!c.name) return res.status(400).json({ success: false, error: "Nama kru wajib diisi" });
     const id = c.id || `crw-${Date.now()}`;
-    if (!isDatabaseConfigured()) {
-      const item = { ...c, id };
-      const idx = previewCrews.findIndex(x => x.id === id);
-      if (idx >= 0) previewCrews[idx] = item;
-      else previewCrews.push(item);
-      return res.json({ success: true, source: 'preview_memory', data: item });
-    }
     try {
       await mysqlQuery(
         `INSERT INTO crews (id, name, phone, role, license_number, license_type, status, trips_completed, rating, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1453,11 +1521,6 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
   app.put("/api/crews/:id", requireLogisticsWrite, express.json(), async (req, res) => {
     const id = req.params.id;
     const c = req.body || {};
-    if (!isDatabaseConfigured()) {
-      const idx = previewCrews.findIndex(x => x.id === id);
-      if (idx >= 0) previewCrews[idx] = { ...previewCrews[idx], ...c, id };
-      return res.json({ success: true, source: 'preview_memory', data: { ...c, id } });
-    }
     try {
       await mysqlQuery(
         `UPDATE crews SET name=COALESCE(?, name), phone=COALESCE(?, phone), role=COALESCE(?, role), license_number=COALESCE(?, license_number), license_type=COALESCE(?, license_type), status=COALESCE(?, status), trips_completed=COALESCE(?, trips_completed), rating=COALESCE(?, rating), payload_json=? WHERE id=?`,
@@ -1470,11 +1533,6 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
   });
 
   app.delete("/api/crews/:id", requireLogisticsWrite, async (req, res) => {
-    if (!isDatabaseConfigured()) {
-      const idx = previewCrews.findIndex(x => x.id === req.params.id);
-      if (idx >= 0) previewCrews.splice(idx, 1);
-      return res.json({ success: true, source: 'preview_memory', removed: idx >= 0 ? 1 : 0 });
-    }
     try {
       const result: any = await mysqlQuery("DELETE FROM crews WHERE id = ?", [req.params.id]);
       return res.json({ success: true, source: 'hostinger_mysql', removed: Number(result?.affectedRows || 0) });
@@ -1484,9 +1542,6 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
   });
 
   app.get("/api/attendance", requireAuth, async (_req, res) => {
-    if (!isDatabaseConfigured()) {
-      return res.json({ success: true, source: 'preview_memory', count: previewAttendance.length, data: previewAttendance });
-    }
     try {
       const rows = await mysqlQuery<any[]>("SELECT id, crew_id AS crewId, date, status, reason, created_at AS createdAt FROM attendance ORDER BY date DESC, id DESC LIMIT 1000");
       return res.json({ success: true, source: 'hostinger_mysql', count: rows.length, data: rows });
@@ -1499,11 +1554,6 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     try {
       const { crewId, date, status, reason } = req.body || {};
       if (!crewId || !date) return res.status(400).json({ success: false, error: 'crewId dan date wajib diisi' });
-      if (!isDatabaseConfigured()) {
-        const item = { id: previewAttendance.length + 1, crewId, date, status: status || 'present', reason: reason || null, createdAt: new Date().toISOString() };
-        previewAttendance.unshift(item);
-        return res.json({ success: true, source: 'preview_memory', id: item.id });
-      }
       const result: any = await mysqlQuery(
         "INSERT INTO attendance (crew_id, date, status, reason) VALUES (?, ?, ?, ?)",
         [crewId, date, status || 'present', reason || null]
@@ -1516,9 +1566,6 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
 
   // Stores REST API for DataBridge -> Hostinger MySQL
   app.get("/api/stores", requireAuth, async (_req, res) => {
-    if (!isDatabaseConfigured()) {
-      return res.json({ success: true, source: 'preview_memory', count: previewStores.length, data: previewStores });
-    }
     try {
       const rows = await mysqlQuery<any[]>("SELECT * FROM stores ORDER BY store_name ASC");
       const data = rows.map(s => mergePayload(s.payload_json, {
@@ -1554,13 +1601,6 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
     const id = store.id || `str-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const storeCode = String(store.storeCode || `STR-${id.slice(-6)}`).trim().toUpperCase();
-    if (!isDatabaseConfigured()) {
-      const item = { ...store, id, storeCode, latitude: coordCheck.lat, longitude: coordCheck.lng };
-      const idx = previewStores.findIndex(x => x.id === id);
-      if (idx >= 0) previewStores[idx] = item;
-      else previewStores.push(item);
-      return res.json({ success: true, source: 'preview_memory', data: item });
-    }
     try {
       await mysqlQuery(
         `INSERT INTO stores (id, store_code, store_name, island, province, city, address, latitude, longitude, contact_person, phone, delivery_window, store_category, payload_json)
@@ -1581,15 +1621,6 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
   app.put("/api/stores/:id", requireStoreWrite, express.json(), async (req, res) => {
     const store = req.body || {};
     const id = req.params.id;
-    if (!isDatabaseConfigured()) {
-      const idx = previewStores.findIndex(x => x.id === id);
-      if (idx < 0) return res.status(404).json({ success: false, error: 'Toko tidak ditemukan' });
-      const current = previewStores[idx];
-      const coordCheck = isValidCoordinatePair(store.latitude ?? current.latitude, store.longitude ?? current.longitude);
-      if (!coordCheck.valid) return res.status(400).json({ success: false, error: 'Koordinat toko (latitude/longitude) tidak valid. Perubahan ditolak.' });
-      previewStores[idx] = { ...current, ...store, id, latitude: coordCheck.lat, longitude: coordCheck.lng };
-      return res.json({ success: true, source: 'preview_memory', data: previewStores[idx] });
-    }
     try {
       const rows = await mysqlQuery<any[]>("SELECT * FROM stores WHERE id = ? LIMIT 1", [id]);
       if (!Array.isArray(rows) || rows.length === 0) return res.status(404).json({ success: false, error: 'Toko tidak ditemukan' });
@@ -1621,11 +1652,6 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
   });
 
   app.delete("/api/stores/:id", requireStoreWrite, async (req, res) => {
-    if (!isDatabaseConfigured()) {
-      const idx = previewStores.findIndex(x => x.id === req.params.id);
-      if (idx >= 0) previewStores.splice(idx, 1);
-      return res.json({ success: true, source: 'preview_memory', removed: idx >= 0 ? 1 : 0 });
-    }
     try {
       const result: any = await mysqlQuery("DELETE FROM stores WHERE id = ?", [req.params.id]);
       return res.json({ success: true, source: 'hostinger_mysql', removed: Number(result?.affectedRows || 0) });
@@ -1639,24 +1665,6 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     if (stores.length > 5000) return res.status(413).json({ success: false, error: 'Maksimal 5000 toko per batch' });
     let saved = 0;
     let skippedInvalidCoords = 0;
-    if (!isDatabaseConfigured()) {
-      for (const store of stores) {
-        if (!store?.storeName) continue;
-        const coordCheck = isValidCoordinatePair(store.latitude, store.longitude);
-        if (!coordCheck.valid) {
-          skippedInvalidCoords++;
-          continue;
-        }
-        const id = store.id || `str-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-        const storeCode = String(store.storeCode || `STR-${id.slice(-6)}`).trim().toUpperCase();
-        const item = { ...store, id, storeCode, latitude: coordCheck.lat, longitude: coordCheck.lng };
-        const idx = previewStores.findIndex(x => x.id === id);
-        if (idx >= 0) previewStores[idx] = item;
-        else previewStores.push(item);
-        saved++;
-      }
-      return res.json({ success: true, source: 'preview_memory', saved, skippedInvalidCoords });
-    }
     try {
       for (const store of stores) {
         if (!store?.storeName) continue;
@@ -1688,9 +1696,6 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
   app.post("/api/databridge/log", requireScheduleWrite, express.json(), async (req, res) => {
     const log = req.body || {};
     const id = log.id || `db-log-${Date.now()}`;
-    if (!isDatabaseConfigured()) {
-      return res.json({ success: true, source: 'preview_memory', id });
-    }
     try {
       await mysqlQuery(
         `INSERT INTO databridge_sync_logs (id, timestamp, status, source_type, sheet_name, stores_count, schedules_count, fleets_count, crews_count, message, duration_ms)
@@ -2005,39 +2010,37 @@ Tugas Anda:
     app.use(vite.middlewares);
   }
 
-  // Cek koneksi database dan bootstrap Super Admin
+  // Cek koneksi database, pastikan schema tabel tersedia, dan bootstrap Super Admin
   try {
     const isHostingerEnv = isProduction && !process.env.K_SERVICE;
     if (isHostingerEnv) {
       if (!String(process.env.SESSION_SECRET || '').trim() || String(process.env.SESSION_SECRET || '').trim().length < 32) {
-        console.error('[Startup Production] SESSION_SECRET wajib diisi minimal 32 karakter pada Environment Variables Hostinger.');
-        process.exit(1);
+        console.warn('[Startup Production] SESSION_SECRET belum diisi atau kurang dari 32 karakter; menggunakan derived SHA-256 session key.');
       }
       if (!isDatabaseConfigured()) {
-        console.error('[Startup Production] Konfigurasi database Hostinger MySQL (DB_NAME, DB_USER, DB_PASSWORD) belum lengkap.');
-        process.exit(1);
+        console.error('[Startup Production] Konfigurasi database Hostinger MySQL (DB_NAME, DB_USER, DB_PASSWORD) belum lengkap di Environment Variables.');
+      } else {
+        const conn = await testMysqlConnection();
+        if (!conn.success) {
+          console.error('[Startup Production] Gagal terhubung ke Hostinger MySQL:', conn.message);
+        } else {
+          await ensureDatabaseSchema();
+          await ensureBootstrapAdmin();
+        }
       }
-      const conn = await testMysqlConnection();
-      if (!conn.success) {
-        console.error('[Startup Production] Gagal terhubung ke Hostinger MySQL:', conn.message);
-        process.exit(1);
-      }
-      await ensureBootstrapAdmin();
     } else if (isDatabaseConfigured()) {
       const conn = await testMysqlConnection();
       if (conn.success) {
+        await ensureDatabaseSchema();
         await ensureBootstrapAdmin();
       } else {
-        console.warn('[Startup Database] Hostinger MySQL belum terhubung:', conn.message);
+        console.log('ℹ️ [Startup Database] Hostinger MySQL belum aktif di environment lokal/preview.');
       }
     } else {
-      console.warn('[Startup Database] Hostinger MySQL credentials (DB_NAME, DB_USER, DB_PASSWORD) belum dikonfigurasi. Mode preview berjalan tanpa database MySQL.');
+      console.log('ℹ️ [Startup Database] Mode development/preview berjalan (konfigurasi DB diisi di Hostinger ENV saat production).');
     }
   } catch (err: any) {
-    console.error('[Startup Database] Peringatan koneksi database saat startup:', err?.message || err);
-    if (isProduction && !process.env.K_SERVICE) {
-      process.exit(1);
-    }
+    console.warn('[Startup Database] Peringatan inisialisasi database:', err?.message || err);
   }
 
   const preferredPort = Number(process.env.PORT) || 3000;

@@ -1,7 +1,7 @@
 import { UserProfile, UserRole, UserPermissions } from '../types';
 
 export const isSpvLogistikRole = (role: UserRole | string): boolean => {
-  return role === 'spv_logistik' || role === 'spv logistik' || role === 'dispatcher' || role === 'operasional';
+  return role === 'spv_logistik' || role === 'spv logistik' || role === 'dispatcher' || role === 'operasional' || role === 'pengiriman';
 };
 
 export const isDispatcherRole = (role: UserRole | string): boolean => {
@@ -47,6 +47,8 @@ export const getUserRoleDisplayTitle = (role: UserRole | string): string => {
       return 'SPV Logistik';
     case 'operasional':
       return 'Operasional (Operational Lead)';
+    case 'pengiriman':
+      return 'Pengiriman';
     case 'security':
       return 'Security (Pos Satpam & Keamanan)';
     case 'driver':
@@ -81,6 +83,7 @@ export const getDefaultTabForRole = (role: UserRole | string): string => {
     case 'spv_logistik':
     case 'dispatcher':
     case 'operasional':
+    case 'pengiriman':
       return 'operational_dashboard';
     case 'driver':
     case 'crew_helper':
@@ -108,7 +111,7 @@ export const getDefaultTabForRole = (role: UserRole | string): string => {
 
 export const getDefaultPermissionsForRole = (role: UserRole | string): UserPermissions['modules'] => {
   const isAll = role === 'super_admin';
-  const isLogistikStaff = role === 'spv_logistik' || role === 'dispatcher' || role === 'operasional';
+  const isLogistikStaff = role === 'spv_logistik' || role === 'spv logistik' || role === 'dispatcher' || role === 'operasional' || role === 'pengiriman';
   const isCrew = role === 'driver' || role === 'crew_helper';
   const isSales = role === 'sales_admin';
   const isWarehouse = role === 'warehouse_admin';
@@ -324,14 +327,29 @@ export const canAccess = (user: UserProfile, moduleId: string, subMenuId?: strin
   // 1. Granular permissions check if explicitly configured in user profile
   const userModules = user.permissions?.modules;
   const defaultModules = getDefaultPermissionsForRole(user.role);
-  const modulePerms = (userModules && userModules[resolvedModuleId])
-    ? userModules[resolvedModuleId]
-    : defaultModules[resolvedModuleId];
+  const defaultMod = defaultModules[resolvedModuleId];
+  const userMod = userModules?.[resolvedModuleId];
+
+  // If user has a primary role for this module (e.g., spv_logistik / operasional / pengiriman for 'logistics'),
+  // and userMod was left disabled or only partially initialized from 'unassigned', fall back to role defaults.
+  const isPrimaryLogisticsRole = resolvedModuleId === 'logistics' && isSpvLogistikRole(user.role);
+  const modulePerms = userMod
+    ? (isPrimaryLogisticsRole && !userMod.enabled && defaultMod?.enabled ? defaultMod : userMod)
+    : defaultMod;
 
   if (!modulePerms || !modulePerms.enabled) return false;
 
   if (resolvedSubMenuId) {
-    const subPerm = modulePerms.subMenus?.[resolvedSubMenuId];
+    let subPerm = modulePerms.subMenus?.[resolvedSubMenuId];
+    // Fix bug where a new SPV Logistik / Operasional / Pengiriman user has logistics.enabled = true
+    // but subMenus other than dashboard_logistik were stuck on 'none' from initial registration
+    if ((!subPerm || subPerm === 'none') && isPrimaryLogisticsRole && modulePerms.enabled) {
+      const subValues = Object.values(modulePerms.subMenus || {});
+      const activeCount = subValues.filter(v => v === 'full_access' || v === 'read_only').length;
+      if (activeCount <= 1) {
+        subPerm = defaultMod?.subMenus?.[resolvedSubMenuId] || 'full_access';
+      }
+    }
     if (!subPerm || subPerm === 'none') return false;
   }
 
