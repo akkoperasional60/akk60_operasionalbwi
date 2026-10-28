@@ -6,12 +6,13 @@
   "scripts": {
     "prebuild": "tsx scripts/validate_env.ts",
     "dev": "tsx server.ts",
-    "build": "vite build",
+    "build:server": "esbuild server.ts --bundle --platform=node --packages=external --format=esm --outfile=server.js",
+    "build": "vite build && npm run build:server",
     "build:portal": "BUILD_TARGET=portal vite build",
     "build:driver": "BUILD_TARGET=driver vite build",
     "build:both": "BUILD_TARGET=portal vite build && BUILD_TARGET=driver vite build",
     "build:apk": "python3 scripts/build_apk.py",
-    "start": "tsx server.ts",
+    "start": "node server.js",
     "clean": "rm -rf dist dist-portal dist-driver",
     "lint": "tsc --noEmit",
     "test": "tsx scripts/run_e2e_tests.ts"

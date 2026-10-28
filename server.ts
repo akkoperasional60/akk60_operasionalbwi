@@ -2,7 +2,6 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
-import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
 import * as XLSX from "xlsx";
@@ -1630,6 +1629,7 @@ Tugas Anda:
     });
   } else {
     // In development mode, Vite middleware compiles and serves on-the-fly
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
