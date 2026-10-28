@@ -29,6 +29,14 @@ if (missing.length > 0) {
   console.log('✅ [Pre-Build] Environment Hostinger MySQL terdeteksi lengkap.');
 }
 
+// 1b. Cek URL production (warning saja agar staging/preview tetap bisa dibangun)
+const appUrl = String(process.env.APP_URL || '').trim().replace(/\/+$/, '');
+if (!appUrl) {
+  console.warn('⚠️ [Pre-Build] APP_URL belum diisi. Production Hostinger harus memakai https://akkoperasional.com');
+} else if (process.env.NODE_ENV === 'production' && appUrl !== 'https://akkoperasional.com') {
+  console.warn(`⚠️ [Pre-Build] APP_URL production saat ini ${appUrl}. Baseline production resmi adalah https://akkoperasional.com`);
+}
+
 // 2. Cek SESSION_SECRET
 const sessionSecret = String(process.env.SESSION_SECRET || '').trim();
 if (sessionSecret.length < 32) {

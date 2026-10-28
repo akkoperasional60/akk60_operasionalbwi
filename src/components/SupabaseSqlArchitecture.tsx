@@ -13,8 +13,8 @@ export const SupabaseSqlArchitecture: React.FC = () => {
     'APP_URL=https://akkoperasional.com',
     'DB_HOST=localhost',
     'DB_PORT=3306',
-    'DB_NAME=u194997008_akk_operasional',
-    'DB_USER=u194997008_akk_app',
+    'DB_NAME=u649808503_ops_node',
+    'DB_USER=u649808503_ops_node',
     'DB_PASSWORD=<secret>',
     'SESSION_SECRET=<minimal 32 karakter acak>',
     'BOOTSTRAP_ADMIN_EMAIL=<hanya saat bootstrap awal>',
@@ -48,7 +48,7 @@ export const SupabaseSqlArchitecture: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
         {[
           { icon: GitBranch, title: 'Frontend', value: 'React + Vite', detail: 'Browser hanya memanggil /api/*' },
-          { icon: Server, title: 'Backend', value: 'Express Node.js 22', detail: 'server.ts + HttpOnly Session Cookie' },
+          { icon: Server, title: 'Backend', value: 'Express Node.js 24', detail: 'server.ts + HttpOnly Session Cookie' },
           { icon: Database, title: 'Database', value: 'Hostinger MySQL', detail: 'mysql2 connection pool' },
           { icon: ShieldCheck, title: 'Secrets', value: 'Server-Side ENV', detail: 'Dilarang memakai prefix VITE_ untuk secret/password' }
         ].map(({ icon: Icon, title, value, detail }) => (

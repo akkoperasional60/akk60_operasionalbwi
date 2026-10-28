@@ -486,6 +486,7 @@ class LogisticsStore {
   private offlineScheduleQueue: OfflineScheduleStatusUpdate[] = [];
 
   constructor() {
+    const isProd = Boolean(import.meta.env.PROD);
     this.offlineScheduleQueue = this.loadFromStorage('akk_offline_sync_queue', []);
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => {
@@ -493,12 +494,12 @@ class LogisticsStore {
       });
       window.addEventListener('storage', (e) => {
         if (e.key && Object.values(STORAGE_KEYS).includes(e.key)) {
-          this.fleets = this.loadFromStorage(STORAGE_KEYS.FLEETS, INITIAL_FLEETS);
-          this.crews = this.loadFromStorage(STORAGE_KEYS.CREWS, INITIAL_CREWS);
-          this.stores = this.loadFromStorage(STORAGE_KEYS.STORES, INITIAL_STORES);
-          this.schedules = this.loadFromStorage(STORAGE_KEYS.SCHEDULES, INITIAL_SCHEDULES);
-          this.users = this.loadFromStorage(STORAGE_KEYS.USERS, INITIAL_PROFILES);
-          this.crewHistory = this.loadFromStorage(STORAGE_KEYS.CREW_HISTORY, INITIAL_CREW_HISTORY);
+          this.fleets = this.loadFromStorage(STORAGE_KEYS.FLEETS, isProd ? [] : INITIAL_FLEETS);
+          this.crews = this.loadFromStorage(STORAGE_KEYS.CREWS, isProd ? [] : INITIAL_CREWS);
+          this.stores = this.loadFromStorage(STORAGE_KEYS.STORES, isProd ? [] : INITIAL_STORES);
+          this.schedules = this.loadFromStorage(STORAGE_KEYS.SCHEDULES, []);
+          this.users = this.loadFromStorage(STORAGE_KEYS.USERS, isProd ? [] : INITIAL_PROFILES);
+          this.crewHistory = this.loadFromStorage(STORAGE_KEYS.CREW_HISTORY, isProd ? [] : INITIAL_CREW_HISTORY);
           this.notify();
         }
       });
@@ -508,7 +509,6 @@ class LogisticsStore {
         }
       }, 30000);
     }
-    const isProd = Boolean(import.meta.env.PROD);
     this.fleets = this.loadFromStorage(STORAGE_KEYS.FLEETS, isProd ? [] : INITIAL_FLEETS);
     this.crews = this.loadFromStorage(STORAGE_KEYS.CREWS, isProd ? [] : INITIAL_CREWS);
     this.stores = this.loadFromStorage(STORAGE_KEYS.STORES, isProd ? [] : INITIAL_STORES);
@@ -567,22 +567,22 @@ class LogisticsStore {
         } catch {}
       }
     }
-    this.crewHistory = this.loadFromStorage(STORAGE_KEYS.CREW_HISTORY, INITIAL_CREW_HISTORY);
-    this.areaApprovals = this.loadFromStorage(STORAGE_KEYS.AREA_APPROVALS, INITIAL_AREA_APPROVALS);
+    this.crewHistory = this.loadFromStorage(STORAGE_KEYS.CREW_HISTORY, isProd ? [] : INITIAL_CREW_HISTORY);
+    this.areaApprovals = this.loadFromStorage(STORAGE_KEYS.AREA_APPROVALS, isProd ? [] : INITIAL_AREA_APPROVALS);
     this.areaThreshold = this.loadFromStorage(STORAGE_KEYS.AREA_THRESHOLD, 3);
-    this.salesOrders = this.loadFromStorage(STORAGE_KEYS.SALES_ORDERS, INITIAL_SALES_ORDERS);
-    this.adminActivities = this.loadFromStorage(STORAGE_KEYS.ADMIN_ACTIVITIES, INITIAL_ADMIN_ACTIVITIES);
-    this.adminSchedules = this.loadFromStorage(STORAGE_KEYS.ADMIN_SCHEDULES, INITIAL_ADMIN_SCHEDULES);
-    this.loadingRecords = this.loadFromStorage(STORAGE_KEYS.LOADING_RECORDS, INITIAL_LOADING_RECORDS);
-    this.skillProfiles = this.loadFromStorage(STORAGE_KEYS.SKILL_PROFILES, INITIAL_SKILL_PROFILES);
-    this.jobdeskConfigs = this.loadFromStorage(STORAGE_KEYS.JOBDESK_CONFIGS, INITIAL_JOBDESK_CONFIGS);
-    this.spareParts = this.loadFromStorage(STORAGE_KEYS.SPARE_PARTS, INITIAL_SPARE_PARTS);
-    this.sparePartUsages = this.loadFromStorage(STORAGE_KEYS.SPARE_PART_USAGES, INITIAL_SPARE_PART_USAGES);
-    this.fuelLogs = this.loadFromStorage(STORAGE_KEYS.FUEL_LOGS, INITIAL_FUEL_LOGS);
+    this.salesOrders = this.loadFromStorage(STORAGE_KEYS.SALES_ORDERS, isProd ? [] : INITIAL_SALES_ORDERS);
+    this.adminActivities = this.loadFromStorage(STORAGE_KEYS.ADMIN_ACTIVITIES, isProd ? [] : INITIAL_ADMIN_ACTIVITIES);
+    this.adminSchedules = this.loadFromStorage(STORAGE_KEYS.ADMIN_SCHEDULES, isProd ? [] : INITIAL_ADMIN_SCHEDULES);
+    this.loadingRecords = this.loadFromStorage(STORAGE_KEYS.LOADING_RECORDS, isProd ? [] : INITIAL_LOADING_RECORDS);
+    this.skillProfiles = this.loadFromStorage(STORAGE_KEYS.SKILL_PROFILES, isProd ? [] : INITIAL_SKILL_PROFILES);
+    this.jobdeskConfigs = this.loadFromStorage(STORAGE_KEYS.JOBDESK_CONFIGS, isProd ? [] : INITIAL_JOBDESK_CONFIGS);
+    this.spareParts = this.loadFromStorage(STORAGE_KEYS.SPARE_PARTS, isProd ? [] : INITIAL_SPARE_PARTS);
+    this.sparePartUsages = this.loadFromStorage(STORAGE_KEYS.SPARE_PART_USAGES, isProd ? [] : INITIAL_SPARE_PART_USAGES);
+    this.fuelLogs = this.loadFromStorage(STORAGE_KEYS.FUEL_LOGS, isProd ? [] : INITIAL_FUEL_LOGS);
     this.imageRecords = this.loadFromStorage(STORAGE_KEYS.IMAGES, []);
-    this.scannedDocuments = this.loadFromStorage(STORAGE_KEYS.SCANNED_DOCUMENTS, INITIAL_SCANNED_DOCUMENTS);
-    this.securityLogs = this.loadFromStorage(STORAGE_KEYS.SECURITY_LOGS, INITIAL_SECURITY_LOGS);
-    this.scheduleChangeLogs = this.loadFromStorage(STORAGE_KEYS.SCHEDULE_CHANGE_LOGS, INITIAL_SCHEDULE_CHANGE_LOGS);
+    this.scannedDocuments = this.loadFromStorage(STORAGE_KEYS.SCANNED_DOCUMENTS, isProd ? [] : INITIAL_SCANNED_DOCUMENTS);
+    this.securityLogs = this.loadFromStorage(STORAGE_KEYS.SECURITY_LOGS, isProd ? [] : INITIAL_SECURITY_LOGS);
+    this.scheduleChangeLogs = this.loadFromStorage(STORAGE_KEYS.SCHEDULE_CHANGE_LOGS, isProd ? [] : INITIAL_SCHEDULE_CHANGE_LOGS);
     this.systemActivities = this.loadFromStorage('akk_system_activities_v1', []);
     // Legacy config object retained only so older UI state does not crash after migration.
     // No Supabase URL/key is embedded in the browser anymore; Hostinger MySQL is accessed via /api/*.
@@ -652,6 +652,7 @@ class LogisticsStore {
   }
 
   private deduplicateSuperAdmins(usersList: UserProfile[]): UserProfile[] {
+    const isProd = Boolean(import.meta.env.PROD);
     let primarySuperAdmin: UserProfile | null = null;
     const filtered: UserProfile[] = [];
 
@@ -672,29 +673,20 @@ class LogisticsStore {
         u.id.startsWith('usr-preview-') ||
         u.id.startsWith('usr-bootstrap-') ||
         (u.fullName || '').trim().toLowerCase().startsWith('super admin') ||
-        (u.email || '').trim().toLowerCase() === 'admin@gmail.com' ||
-        (u.email || '').trim().toLowerCase() === 'akkoperasional60@gmail.com';
+        (u.email || '').trim().toLowerCase() === 'admin@gmail.com';
 
       if (isDuplicateSuperAdmin) {
         if (!primarySuperAdmin) {
+          // Di production pertahankan identitas dari MySQL apa adanya.
+          // Jangan pernah mengganti email/id user production menjadi nilai mock/default.
           primarySuperAdmin = {
             ...u,
-            id: u.id.startsWith('usr-bootstrap-') ? u.id : 'usr-001',
-            fullName: 'Super Admin',
-            email: (u.email && u.email.toLowerCase() !== 'admin@gmail.com' && !u.email.endsWith('@akkoperasional.com'))
-              ? u.email
-              : 'akkoperasional60@gmail.com',
             role: 'super_admin',
-            department: 'Manajemen & Direksi',
+            department: u.department || 'Manajemen & Direksi',
             status: 'approved',
             permissions: { modules: getDefaultPermissionsForRole('super_admin') }
           };
           filtered.push(primarySuperAdmin);
-        } else if (u.email?.toLowerCase() === 'akkoperasional60@gmail.com') {
-          primarySuperAdmin.email = 'akkoperasional60@gmail.com';
-          if (u.id.startsWith('usr-bootstrap-')) {
-            primarySuperAdmin.id = u.id;
-          }
         }
         continue;
       }
@@ -702,20 +694,11 @@ class LogisticsStore {
       filtered.push(u);
     }
 
-    if (!primarySuperAdmin) {
-      filtered.unshift({
-        id: 'usr-001',
-        fullName: 'Super Admin',
-        email: 'akkoperasional60@gmail.com',
-        role: 'super_admin',
-        department: 'Manajemen & Direksi',
-        phone: '0811-3000-0001',
-        status: 'approved',
-        createdAt: '2025-01-01T08:00:00.000Z',
-        approvedAt: '2025-01-01T08:00:00.000Z',
-        approvedBy: 'System Initializer',
-        permissions: { modules: getDefaultPermissionsForRole('super_admin') }
-      });
+    // Hanya preview/development yang boleh memiliki fallback user lokal.
+    // Production harus mengambil user dari Hostinger MySQL; database kosong berarti UI kosong.
+    if (!primarySuperAdmin && !isProd) {
+      const previewDefault = INITIAL_PROFILES.find(u => u.role === 'super_admin');
+      if (previewDefault) filtered.unshift({ ...previewDefault, password: undefined } as UserProfile);
     }
 
     return filtered;
@@ -1032,8 +1015,8 @@ class LogisticsStore {
       this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
     }
 
-    // Ensure fuelLogs have literPerKm, literPer100Km, and latest records
-    if (this.fuelLogs.length < INITIAL_FUEL_LOGS.length) {
+    // Jangan menyuntikkan fuel log contoh di production. Hanya migrasikan record yang memang sudah ada.
+    if (!import.meta.env.PROD && this.fuelLogs.length < INITIAL_FUEL_LOGS.length) {
       this.fuelLogs = [...INITIAL_FUEL_LOGS];
       this.saveToStorage(STORAGE_KEYS.FUEL_LOGS, this.fuelLogs);
     } else {
@@ -2620,11 +2603,13 @@ class LogisticsStore {
       let match = this.users.find(u => u.email && u.email.trim().toLowerCase() === cleanId);
       if (match) return match;
 
-      // Fallback: match cleanId with INITIAL_PROFILES email
-      const initMatch = INITIAL_PROFILES.find(p => p.email && p.email.trim().toLowerCase() === cleanId);
-      if (initMatch) {
-        match = this.users.find(u => u.id === initMatch.id);
-        if (match) return match;
+      // Preview-only fallback. Production users always come from Hostinger MySQL.
+      if (!import.meta.env.PROD) {
+        const initMatch = INITIAL_PROFILES.find(p => p.email && p.email.trim().toLowerCase() === cleanId);
+        if (initMatch) {
+          match = this.users.find(u => u.id === initMatch.id);
+          if (match) return match;
+        }
       }
 
       const emailPrefix = cleanId.split('@')[0].trim().toLowerCase();

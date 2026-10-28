@@ -289,28 +289,34 @@ async function startServer() {
     res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0${secure}`);
   };
 
-  // In-memory preview session store (HANYA aktif di preview lokal/AI Studio saat MySQL localhost:3306 tidak berjalan di container preview)
-  const defaultPreviewAdminEmail = String(process.env.BOOTSTRAP_ADMIN_EMAIL || 'akkoperasional60@gmail.com').trim().toLowerCase();
-  const defaultPreviewAdminPass = String(process.env.BOOTSTRAP_ADMIN_PASSWORD || 'operasional123').trim();
-  const defaultPreviewAdminName = String(process.env.BOOTSTRAP_ADMIN_NAME || 'Super Admin').trim() || 'Super Admin';
-  const previewSessionUsers = new Map<string, any>([
-    [
-      'usr-001',
-      {
-        id: 'usr-001',
-        email: defaultPreviewAdminEmail,
-        password_hash: hashPassword(defaultPreviewAdminPass),
-        full_name: defaultPreviewAdminName,
-        role: 'super_admin',
-        department: 'Manajemen & Direksi',
-        phone: '0811-3000-0001',
-        status: 'approved',
-        created_at: '2025-01-01T08:00:00.000Z',
-        approved_at: '2025-01-01T08:00:00.000Z',
-        notes: 'Super Admin Utama PT AKK'
-      }
-    ]
-  ]);
+  // In-memory preview session store (HANYA untuk preview lokal/AI Studio).
+  // Di production Hostinger, autentikasi selalu melalui MySQL dan tidak memakai store ini.
+  const isPreviewRuntime = Boolean(process.env.K_SERVICE) || process.env.NODE_ENV !== 'production';
+  const previewAdminEmail = String(
+    process.env.PREVIEW_ADMIN_EMAIL ||
+    process.env.BOOTSTRAP_ADMIN_EMAIL ||
+    (isPreviewRuntime ? 'akkoperasional60@gmail.com' : '')
+  ).trim().toLowerCase();
+  const previewAdminPass = String(process.env.PREVIEW_ADMIN_PASSWORD || process.env.BOOTSTRAP_ADMIN_PASSWORD || '').trim();
+  const previewAdminName = String(process.env.PREVIEW_ADMIN_NAME || process.env.BOOTSTRAP_ADMIN_NAME || 'Super Admin').trim() || 'Super Admin';
+  // One-way scrypt digest untuk sesi preview AI Studio (tanpa plaintext password di source code)
+  const previewDefaultScryptHash = 'scrypt$a1b2c3d4e5f60718293a4b5c6d7e8f90$c8e04eeaad22102aa8bdc5b028aeca3ea0a4084d4fb57b829d9199b2f8d65cabe95629ff963b1eb29dbe0454ede8927fc78d480841d87d199794006d37b793ab';
+  const previewSessionUsers = new Map<string, any>();
+  if (previewAdminEmail && (previewAdminPass.length >= 8 || isPreviewRuntime)) {
+    previewSessionUsers.set('usr-001', {
+      id: 'usr-001',
+      email: previewAdminEmail,
+      password_hash: previewAdminPass.length >= 8 ? hashPassword(previewAdminPass) : previewDefaultScryptHash,
+      full_name: previewAdminName,
+      role: 'super_admin',
+      department: 'Manajemen & Direksi',
+      phone: '0811-3000-0001',
+      status: 'approved',
+      created_at: new Date().toISOString(),
+      approved_at: new Date().toISOString(),
+      notes: 'Preview admin (AI Studio preview environment)'
+    });
+  }
 
   const getSessionUser = async (req: any): Promise<any | null> => {
     const parsed = verifySessionToken(readCookie(req, SESSION_COOKIE));
@@ -560,23 +566,23 @@ async function startServer() {
   const ensureBootstrapAdmin = async (): Promise<void> => {
     if (!isDatabaseConfigured()) return;
     try {
-      const email = String(process.env.BOOTSTRAP_ADMIN_EMAIL || 'akkoperasional60@gmail.com').trim().toLowerCase();
+      // Bootstrap hanya boleh membuat Super Admin PERTAMA. Begitu sudah ada Super Admin
+      // approved di MySQL, ENV bootstrap tidak boleh mengubah password/email atau membuat duplikat.
+      const existingAdmins = await mysqlQuery<any[]>(
+        `SELECT id, email FROM users WHERE role = 'super_admin' AND status = 'approved' ORDER BY created_at ASC LIMIT 1`
+      );
+      if (Array.isArray(existingAdmins) && existingAdmins.length > 0) {
+        console.log('[Bootstrap Admin] Super Admin sudah aktif di database. Demi keamanan, BOOTSTRAP_ADMIN_* diabaikan dan sebaiknya dihapus dari Hostinger ENV.');
+        return;
+      }
+
+      const email = String(process.env.BOOTSTRAP_ADMIN_EMAIL || '').trim().toLowerCase();
       const password = String(process.env.BOOTSTRAP_ADMIN_PASSWORD || '').trim();
       const fullName = String(process.env.BOOTSTRAP_ADMIN_NAME || 'Super Admin').trim() || 'Super Admin';
 
-      // Clean up legacy duplicate Super Admin PT AKK / preview rows so only 1 primary Super Admin remains
-      await mysqlQuery(
-        `DELETE FROM users WHERE id LIKE 'usr-preview-%' OR (role = 'super_admin' AND full_name = 'Super Admin PT AKK' AND LOWER(email) <> ?)`,
-        [email]
-      ).catch(() => {});
-
-      if (!email || password.length < 6) {
-        const rows = await mysqlQuery<any[]>(
-          `SELECT id FROM users WHERE role = 'super_admin' AND status = 'approved' LIMIT 1`
-        );
-        if (!Array.isArray(rows) || rows.length === 0) {
-          console.warn('[Bootstrap Admin] Belum ada Super Admin approved. Isi BOOTSTRAP_ADMIN_EMAIL dan BOOTSTRAP_ADMIN_PASSWORD di Hostinger ENV.');
-        }
+      // Bootstrap TIDAK BOLEH membuat akun dengan credential default/hardcoded.
+      if (!email || password.length < 12) {
+        console.warn('[Bootstrap Admin] Belum ada Super Admin approved. Untuk database BARU, isi BOOTSTRAP_ADMIN_EMAIL dan BOOTSTRAP_ADMIN_PASSWORD (minimal 12 karakter), lalu hapus ENV bootstrap setelah login pertama berhasil.');
         return;
       }
 
@@ -589,15 +595,11 @@ async function startServer() {
            full_name = VALUES(full_name),
            role = 'super_admin',
            status = 'approved',
-           approved_at = COALESCE(approved_at, NOW())`,
+           approved_at = COALESCE(approved_at, NOW()),
+           updated_at = NOW()`,
         [id, email, hashPassword(password), fullName]
       );
-      // Remove any other duplicate super_admin accounts with different IDs
-      await mysqlQuery(
-        `DELETE FROM users WHERE role = 'super_admin' AND id <> ? AND LOWER(email) <> ?`,
-        [id, email]
-      ).catch(() => {});
-      console.log(`[Bootstrap Admin] Akun Super Admin (${email}) siap digunakan.`);
+      console.log(`[Bootstrap Admin] Super Admin pertama (${email}) berhasil dibuat. Setelah login berhasil, HAPUS seluruh BOOTSTRAP_ADMIN_* dari Hostinger ENV.`);
     } catch (err: any) {
       console.warn('[Bootstrap Admin] Gagal memastikan Super Admin:', err?.message || err);
     }
@@ -645,7 +647,7 @@ async function startServer() {
         cleanId === String(u.id || '').toLowerCase() ||
         cleanId === uPrefix ||
         cleanId === uName ||
-        (u.role === 'super_admin' && ['admin', 'superadmin', 'super admin', 'akkoperasional60', 'akkoperasional60@gmail.com'].includes(cleanId))
+        (u.role === 'super_admin' && ['admin', 'superadmin', 'super admin'].includes(cleanId))
       ) {
         matchedUser = u;
         break;
@@ -697,19 +699,12 @@ async function startServer() {
       if (!Array.isArray(mysqlUsers) || mysqlUsers.length === 0) {
         const countRows = await mysqlQuery<any[]>(`SELECT COUNT(*) AS total FROM users`);
         const totalUsers = Number(countRows?.[0]?.total || 0);
-        if (totalUsers === 0 && loginIdentifier.includes('@') && cleanPass.length >= 6) {
-          const firstId = `usr-bootstrap-${crypto.createHash('sha256').update(loginIdentifier).digest('hex').slice(0, 16)}`;
-          const firstName = String(process.env.BOOTSTRAP_ADMIN_NAME || 'Super Admin').trim() || 'Super Admin';
-          await mysqlQuery(
-            `INSERT INTO users (id, email, password_hash, full_name, role, department, status, approved_at, notes)
-             VALUES (?, ?, ?, ?, 'super_admin', 'Manajemen & Direksi', 'approved', NOW(), 'Inisialisasi Super Admin Pertama')`,
-            [firstId, loginIdentifier, hashPassword(cleanPass), firstName]
-          );
-          mysqlUsers = await mysqlQuery<any[]>(queryUserSql, queryParams);
+        if (totalUsers === 0) {
+          return res.status(503).json({
+            success: false,
+            error: 'Database belum memiliki akun. Aktifkan BOOTSTRAP_ADMIN_* sementara di Hostinger untuk membuat Super Admin pertama.'
+          });
         }
-      }
-
-      if (!Array.isArray(mysqlUsers) || mysqlUsers.length === 0) {
         return res.status(401).json({ success: false, error: 'Email/username atau password salah' });
       }
       const u = mysqlUsers[0];
@@ -2001,53 +1996,36 @@ Tugas Anda:
       });
     });
   } else {
-    // In development mode, Vite middleware compiles and serves on-the-fly
-    const { createServer: createViteServer } = await import("vite");
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  }
+    // Initialize Vite asynchronously while allowing Express to bind port 3000 immediately for pre-warming checks
+    const viteReadyPromise = (async () => {
+      const { createServer: createViteServer } = await import("vite");
+      const disableHmr = process.env.DISABLE_HMR === 'true' || Boolean(process.env.K_SERVICE);
+      const vite = await createViteServer({
+        server: {
+          middlewareMode: true,
+          hmr: disableHmr ? false : undefined,
+          watch: disableHmr ? null : {},
+        },
+        appType: "spa",
+      });
+      return vite.middlewares;
+    })();
 
-  // Cek koneksi database, pastikan schema tabel tersedia, dan bootstrap Super Admin
-  try {
-    const isHostingerEnv = isProduction && !process.env.K_SERVICE;
-    if (isHostingerEnv) {
-      if (!String(process.env.SESSION_SECRET || '').trim() || String(process.env.SESSION_SECRET || '').trim().length < 32) {
-        console.warn('[Startup Production] SESSION_SECRET belum diisi atau kurang dari 32 karakter; menggunakan derived SHA-256 session key.');
+    app.use(async (req, res, next) => {
+      try {
+        const middlewares = await viteReadyPromise;
+        return middlewares(req, res, next);
+      } catch (err) {
+        return next(err);
       }
-      if (!isDatabaseConfigured()) {
-        console.error('[Startup Production] Konfigurasi database Hostinger MySQL (DB_NAME, DB_USER, DB_PASSWORD) belum lengkap di Environment Variables.');
-      } else {
-        const conn = await testMysqlConnection();
-        if (!conn.success) {
-          console.error('[Startup Production] Gagal terhubung ke Hostinger MySQL:', conn.message);
-        } else {
-          await ensureDatabaseSchema();
-          await ensureBootstrapAdmin();
-        }
-      }
-    } else if (isDatabaseConfigured()) {
-      const conn = await testMysqlConnection();
-      if (conn.success) {
-        await ensureDatabaseSchema();
-        await ensureBootstrapAdmin();
-      } else {
-        console.log('ℹ️ [Startup Database] Hostinger MySQL belum aktif di environment lokal/preview.');
-      }
-    } else {
-      console.log('ℹ️ [Startup Database] Mode development/preview berjalan (konfigurasi DB diisi di Hostinger ENV saat production).');
-    }
-  } catch (err: any) {
-    console.warn('[Startup Database] Peringatan inisialisasi database:', err?.message || err);
+    });
   }
 
   const preferredPort = Number(process.env.PORT) || 3000;
-  
+
   function listenOnPort(port: number) {
     const server = app.listen(port, "0.0.0.0", () => {
-      console.log(`Server running in ${isProduction ? 'production (static dist)' : 'development (vite middleware)'} mode on http://0.0.0.0:${port}`);
+      console.log(`Server running in ${isProduction && hasDist ? 'production (static dist)' : 'development (vite middleware)'} mode on http://0.0.0.0:${port}`);
     });
 
     server.on('error', (err: any) => {
@@ -2076,6 +2054,41 @@ Tugas Anda:
   }
 
   listenOnPort(preferredPort);
+
+  // Cek koneksi database, pastikan schema tabel tersedia, dan bootstrap Super Admin secara non-blocking
+  void (async () => {
+    try {
+      const isHostingerEnv = isProduction && !process.env.K_SERVICE;
+      if (isHostingerEnv) {
+        if (!String(process.env.SESSION_SECRET || '').trim() || String(process.env.SESSION_SECRET || '').trim().length < 32) {
+          console.warn('[Startup Production] SESSION_SECRET belum diisi atau kurang dari 32 karakter; menggunakan derived SHA-256 session key.');
+        }
+        if (!isDatabaseConfigured()) {
+          console.error('[Startup Production] Konfigurasi database Hostinger MySQL (DB_NAME, DB_USER, DB_PASSWORD) belum lengkap di Environment Variables.');
+        } else {
+          const conn = await testMysqlConnection();
+          if (!conn.success) {
+            console.error('[Startup Production] Gagal terhubung ke Hostinger MySQL:', conn.message);
+          } else {
+            await ensureDatabaseSchema();
+            await ensureBootstrapAdmin();
+          }
+        }
+      } else if (isDatabaseConfigured()) {
+        const conn = await testMysqlConnection();
+        if (conn.success) {
+          await ensureDatabaseSchema();
+          await ensureBootstrapAdmin();
+        } else {
+          console.log('ℹ️ [Startup Database] Hostinger MySQL belum aktif di environment lokal/preview.');
+        }
+      } else {
+        console.log('ℹ️ [Startup Database] Mode development/preview berjalan (konfigurasi DB diisi di Hostinger ENV saat production).');
+      }
+    } catch (err: any) {
+      console.warn('[Startup Database] Peringatan inisialisasi database:', err?.message || err);
+    }
+  })();
 }
 
 startServer();

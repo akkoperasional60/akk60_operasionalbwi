@@ -10,8 +10,8 @@ const USERNAME_REGEX = /^[a-zA-Z0-9._\-\s]{3,35}$/;
 
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_DURATION_SECONDS = 60;
-const STORAGE_FAILED_KEY = 'akk_auth_v2_failed_attempts';
-const STORAGE_LOCKOUT_KEY = 'akk_auth_v2_lockout_until';
+const STORAGE_FAILED_KEY = 'akk_auth_v3_failed_attempts';
+const STORAGE_LOCKOUT_KEY = 'akk_auth_v3_lockout_until';
 
 export interface RecoverySession {
   user: UserProfile;
@@ -45,6 +45,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     try {
       localStorage.removeItem('akk_auth_failed_attempts');
       localStorage.removeItem('akk_auth_lockout_until');
+      localStorage.removeItem('akk_auth_v2_failed_attempts');
+      localStorage.removeItem('akk_auth_v2_lockout_until');
       const saved = localStorage.getItem(STORAGE_FAILED_KEY);
       return saved ? parseInt(saved, 10) || 0 : 0;
     } catch {
