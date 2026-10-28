@@ -2654,21 +2654,19 @@ class LogisticsStore {
         scheduleRes.ok ? scheduleRes.json().catch(() => ({})) : Promise.resolve({})
       ]);
 
-      if (fleetRes.ok && Array.isArray(fleetPayload?.data)) {
+      if (fleetRes.ok && Array.isArray(fleetPayload?.data) && (fleetPayload.source === 'hostinger_mysql' || fleetPayload.data.length > 0)) {
         this.fleets = fleetPayload.data;
         this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
       }
-      if (crewRes.ok && Array.isArray(crewPayload?.data)) {
+      if (crewRes.ok && Array.isArray(crewPayload?.data) && (crewPayload.source === 'hostinger_mysql' || crewPayload.data.length > 0)) {
         this.crews = crewPayload.data;
         this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
       }
-      if (storeRes.ok && Array.isArray(storePayload?.data)) {
+      if (storeRes.ok && Array.isArray(storePayload?.data) && (storePayload.source === 'hostinger_mysql' || storePayload.data.length > 0)) {
         this.stores = storePayload.data.filter((item: RetailStore) => !isAreaRouteItem(item));
         this.saveToStorage(STORAGE_KEYS.STORES, this.stores);
       }
-      if (scheduleRes.ok) {
-        // Hostinger MySQL adalah source of truth. Snapshot kosong berarti jadwal benar-benar kosong;
-        // jangan mempertahankan INITIAL_SCHEDULES/mock lama dari browser.
+      if (scheduleRes.ok && (schedulePayload?.source === 'hostinger_mysql' || schedulePayload?.exists)) {
         this.schedules = Array.isArray(schedulePayload?.schedules) ? schedulePayload.schedules : [];
         this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
       }
