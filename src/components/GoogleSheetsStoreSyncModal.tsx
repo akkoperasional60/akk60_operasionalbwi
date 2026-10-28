@@ -28,7 +28,8 @@ import {
   googleSheetsSyncService, 
   GoogleSheetsSyncConfig, 
   SyncLogEntry, 
-  validateCoordinateData 
+  validateCoordinateData,
+  toGoogleSheetsCsvUrl
 } from '../services/googleSheetsSyncService';
 
 interface GoogleSheetsStoreSyncModalProps {
@@ -165,16 +166,23 @@ export const GoogleSheetsStoreSyncModal: React.FC<GoogleSheetsStoreSyncModalProp
   if (!isOpen) return null;
 
   const handleFetchSheet = async () => {
-    if (!spreadsheetUrl.trim()) {
+    const cleanUrl = spreadsheetUrl.trim();
+    const cleanSheet = selectedSheetName.trim() || 'DATA FIX';
+    if (!cleanUrl) {
       addNotification('sla_warning', 'URL Google Sheets Kosong', 'Masukkan URL Google Sheets yang benar sebelum memuat data.');
       setParsedStores([]);
       setSyncSuccessCount(null);
       return;
     }
 
+    googleSheetsSyncService.updateConfig({
+      spreadsheetUrl: cleanUrl,
+      sheetName: cleanSheet
+    });
+
     setIsFetching(true);
     try {
-      const csvUrl = spreadsheetUrl.replace('/edit#gid=', '/export?format=csv&gid=').replace('/edit?usp=sharing', '/export?format=csv');
+      const csvUrl = toGoogleSheetsCsvUrl(cleanUrl);
       let response: Response | null = null;
       try {
         const proxyRes = await fetch(`/api/proxy-sheet?url=${encodeURIComponent(csvUrl)}`);
@@ -188,27 +196,29 @@ export const GoogleSheetsStoreSyncModal: React.FC<GoogleSheetsStoreSyncModalProp
       if (response && response.ok) {
         const csvText = await response.text();
         const res = googleSheetsSyncService.importCsvData(csvText);
-        setParsedStores(res.stores.map((s, i) => ({
-          no: i + 1,
-          storeCode: s.storeCode,
-          storeName: s.storeName,
-          phone: s.phone,
-          address: s.address,
-          rawLat: String(s.latitude),
-          rawLng: String(s.longitude),
-          latitude: s.latitude,
-          longitude: s.longitude,
-          city: s.city,
-          island: s.island,
-          storeCategory: s.storeCategory
-        })));
-        setSyncSuccessCount(res.total);
-        addNotification(
-          'schedule',
-          'Berhasil Memuat Google Sheets',
-          `Seluruh ${res.total} data toko retail dari sheet "${selectedSheetName}" berhasil dimuat.`
-        );
-        return;
+        if (res.total > 0) {
+          setParsedStores(res.stores.map((s, i) => ({
+            no: i + 1,
+            storeCode: s.storeCode,
+            storeName: s.storeName,
+            phone: s.phone,
+            address: s.address,
+            rawLat: String(s.latitude),
+            rawLng: String(s.longitude),
+            latitude: s.latitude,
+            longitude: s.longitude,
+            city: s.city,
+            island: s.island,
+            storeCategory: s.storeCategory
+          })));
+          setSyncSuccessCount(res.total);
+          addNotification(
+            'schedule',
+            'Berhasil Memuat Google Sheets',
+            `Seluruh ${res.total} data toko retail dari sheet "${cleanSheet}" berhasil dimuat.`
+          );
+          return;
+        }
       }
     } catch {
       // Fallback
@@ -221,7 +231,7 @@ export const GoogleSheetsStoreSyncModal: React.FC<GoogleSheetsStoreSyncModalProp
     addNotification(
       'sla_warning',
       'Gagal Memuat Google Sheets',
-      `Data dari sheet "${selectedSheetName}" tidak dapat dibaca. Tidak ada data contoh yang dimasukkan.`
+      `Data dari sheet "${cleanSheet}" tidak dapat dibaca. Tidak ada data contoh yang dimasukkan.`
     );
   };
 
@@ -231,6 +241,10 @@ export const GoogleSheetsStoreSyncModal: React.FC<GoogleSheetsStoreSyncModalProp
       return;
     }
     const res = googleSheetsSyncService.importCsvData(pasteCsvText);
+    if (res.total === 0) {
+      addNotification('sla_warning', 'Tidak Ada Data Toko Valid', 'Data tempelan tidak memiliki baris toko yang valid.');
+      return;
+    }
     setSyncSuccessCount(res.total);
     setParsedStores(res.stores.map((s, i) => ({
       no: i + 1,
@@ -254,31 +268,74 @@ export const GoogleSheetsStoreSyncModal: React.FC<GoogleSheetsStoreSyncModalProp
   };
 
   const handleImportToSystem = async () => {
+    const cleanUrl = spreadsheetUrl.trim();
+    const cleanSheet = selectedSheetName.trim() || 'DATA FIX';
+
+    if (cleanUrl) {
+      googleSheetsSyncService.updateConfig({
+        spreadsheetUrl: cleanUrl,
+        sheetName: cleanSheet
+      });
+    } else if (parsedStores.length > 0 && syncSuccessCount && syncSuccessCount > 0) {
+      addNotification(
+        'schedule',
+        'Sinkronisasi Google Sheets Berhasil!',
+        `Semua ${parsedStores.length} Toko Retail dari sheet "${cleanSheet}" berhasil diverifikasi dan langsung aktif di peta!`
+      );
+      if (onSuccessSync) onSuccessSync();
+      setTimeout(() => {
+        onClose();
+      }, 800);
+      return;
+    } else {
+      addNotification(
+        'sla_warning',
+        'URL Google Sheets Belum Diisi',
+        'Masukkan tautan Google Sheets atau tempel data CSV terlebih dahulu sebelum menyinkronkan.'
+      );
+      return;
+    }
+
     setIsFetching(true);
     try {
       const res = await googleSheetsSyncService.syncNow('Picu Manual Modal UI');
+      if (res.total === 0) {
+        addNotification(
+          'sla_warning',
+          'Tidak Ada Data Toko Valid',
+          'Tidak ada data toko valid yang berhasil dibaca dari Google Sheets. Tidak ada data contoh yang dimasukkan.'
+        );
+        return;
+      }
+
       setSyncSuccessCount(res.total);
 
       if (res.corruptedCount > 0) {
         addNotification(
           'sla_warning',
           `⚠️ Terdeteksi ${res.corruptedCount} Koordinat Rusak di Google Sheet!`,
-          `Sebanyak ${res.corruptedCount} toko memiliki format koordinat cacat pada sheet "${selectedSheetName}" dan ditandai Needs Correction. Peringatan darurat telah dikirim ke Dashboard.`,
+          `Sebanyak ${res.corruptedCount} toko memiliki format koordinat cacat pada sheet "${cleanSheet}" dan ditandai Needs Correction. Peringatan darurat telah dikirim ke Dashboard.`,
           true
         );
       } else {
         addNotification(
           'schedule',
           'Sinkronisasi Google Sheets Berhasil!',
-          `Semua ${res.total} Toko Retail dari sheet "${selectedSheetName}" berhasil diverifikasi dan langsung aktif di peta!`
+          `Semua ${res.total} Toko Retail dari sheet "${cleanSheet}" berhasil diverifikasi dan langsung aktif di peta!`
         );
       }
 
       if (onSuccessSync) onSuccessSync();
-      // Auto close after 1.2s to show updated map immediately
+      // Auto close after 0.8s to show updated map immediately
       setTimeout(() => {
         onClose();
       }, 800);
+    } catch (err: any) {
+      addNotification(
+        'sla_warning',
+        'Gagal Menyinkronkan Google Sheets',
+        err?.message || 'Tidak ada data toko valid yang berhasil dibaca dari Google Sheets.'
+      );
     } finally {
       setIsFetching(false);
     }
@@ -670,7 +727,21 @@ export const GoogleSheetsStoreSyncModal: React.FC<GoogleSheetsStoreSyncModalProp
                   </div>
                   <button
                     onClick={async () => {
+                      if (spreadsheetUrl.trim()) {
+                        googleSheetsSyncService.updateConfig({
+                          spreadsheetUrl: spreadsheetUrl.trim(),
+                          sheetName: selectedSheetName.trim() || config.sheetName
+                        });
+                      }
                       const res = await googleSheetsSyncService.syncNow('Picu Manual Pengaturan');
+                      if (res.total === 0) {
+                        addNotification(
+                          'sla_warning',
+                          'Sinkronisasi Dilewati',
+                          'Tidak ada data toko valid yang berhasil dibaca dari Google Sheets. Pastikan tautan Google Sheets sudah diisi.'
+                        );
+                        return;
+                      }
                       addNotification(
                         'schedule',
                         'Sinkronisasi Ulang Berhasil',
@@ -738,14 +809,28 @@ export const GoogleSheetsStoreSyncModal: React.FC<GoogleSheetsStoreSyncModalProp
             <div className="flex gap-2">
               <button
                 onClick={async () => {
-                    setIsFetching(true);
-                    try {
-                        await googleSheetsSyncService.syncNow('Force Sync Manual', true);
-                        if (onSuccessSync) onSuccessSync();
-                        addNotification('schedule', 'Force Sync Berhasil', 'Data lokal dibersihkan dan ditarik ulang langsung dari sumber.');
-                    } finally {
-                        setIsFetching(false);
+                  setIsFetching(true);
+                  try {
+                    if (spreadsheetUrl.trim()) {
+                      googleSheetsSyncService.updateConfig({
+                        spreadsheetUrl: spreadsheetUrl.trim(),
+                        sheetName: selectedSheetName.trim() || config.sheetName
+                      });
                     }
+                    const res = await googleSheetsSyncService.syncNow('Force Sync Manual', true);
+                    if (res.total === 0) {
+                      addNotification(
+                        'sla_warning',
+                        'Force Sync: Tidak Ada Data Toko',
+                        'Data lokal dibersihkan, namun belum ada data toko valid dari Google Sheets.'
+                      );
+                      return;
+                    }
+                    if (onSuccessSync) onSuccessSync();
+                    addNotification('schedule', 'Force Sync Berhasil', 'Data lokal dibersihkan dan ditarik ulang langsung dari sumber.');
+                  } finally {
+                    setIsFetching(false);
+                  }
                 }}
                 className="px-4 py-2 rounded-xl bg-orange-600 hover:bg-orange-500 text-white text-xs font-bold transition cursor-pointer flex items-center gap-2"
               >

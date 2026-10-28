@@ -253,6 +253,23 @@ export function validateCoordinateData(
 const SYNC_CONFIG_STORAGE_KEY = 'akk_gsheets_sync_config_v1';
 const SYNC_LOGS_STORAGE_KEY = 'akk_gsheets_sync_logs_v1';
 
+export function toGoogleSheetsCsvUrl(rawUrl: string): string {
+  const trimmed = (rawUrl || '').trim();
+  if (!trimmed) return '';
+  if (trimmed.includes('/export?format=csv') || trimmed.includes('/gviz/tq')) {
+    return trimmed;
+  }
+  const idMatch = trimmed.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  const gidMatch = trimmed.match(/[?&#]gid=([0-9]+)/);
+  if (idMatch && idMatch[1]) {
+    return `https://docs.google.com/spreadsheets/d/${idMatch[1]}/export?format=csv${gidMatch ? `&gid=${gidMatch[1]}` : ''}`;
+  }
+  return trimmed
+    .replace('/edit#gid=', '/export?format=csv&gid=')
+    .replace('/edit?usp=sharing', '/export?format=csv')
+    .replace(/\/edit.*$/, '/export?format=csv');
+}
+
 class GoogleSheetsSyncService {
   private config: GoogleSheetsSyncConfig;
   private syncLogs: SyncLogEntry[] = [];
@@ -265,11 +282,18 @@ class GoogleSheetsSyncService {
     this.config = this.loadConfig();
     this.syncLogs = this.loadLogs();
 
-    // Auto-sync on launch if enabled and no stores exist or corrupted dummy stores present
+    // Auto-sync on launch only if explicitly enabled, a valid URL is configured, and user session is active
     const currentStores = logisticsStore.getStores();
-    if (this.config.syncOnAppLaunch && this.config.spreadsheetUrl && (currentStores.length === 0 || currentStores.some(s => s.storeName.includes('Freshman') || s.storeName.includes('Sophomore')))) {
+    if (
+      this.config.syncOnAppLaunch &&
+      this.config.spreadsheetUrl.trim() &&
+      logisticsStore.isAuthenticated() &&
+      currentStores.length === 0
+    ) {
       setTimeout(() => {
-        this.syncNow('Sinkronisasi Otomatis Sheet DATA FIX');
+        this.syncNow('Sinkronisasi Otomatis Sheet DATA FIX').catch(err => {
+          console.warn('[BatchSync] Auto-sync on launch skipped:', err?.message || err);
+        });
       }, 300);
     }
 
@@ -281,9 +305,32 @@ class GoogleSheetsSyncService {
       const saved = localStorage.getItem(SYNC_CONFIG_STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
+        const savedUrl = String(parsed.spreadsheetUrl || '').trim();
+        // Clean up legacy sample student spreadsheet URL if still cached in browser localStorage
+        const isLegacyDemoUrl = savedUrl.includes('1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms');
+        if (isLegacyDemoUrl) {
+          const cleaned: GoogleSheetsSyncConfig = {
+            isAutoSyncEnabled: false,
+            autoSyncIntervalMinutes: Number(parsed.autoSyncIntervalMinutes) || 60,
+            lastSyncTimestamp: null,
+            sheetName: parsed.sheetName || 'DATA FIX',
+            spreadsheetUrl: '',
+            syncOnAppLaunch: false
+          };
+          try {
+            localStorage.setItem(SYNC_CONFIG_STORAGE_KEY, JSON.stringify(cleaned));
+          } catch {
+            // ignore storage errors
+          }
+          return cleaned;
+        }
         return {
-          ...parsed,
-          autoSyncIntervalMinutes: parsed.autoSyncIntervalMinutes || 60
+          isAutoSyncEnabled: Boolean(parsed.isAutoSyncEnabled && savedUrl),
+          autoSyncIntervalMinutes: Number(parsed.autoSyncIntervalMinutes) || 60,
+          lastSyncTimestamp: parsed.lastSyncTimestamp || null,
+          sheetName: parsed.sheetName || 'DATA FIX',
+          spreadsheetUrl: savedUrl,
+          syncOnAppLaunch: Boolean(parsed.syncOnAppLaunch && savedUrl)
         };
       }
     } catch (e) {
@@ -362,10 +409,13 @@ class GoogleSheetsSyncService {
       this.timerId = null;
     }
 
-    if (this.config.isAutoSyncEnabled) {
+    if (this.config.isAutoSyncEnabled && this.config.spreadsheetUrl.trim()) {
       const ms = Math.max(1, this.config.autoSyncIntervalMinutes) * 60 * 1000;
       this.timerId = setInterval(() => {
-        this.syncNow('Siklus Otomatis Latar Belakang');
+        if (!this.config.spreadsheetUrl.trim() || !logisticsStore.isAuthenticated()) return;
+        this.syncNow('Siklus Otomatis Latar Belakang').catch(err => {
+          console.warn('[BatchSync] Background sync skipped:', err?.message || err);
+        });
       }, ms);
     }
   }
@@ -423,94 +473,129 @@ class GoogleSheetsSyncService {
     console.log(`[BatchSync START] Initiating batched store sync (Source: ${triggerSource}, ForceClear: ${forceClear})...`);
 
     try {
-      if (!this.config.spreadsheetUrl.trim()) {
-        throw new Error('URL Google Sheets belum dikonfigurasi. Sinkronisasi dibatalkan agar sistem tidak memakai data contoh.');
+      const rawSpreadsheetUrl = this.config.spreadsheetUrl.trim();
+      if (!rawSpreadsheetUrl) {
+        const msg = 'URL Google Sheets belum dikonfigurasi. Sinkronisasi dibatalkan agar sistem tidak memakai data contoh.';
+        console.warn(`[BatchSync] ${msg}`);
+        const emptyLog: SyncLogEntry = {
+          id: 'log-' + Math.random().toString(36).substring(2, 8),
+          timestamp: new Date().toISOString(),
+          status: 'error',
+          totalStores: 0,
+          addedStores: 0,
+          updatedStores: 0,
+          message: msg,
+          sourceSheet: this.config.sheetName
+        };
+        this.syncLogs = [emptyLog, ...this.syncLogs];
+        this.saveLogs();
+        return { total: 0, added: 0, updated: 0, corruptedCount: 0 };
       }
 
       // Clear local storage cache if forceClear is requested
       if (forceClear) {
-          console.log('[BatchSync] Force clearing local records...');
-          logisticsStore.setStores([]);
+        console.log('[BatchSync] Force clearing local records...');
+        logisticsStore.setStores([]);
       }
-      
+
       let storeRecords: any[] = []; // Initialize empty to fetch fresh data
 
-    // Attempt online fetch if available, fallback smoothly if blocked by CORS or offline
-    try {
-      const csvUrl = this.config.spreadsheetUrl.replace('/edit#gid=', '/export?format=csv&gid=').replace('/edit?usp=sharing', '/export?format=csv');
-      let response: Response | null = null;
-
-      // 1. Try server-side proxy route first (bypasses browser CORS & network drops)
+      // Attempt online fetch if available, fallback smoothly if blocked by CORS or offline
       try {
-        const proxyUrl = `/api/proxy-sheet?url=${encodeURIComponent(csvUrl)}`;
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => {
-          try { controller.abort(); } catch { /* ignore */ }
-        }, 8000);
-        
-        try {
-          const proxyRes = await fetch(proxyUrl, { signal: controller.signal });
-          clearTimeout(timeoutId);
-          if (proxyRes && proxyRes.ok) {
-            response = proxyRes;
-          }
-        } catch {
-          clearTimeout(timeoutId);
-        }
-      } catch {
-        // Server proxy unavailable or timed out, attempt direct fetch
-      }
+        const csvUrl = toGoogleSheetsCsvUrl(rawSpreadsheetUrl);
+        let response: Response | null = null;
 
-      // 2. Fallback to direct fetch if proxy route wasn't available
-      if (!response) {
+        // 1. Try server-side proxy route first (bypasses browser CORS & network drops)
         try {
+          const proxyUrl = `/api/proxy-sheet?url=${encodeURIComponent(csvUrl)}`;
           const controller = new AbortController();
           const timeoutId = setTimeout(() => {
             try { controller.abort(); } catch { /* ignore */ }
-          }, 6000);
+          }, 8000);
 
           try {
-            const directRes = await fetch(csvUrl, { signal: controller.signal });
+            const proxyRes = await fetch(proxyUrl, { signal: controller.signal });
             clearTimeout(timeoutId);
-            if (directRes && directRes.ok) {
-              response = directRes;
+            if (proxyRes && proxyRes.ok) {
+              response = proxyRes;
             }
           } catch {
             clearTimeout(timeoutId);
           }
         } catch {
-          // Fallback smoothly without unhandled errors
+          // Server proxy unavailable or timed out, attempt direct fetch
         }
-      }
 
-      if (response && response.ok) {
-        const csvText = await response.text();
-        const lines = csvText.split('\n').filter(l => l.trim().length > 0);
-        if (lines.length > 1) {
-          const headerLower = lines[0].toLowerCase();
-          const isSampleStudentDataset = headerLower.includes('student name') || headerLower.includes('class level') || headerLower.includes('extracurricular') || headerLower.includes('major');
-          const isRelevantRetailStoreSheet = headerLower.includes('toko') || headerLower.includes('store') || headerLower.includes('outlet') || headerLower.includes('genteng') || headerLower.includes('banyuwangi') || headerLower.includes('latitude') || headerLower.includes('nama');
+        // 2. Fallback to direct fetch if proxy route wasn't available
+        if (!response) {
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => {
+              try { controller.abort(); } catch { /* ignore */ }
+            }, 6000);
 
-          if (!isSampleStudentDataset && isRelevantRetailStoreSheet) {
-            const parsed = lines
-              .slice(1)
-              .map((line, idx) => parseStoreLine(line, idx))
-              .filter((s): s is NonNullable<typeof s> => !!s && !!s.storeName && !s.storeName.includes('Freshman'));
+            try {
+              const directRes = await fetch(csvUrl, { signal: controller.signal });
+              clearTimeout(timeoutId);
+              if (directRes && directRes.ok) {
+                response = directRes;
+              }
+            } catch {
+              clearTimeout(timeoutId);
+            }
+          } catch {
+            // Fallback smoothly without unhandled errors
+          }
+        }
 
-            if (parsed.length > 0) {
-              storeRecords = parsed;
+        if (response && response.ok) {
+          const csvText = await response.text();
+          const trimmedText = csvText.trim();
+          const isHtmlResponse = trimmedText.startsWith('<!DOCTYPE') || trimmedText.toLowerCase().startsWith('<html');
+          if (trimmedText && !isHtmlResponse) {
+            const lines = trimmedText.split(/\r?\n/).filter(l => l.trim().length > 0);
+            if (lines.length > 0) {
+              const headerLower = lines[0].toLowerCase();
+              const isSampleStudentDataset =
+                headerLower.includes('student name') ||
+                headerLower.includes('class level') ||
+                headerLower.includes('extracurricular') ||
+                headerLower.includes('major');
+
+              if (!isSampleStudentDataset) {
+                const parsed = lines
+                  .map((line, idx) => parseStoreLine(line, idx))
+                  .filter((s): s is NonNullable<typeof s> => !!s && !!s.storeName && !s.storeName.includes('Freshman'));
+
+                if (parsed.length > 0) {
+                  storeRecords = parsed;
+                }
+              }
             }
           }
         }
+      } catch (error: any) {
+        console.warn('[BatchSync] Google Sheet tidak dapat dibaca:', error?.message || error);
+        storeRecords = [];
       }
-    } catch (error: any) {
-      console.warn('[BatchSync] Google Sheet tidak dapat dibaca:', error?.message || error);
-      storeRecords = [];
-    }
 
-    if (storeRecords.length === 0) {
-      throw new Error('Tidak ada data toko valid yang berhasil dibaca dari Google Sheets. Tidak ada data contoh yang dimasukkan.');
-    }
+      if (storeRecords.length === 0) {
+        const emptyMsg = 'Tidak ada data toko valid yang berhasil dibaca dari Google Sheets. Tidak ada data contoh yang dimasukkan.';
+        console.warn(`[BatchSync] ${emptyMsg}`);
+        const errLog: SyncLogEntry = {
+          id: 'log-' + Math.random().toString(36).substring(2, 8),
+          timestamp: new Date().toISOString(),
+          status: 'error',
+          totalStores: 0,
+          addedStores: 0,
+          updatedStores: 0,
+          message: emptyMsg,
+          sourceSheet: this.config.sheetName
+        };
+        this.syncLogs = [errLog, ...this.syncLogs];
+        this.saveLogs();
+        return { total: 0, added: 0, updated: 0, corruptedCount: 0 };
+      }
 
 
     console.log(`[BatchSync] Total records to process: ${storeRecords.length}. Processing in batches of 50 to prevent timeout...`);
