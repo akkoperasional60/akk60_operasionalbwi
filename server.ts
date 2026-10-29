@@ -615,21 +615,28 @@ async function startServer() {
     }
   };
 
-  const publicUser = (u: any) => ({
-    id: u.id,
-    email: u.email,
-    name: u.role === 'super_admin' ? 'Super Admin' : u.full_name,
-    fullName: u.role === 'super_admin' ? 'Super Admin' : u.full_name,
-    role: u.role,
-    department: u.department || 'Logistics Operations',
-    phone: u.phone || '',
-    status: u.status || 'pending',
-    createdAt: u.created_at || undefined,
-    approvedAt: u.approved_at || undefined,
-    approvedBy: u.approved_by || undefined,
-    notes: u.notes || undefined,
-    permissions: parsePermissionsJson(u.permissions_json ?? u.permissions)
-  });
+  const publicUser = (u: any) => {
+    const rawName = String(u.full_name || u.fullName || u.name || '').trim();
+    const isHendriEmail = String(u.email || '').trim().toLowerCase() === 'hendri123@gmail.com';
+    const resolvedName = (isHendriEmail && (!rawName || rawName.toLowerCase() === 'super admin'))
+      ? 'Hendri'
+      : (rawName || (u.role === 'super_admin' ? 'Super Admin' : 'User'));
+    return {
+      id: u.id,
+      email: u.email,
+      name: resolvedName,
+      fullName: resolvedName,
+      role: u.role,
+      department: u.department || 'Logistics Operations',
+      phone: u.phone || '',
+      status: u.status || 'pending',
+      createdAt: u.created_at || undefined,
+      approvedAt: u.approved_at || undefined,
+      approvedBy: u.approved_by || undefined,
+      notes: u.notes || undefined,
+      permissions: parsePermissionsJson(u.permissions_json ?? u.permissions)
+    };
+  };
 
   const handlePreviewLogin = (loginIdentifier: string, cleanPass: string, res: any) => {
     const cleanId = loginIdentifier.trim().toLowerCase();
