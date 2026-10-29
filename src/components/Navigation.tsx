@@ -83,7 +83,7 @@ export const Navigation: React.FC<NavigationProps> = ({ currentTab, onSelectTab 
           <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-950 border border-slate-800 text-xs">
             <Building2 className="w-3.5 h-3.5 text-amber-400" />
             <span className="text-slate-400">Hub:</span>
-            <strong className="text-slate-200">Gudang Pusat Banyuwangi DC</strong>
+            <strong className="text-slate-200">Gudang Banyuwangi DC</strong>
             <span className="text-slate-600">&bull;</span>
             <span className="font-mono text-emerald-400">{currentTime}</span>
           </div>

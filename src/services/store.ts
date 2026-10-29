@@ -247,6 +247,8 @@ export function isAreaRouteItem(store: Partial<RetailStore>): boolean {
 
   const nameLower = (store.storeName || '').trim().toLowerCase();
   if (AREA_DESTINATION_NAMES.has(nameLower)) return true;
+  if (/^toko\s+ritel\b/i.test(nameLower)) return true;
+  if (/indomar(e|ke)t|alfamart/i.test(nameLower)) return true;
   return false;
 }
 
@@ -628,16 +630,6 @@ class LogisticsStore {
             };
           }
           return s;
-        });
-
-        INITIAL_STORES.forEach(initStore => {
-          const exists = this.stores.some(
-            s => s.id === initStore.id || s.storeCode === initStore.storeCode || (s.storeName || '').trim().toLowerCase() === initStore.storeName.trim().toLowerCase()
-          );
-          if (!exists) {
-            this.stores.push({ ...initStore });
-            storesUpdated = true;
-          }
         });
 
         if (storesUpdated) {
@@ -1172,22 +1164,12 @@ class LogisticsStore {
       await this.handleBackendAutoWrite(event);
     });
 
-    // 2. Google Sheets & Cloud Schedule Auto-Write Middleware
-    this.use(async (event: EntityChangeEvent) => {
-      await this.handleGoogleSheetsAutoWrite(event);
-    });
-
-    // 3. Fleet & Crew Status Auto-Sync Middleware
-    this.use(async (event: EntityChangeEvent) => {
-      await this.handleFleetCrewStatusAutoSync(event);
-    });
-
-    // 4. Image & Document Storage Middleware
+    // 2. Image & Document Storage Middleware
     this.use(async (event: EntityChangeEvent) => {
       await this.handleImageStorageAutoSync(event);
     });
 
-    // 5. System Audit Activity Trail Middleware
+    // 3. System Audit Activity Trail Middleware
     this.use(async (event: EntityChangeEvent) => {
       await this.handleSystemAuditMiddleware(event);
     });
@@ -1738,10 +1720,14 @@ class LogisticsStore {
   private computeSyncedCrews(): Crew[] {
     const syncedCrews: Crew[] = [];
     const seenNames = new Set<string>();
-    const defaultFleetId = this.fleets?.[0]?.id;
+    const isCurrentSuperAdmin = this.currentUser?.role === 'super_admin';
 
     for (const u of this.users) {
       if (u.role !== 'driver' && u.role !== 'crew_helper') continue;
+      if (u.status === 'rejected') continue;
+      // Sembunyikan akun driver/helper yang nonaktif pada user selain Super Admin
+      if (!isCurrentSuperAdmin && u.status === 'inactive') continue;
+
       const cleanName = (u.fullName || '').trim();
       if (!cleanName) continue;
       const lowerName = cleanName.toLowerCase();
@@ -1801,29 +1787,33 @@ class LogisticsStore {
   }
 
   public getDriverCrews(): Crew[] {
-    const all = this.computeSyncedCrews();
+    const all = this.computeSyncedCrews().filter(c => c.status !== 'off');
     const drivers = all.filter(c => {
       const linkedUser = this.users.find(
         u => (u.role === 'driver' || u.role === 'crew_helper') &&
           (u.fullName.trim().toLowerCase() === c.name.trim().toLowerCase() || `crw-${u.id}` === c.id)
       );
-      if (linkedUser) return linkedUser.role === 'driver';
-      return !c.role.toLowerCase().includes('helper') && !c.role.toLowerCase().includes('kernet');
+      if (linkedUser) {
+        return linkedUser.status === 'approved' && linkedUser.role === 'driver';
+      }
+      return false;
     });
-    return drivers.length > 0 ? drivers : all;
+    return drivers;
   }
 
   public getHelperCrews(): Crew[] {
-    const all = this.computeSyncedCrews();
+    const all = this.computeSyncedCrews().filter(c => c.status !== 'off');
     const helpers = all.filter(c => {
       const linkedUser = this.users.find(
         u => (u.role === 'driver' || u.role === 'crew_helper') &&
           (u.fullName.trim().toLowerCase() === c.name.trim().toLowerCase() || `crw-${u.id}` === c.id)
       );
-      if (linkedUser) return linkedUser.role === 'crew_helper';
-      return c.role.toLowerCase().includes('helper') || c.role.toLowerCase().includes('kernet');
+      if (linkedUser) {
+        return linkedUser.status === 'approved' && (linkedUser.role === 'crew_helper' || linkedUser.role === 'driver');
+      }
+      return false;
     });
-    return helpers.length > 0 ? helpers : all;
+    return helpers;
   }
 
   public setCrews(crews: Crew[]): void {

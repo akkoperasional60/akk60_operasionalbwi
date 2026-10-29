@@ -534,6 +534,9 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     preparedBy?: string;
     gateOutConfirmed?: boolean;
     gateOutBy?: string;
+    gateOutTimestamp?: string;
+    argoArrivalTimestamp?: string;
+    argoArrivalBy?: string;
   }>>(() => {
     try {
       const raw = localStorage.getItem('akk_shared_schedule_flow_v1');
@@ -556,6 +559,9 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       preparedBy: string;
       gateOutConfirmed: boolean;
       gateOutBy: string;
+      gateOutTimestamp: string;
+      argoArrivalTimestamp: string;
+      argoArrivalBy: string;
     }>
   ) => {
     const todayStr = new Date().toISOString().slice(0, 10);
@@ -1806,6 +1812,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     const wb = driverWaybillService.getWaybillForSchedule(preparedSchedule);
     driverWaybillService.updateWaybillStatus(wb.id, 'in_transit');
 
+    const gateOutIso = new Date().toISOString();
     updateSharedScheduleFlow([delivery.id], {
       fleetId: preparedSchedule.fleetId,
       plateNumber: preparedSchedule.fleet?.plateNumber || '-',
@@ -1813,7 +1820,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       checklistCompleted: true,
       preparedForGateOut: true,
       gateOutConfirmed: true,
-      gateOutBy: portalDisplayName
+      gateOutBy: portalDisplayName,
+      gateOutTimestamp: gateOutIso
     });
 
     await handleUpdateStatus(
@@ -2015,6 +2023,11 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     };
 
     const targetDelivery = podModal.delivery;
+    const argoArrivalIso = podData.podPhotoTimestamp || new Date().toISOString();
+    updateSharedScheduleFlow([targetDelivery.id], {
+      argoArrivalTimestamp: argoArrivalIso,
+      argoArrivalBy: portalDisplayName
+    });
     await handleUpdateStatus(targetDelivery, 'delivered', podNote, podData, choice);
     // Pastikan waybill ter-generate dan berstatus 'delivered' agar muncul di SJ Keluar & Selesai
     driverWaybillService.getWaybillForSchedule({
