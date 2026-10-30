@@ -315,7 +315,7 @@ const TAB_TO_MODULE_MAP: Record<string, { moduleId: string; subMenuId?: string }
 
 export const canAccess = (user: UserProfile, moduleId: string, subMenuId?: string): boolean => {
   if (!user) return false;
-  if (user.status === 'inactive' || user.status !== 'approved') return false;
+  if (user.status === 'inactive') return false;
   if (isSuperAdminRole(user.role)) return true;
   if (user.role === 'unassigned') return false;
 

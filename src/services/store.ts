@@ -35,8 +35,52 @@ import {
   AutoSyncStatus,
   ScannedDocumentLog,
   ScannedDocumentType,
-  SecurityGateLog
+  SecurityGateLog,
+  ChatMessage
 } from '../types';
+
+export const INITIAL_CHAT_MESSAGES: ChatMessage[] = [
+  {
+    id: 'msg-101',
+    senderId: 'usr-spv-01',
+    senderName: 'Budi Santoso',
+    senderRole: 'spv_logistik',
+    receiverId: 'usr-driver-01',
+    receiverName: 'Agus Setiawan',
+    receiverRole: 'driver',
+    content: 'Pak Agus, tolong cek muatan boks armada DS-1 untuk rute Denpasar esok pagi.',
+    timestamp: new Date(Date.now() - 3600000 * 2).toISOString(),
+    isRead: true,
+    cabangId: 'sidoarjo'
+  },
+  {
+    id: 'msg-102',
+    senderId: 'usr-driver-01',
+    senderName: 'Agus Setiawan',
+    senderRole: 'driver',
+    receiverId: 'usr-spv-01',
+    receiverName: 'Budi Santoso',
+    receiverRole: 'spv_logistik',
+    content: 'Siap Pak SPV, armada DS-1 sudah selesai muat barang dan gate-out terkonfirmasi.',
+    timestamp: new Date(Date.now() - 3600000 * 1.5).toISOString(),
+    isRead: true,
+    cabangId: 'sidoarjo'
+  },
+  {
+    id: 'msg-103',
+    senderId: 'usr-operasional-01',
+    senderName: 'Bambang Supeno',
+    senderRole: 'operasional',
+    receiverId: 'all',
+    receiverName: 'Semua Pengguna Logistik',
+    receiverRole: 'all',
+    content: 'Pengumuman: Jadwal muat malam ini di Gudang Sidoarjo berjalan sesuai rencana.',
+    timestamp: new Date(Date.now() - 3600000 * 0.5).toISOString(),
+    isRead: false,
+    cabangId: 'sidoarjo'
+  }
+];
+
 import {
   INITIAL_FLEETS,
   INITIAL_CREWS,
@@ -116,7 +160,8 @@ const STORAGE_KEYS = {
   IMAGES: 'akk_images_storage_v1',
   SCANNED_DOCUMENTS: 'akk_scanned_documents_v1',
   SECURITY_LOGS: 'akk_security_logs_v1',
-  SCHEDULE_CHANGE_LOGS: 'akk_schedule_change_logs_v1'
+  SCHEDULE_CHANGE_LOGS: 'akk_schedule_change_logs_v1',
+  MESSAGES: 'akk_chat_messages_v1'
 };
 
 export const GUEST_USER_PROFILE: UserProfile = {
@@ -473,6 +518,7 @@ class LogisticsStore {
   private scannedDocuments: ScannedDocumentLog[] = [];
   private securityLogs: SecurityGateLog[] = [];
   private scheduleChangeLogs: ScheduleChangeLogEntry[] = [];
+  private messages: ChatMessage[] = [];
   private autoSyncStatus: AutoSyncStatus = {
     isSyncing: false,
     lastSyncTime: null,
@@ -517,6 +563,7 @@ class LogisticsStore {
     this.schedules = this.loadFromStorage(STORAGE_KEYS.SCHEDULES, []);
     this.devices = this.loadFromStorage(STORAGE_KEYS.DEVICES, isProd ? [] : INITIAL_TRACKSOLID_DEVICES);
     this.users = this.loadFromStorage(STORAGE_KEYS.USERS, isProd ? [] : INITIAL_PROFILES);
+    this.messages = this.loadFromStorage(STORAGE_KEYS.MESSAGES, INITIAL_CHAT_MESSAGES);
 
     // Initial authentication session from sessionStorage (Menutup browser otomatis mereset sesi)
     const sessionUserId = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STORAGE_KEYS.AUTH_SESSION) : null;
@@ -2128,12 +2175,31 @@ class LogisticsStore {
     const targetSchedules = schedules || this.schedules || [];
     let addedCount = 0;
 
-    targetSchedules.forEach((sch) => {
-      const crew = this.crews.find(c => c.id === sch.crewId);
-      if (!crew) return;
+    // Purge history items for schedules that no longer exist
+    const activeScheduleIds = new Set(targetSchedules.map(s => s.id));
+    this.crewHistory = this.crewHistory.filter(h => !h.scheduleId || activeScheduleIds.has(h.scheduleId));
 
-      const helper = sch.crewHelperId ? this.crews.find(c => c.id === sch.crewHelperId) : (sch.crewHelper ? sch.crewHelper : null);
-      const fleet = this.fleets.find(f => f.id === sch.fleetId);
+    targetSchedules.forEach((sch) => {
+      // Flexible crew lookup by ID or name
+      const driverName = (sch.crew?.name || (sch as any).driver || '').trim();
+      const crew = this.crews.find(c => c.id === sch.crewId || c.id === sch.crew?.id || (driverName && c.name.toLowerCase() === driverName.toLowerCase())) || {
+        id: sch.crewId || `c-custom-${Math.random().toString(36).substring(2, 6)}`,
+        name: driverName || sch.crewId || 'Driver Utama',
+        phone: '081234567890',
+        role: 'Driver Utama' as const,
+        licenseNumber: 'SIM B2 Umum',
+        licenseType: 'SIM B2 Umum',
+        status: 'available' as const,
+        tripsCompleted: 10,
+        rating: 4.8
+      };
+
+      const helperName = (sch.crewHelper?.name || (sch as any).helper || '').trim();
+      const helper = sch.crewHelperId 
+        ? this.crews.find(c => c.id === sch.crewHelperId) 
+        : (sch.crewHelper ? sch.crewHelper : (helperName && helperName !== '-' ? { id: `hlp-${helperName}`, name: helperName } : null));
+
+      const fleet = this.fleets.find(f => f.id === sch.fleetId || f.plateNumber === sch.fleet?.plateNumber);
       const store = this.stores.find(s => s.id === sch.storeId);
       
       const areaName = resolveScheduleAreaName(sch) || store?.storeName || sch.cargoDescription || 'Area Kirim';
@@ -2155,7 +2221,7 @@ class LogisticsStore {
       const initialCode = fleet?.initialCode || sch.fleet?.initialCode || extractedCode || sch.fleetId || 'DS3';
 
       const existingIndex = this.crewHistory.findIndex(
-        h => (h.scheduleId === sch.id || h.trackingNumber === trackingNumber) && h.crewId === crew.id
+        h => (h.scheduleId === sch.id || h.trackingNumber === trackingNumber) && (h.crewId === crew.id || h.crewName === crew.name)
       );
 
       const areaStats = this.checkCrewAreaThreshold(crew.id, areaName);
@@ -2201,7 +2267,7 @@ class LogisticsStore {
       // Also track Helper history if assigned
       if (helper) {
         const helperExistingIndex = this.crewHistory.findIndex(
-          h => (h.scheduleId === sch.id || h.trackingNumber === trackingNumber) && h.crewId === helper.id
+          h => (h.scheduleId === sch.id || h.trackingNumber === trackingNumber) && (h.crewId === helper.id || h.crewName === helper.name)
         );
         const helperHistoryItem: CrewDeliveryHistory = {
           id: helperExistingIndex !== -1 
@@ -5187,6 +5253,32 @@ class LogisticsStore {
     this.saveToStorage(STORAGE_KEYS.SCANNED_DOCUMENTS, this.scannedDocuments);
     this.notify();
   }
+
+  // ==========================================
+  // CHAT & INTERNAL MESSAGING (DISABLED)
+  // ==========================================
+  public getMessages(): ChatMessage[] {
+    return [];
+  }
+
+  public async fetchMessagesFromApi(): Promise<ChatMessage[]> {
+    return [];
+  }
+
+  public async sendMessage(msg: Omit<ChatMessage, 'id' | 'timestamp'>): Promise<ChatMessage> {
+    const newMsg: ChatMessage = {
+      ...msg,
+      id: `msg-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      isRead: false
+    };
+    return newMsg;
+  }
+
+  public async markMessagesAsRead(_senderId?: string): Promise<void> {
+    // no-op
+  }
 }
 
 export const logisticsStore = new LogisticsStore();
+

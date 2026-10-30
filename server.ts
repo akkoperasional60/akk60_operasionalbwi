@@ -1979,6 +1979,7 @@ Tugas Anda:
   });
 
   app.use('/downloads', express.static(path.join(process.cwd(), 'public', 'downloads')));
+
   app.use('/downloads', express.static(path.join(process.cwd(), 'downloads')));
 
   // In development, always use Vite middleware; in production, serve built dist/ if available

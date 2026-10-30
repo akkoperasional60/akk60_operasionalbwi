@@ -510,7 +510,7 @@ export const AnalyticsReportingModule: React.FC = () => {
       </div>
 
       {/* Filter Panel: Rentang Disimpelkan, Custom Dropdown UI/UX Armada & Kru, Tanpa Status Pengiriman */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 shadow-lg space-y-3">
+      <div className="relative z-30 bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 shadow-lg space-y-3">
         {/* Baris 1: Rentang Waktu Simpel + Pencarian */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
           <div className="flex flex-wrap items-center gap-1.5">
@@ -626,7 +626,7 @@ export const AnalyticsReportingModule: React.FC = () => {
             </button>
 
             {isFleetDropdownOpen && (
-              <div className="absolute left-0 right-0 mt-1.5 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl z-40 overflow-hidden">
+              <div className="absolute left-0 right-0 mt-1.5 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl z-50 overflow-hidden">
                 <div className="p-2 border-b border-slate-800 bg-slate-950/60">
                   <div className="relative">
                     <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
@@ -734,7 +734,7 @@ export const AnalyticsReportingModule: React.FC = () => {
             </button>
 
             {isCrewDropdownOpen && (
-              <div className="absolute left-0 right-0 mt-1.5 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl z-40 overflow-hidden">
+              <div className="absolute left-0 right-0 mt-1.5 bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl z-50 overflow-hidden">
                 <div className="p-2 border-b border-slate-800 bg-slate-950/60">
                   <div className="relative">
                     <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />

@@ -161,6 +161,9 @@ export default function App() {
   useEffect(() => {
     if (isAuthChecking || !isAuthenticated) return;
 
+    // Safety guard: Pending users stay on their current requested tab with warning banner, avoid infinite redirect loop
+    if (currentUser.status === 'pending') return;
+
     const userOrRoleChanged =
       prevUserRef.current.id !== currentUser.id ||
       prevUserRef.current.role !== currentUser.role;
@@ -173,7 +176,10 @@ export default function App() {
         setCurrentTab(requestedTab);
         return;
       }
-      setCurrentTab(getDefaultTabForRole(currentUser.role) as NavTab);
+      const defaultTab = getDefaultTabForRole(currentUser.role) as NavTab;
+      if (currentTab !== defaultTab) {
+        setCurrentTab(defaultTab);
+      }
       return;
     }
 
@@ -181,7 +187,10 @@ export default function App() {
     const isAdminTabBlocked = currentTab === 'users' && !isAdmin(currentUser) && !canAccess(currentUser, 'users');
 
     if (isFleetTabBlocked || isAdminTabBlocked || !canAccess(currentUser, currentTab)) {
-      setCurrentTab(getDefaultTabForRole(currentUser.role) as NavTab);
+      const defaultTab = getDefaultTabForRole(currentUser.role) as NavTab;
+      if (currentTab !== defaultTab) {
+        setCurrentTab(defaultTab);
+      }
     }
   }, [currentUser, currentTab, canManageFleet, isDriver, isAdmin, isAuthChecking, isAuthenticated]);
 
@@ -366,6 +375,7 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2.5 shrink-0">
+
             {/* Quick Driver Mobile Mode Switcher */}
             <button
               onClick={() =>
@@ -453,7 +463,7 @@ export default function App() {
         )}
 
         <main className={`flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 ${
-          currentUser.status === 'pending' ? 'pt-4' : 'pt-18 lg:pt-6'
+          currentUser.status === 'pending' ? 'pt-28 lg:pt-6' : 'pt-20 sm:pt-20 lg:pt-6'
         }`}>
           {currentTab === 'dashboard' && (
             isAdmin() || canAccess(currentUser, 'dashboard') ? (

@@ -47,7 +47,8 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   ClipboardCheck,
-  Map as MapIcon
+  Map as MapIcon,
+  MessageSquare
 } from 'lucide-react';
 import { AkkLogo } from './AkkLogo';
 import { ThemeSwitcher } from './ThemeSwitcher';
@@ -173,13 +174,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     updateReports();
     window.addEventListener('driver-report-updated', updateReports);
     return () => window.removeEventListener('driver-report-updated', updateReports);
-  }, []);
-
-  useEffect(() => {
-    return logisticsStore.subscribe(() => {
-      setCurrentUser(logisticsStore.getCurrentUser());
-      setPendingUsersCount(logisticsStore.getPendingUsersCount());
-    });
   }, []);
 
   useEffect(() => {

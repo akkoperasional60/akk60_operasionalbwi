@@ -101,6 +101,24 @@ CREATE TABLE IF NOT EXISTS user_branch_permissions (
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uq_user_branch (user_id, branch_id),
   CONSTRAINT fk_ubp_branch FOREIGN KEY (branch_id) REFERENCES master_branches(id) ON DELETE CASCADE
+);
+
+-- 6. Tabel Riwayat Chat Internal Logistik (messages - Hostinger MySQL)
+CREATE TABLE IF NOT EXISTS messages (
+  id VARCHAR(64) PRIMARY KEY,
+  sender_id VARCHAR(64) NOT NULL,
+  sender_name VARCHAR(128),
+  sender_role VARCHAR(64),
+  receiver_id VARCHAR(64) NOT NULL,
+  receiver_name VARCHAR(128),
+  receiver_role VARCHAR(64),
+  content TEXT NOT NULL,
+  timestamp DATETIME,
+  is_read TINYINT(1) DEFAULT 0,
+  cabang_id VARCHAR(64),
+  payload_json JSON,
+  INDEX idx_msg_receiver (receiver_id),
+  INDEX idx_msg_sender (sender_id)
 );`;
 
 export const MasterCabang: React.FC = () => {

@@ -1297,8 +1297,8 @@ export const Warehouse3DSimulation: React.FC<Warehouse3DSimulationProps> = ({ sk
 
     let animFrameId = 0;
     const animate = () => {
-      animFrameId = requestAnimationFrame(animate);
       if (!isVisibleRef.current) return;
+      animFrameId = requestAnimationFrame(animate);
       controls.update();
 
       const task = activeTaskRef.current;
@@ -1339,7 +1339,9 @@ export const Warehouse3DSimulation: React.FC<Warehouse3DSimulationProps> = ({ sk
 
       renderer.render(scene, camera);
     };
-    animate();
+    if (isVisibleRef.current) {
+      animate();
+    }
 
     const handleResize = () => {
       if (!container) return;
