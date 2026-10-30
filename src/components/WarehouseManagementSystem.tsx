@@ -398,6 +398,10 @@ export const WarehouseManagementSystem: React.FC<{
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
+          // If legacy dummy data (> 5 items with old mock SKU ids) is detected, reset to the 5 requested items
+          if (parsed.length > 5 && parsed.some((item: any) => item.id === 'sku-6' || item.id === 'sku-24' || item.noBarang === 'AKK-KBX-006')) {
+            return INITIAL_MASTER_SKUS;
+          }
           return parsed.map((item: any) => ({
             ...item,
             kategoriBarang: inferKategoriBarang(item.noBarang || '', item.namaBarang || '', item.kategoriBarang)
