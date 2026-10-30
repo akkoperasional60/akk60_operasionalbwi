@@ -103,26 +103,7 @@ const INITIAL_MASTER_SKUS: MasterSkuRecord[] = [
   { id: 'sku-2', kategoriBarang: 'Karton Box Double Wall', noBarang: 'AKK-KBX-002', namaBarang: 'Karton Box Double Wall CB-Flute Export 80x50x50 cm', stokTersedia: 1120, satuan: 'Pcs', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' },
   { id: 'sku-3', kategoriBarang: 'Box Kemasan Makanan', noBarang: 'AKK-KBX-003', namaBarang: 'Box Kemasan Makanan Food Grade Ivory 22x22x8 cm', stokTersedia: 9400, satuan: 'Pcs', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' },
   { id: 'sku-4', kategoriBarang: 'Karton Box Corrugated', noBarang: 'AKK-KBX-004', namaBarang: 'Karton Box Polos E-Flute 40x30x25 cm', stokTersedia: 3600, satuan: 'Pcs', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' },
-  { id: 'sku-5', kategoriBarang: 'Karton Box Corrugated', noBarang: 'AKK-KBX-005', namaBarang: 'Karton Box C-Flute Tebal 50x35x35 cm', stokTersedia: 4100, satuan: 'Pcs', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' },
-  { id: 'sku-6', kategoriBarang: 'Karton Box Corrugated', noBarang: 'AKK-KBX-006', namaBarang: 'Karton Box Corrugated Sablon Ritel 30x20x20 cm', stokTersedia: 2800, satuan: 'Pcs', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' },
-  { id: 'sku-7', kategoriBarang: 'Karton Box Double Wall', noBarang: 'AKK-KBX-007', namaBarang: 'Karton Box Ekspor Waxed Tahan Lembab Cold Storage', stokTersedia: 2900, satuan: 'Pcs', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' },
-  { id: 'sku-8', kategoriBarang: 'Karton Box Double Wall', noBarang: 'AKK-KBX-008', namaBarang: 'Karton Box Master Sparepart Alat Berat & Mesin', stokTersedia: 2500, satuan: 'Pcs', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' },
-  { id: 'sku-9', kategoriBarang: 'Box Kemasan Makanan', noBarang: 'AKK-KBX-009', namaBarang: 'Box Die-Cut Pizza Kraft Coklat 25x25x5 cm', stokTersedia: 5200, satuan: 'Pcs', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' },
-  { id: 'sku-10', kategoriBarang: 'Karton Box Corrugated', noBarang: 'AKK-KBX-010', namaBarang: 'Karton Box Arsip Dokumen Kantor 38x28x30 cm', stokTersedia: 1750, satuan: 'Pcs', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' },
-  { id: 'sku-11', kategoriBarang: 'Plastik & Stretch Film', noBarang: 'AKK-PLS-014', namaBarang: 'Stretch Film Pallet Wrap 50cm x 300m (17 Micron)', stokTersedia: 68, satuan: 'Roll', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' },
-  { id: 'sku-12', kategoriBarang: 'Plastik & Stretch Film', noBarang: 'AKK-PLS-019', namaBarang: 'Plastik Kemasan HD/PE Grosir Uk. 35x55 cm (Isi 50 Pak)', stokTersedia: 420, satuan: 'Ball', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' },
-  { id: 'sku-13', kategoriBarang: 'Plastik & Stretch Film', noBarang: 'AKK-PLS-022', namaBarang: 'Bubble Wrap Heavy Roll 125cm x 50m (Bening)', stokTersedia: 95, satuan: 'Roll', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' },
-  { id: 'sku-14', kategoriBarang: 'Plastik & Stretch Film', noBarang: 'AKK-PLS-030', namaBarang: 'Kantong Klip Zipper & Plastik Vacuum Embossed', stokTersedia: 310, satuan: 'Ball', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' },
-  { id: 'sku-15', kategoriBarang: 'Plastik & Stretch Film', noBarang: 'AKK-PLS-034', namaBarang: 'Plastik Sampah Industri Hitam 90x120 cm Tebal', stokTersedia: 240, satuan: 'Ball', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' },
-  { id: 'sku-16', kategoriBarang: 'Lakban & Strapping Band', noBarang: 'AKK-MPK-007', namaBarang: 'Lakban OPP Coklat Heavy Duty 48mm x 90 Yard', stokTersedia: 32, satuan: 'Karton', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' },
-  { id: 'sku-17', kategoriBarang: 'Lakban & Strapping Band', noBarang: 'AKK-MPK-008', namaBarang: 'Lakban Bening Fragile Print Merah Putih 48mm', stokTersedia: 48, satuan: 'Karton', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' },
-  { id: 'sku-18', kategoriBarang: 'Lakban & Strapping Band', noBarang: 'AKK-MPK-011', namaBarang: 'Strapping Band PP 15mm Kuning (10 Kg / Roll)', stokTersedia: 145, satuan: 'Roll', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' },
-  { id: 'sku-19', kategoriBarang: 'Lakban & Strapping Band', noBarang: 'AKK-MPK-015', namaBarang: 'Klem Besi Strapping Band 15mm (1 Dus = 2.000 Pcs)', stokTersedia: 64, satuan: 'Karton', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' },
-  { id: 'sku-20', kategoriBarang: 'Paper Cup & Food Pack', noBarang: 'AKK-PRD-025', namaBarang: 'Paper Cup Hot 8 Oz Custom Print + Lid (1.000 Pcs)', stokTersedia: 275, satuan: 'Karton', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' },
-  { id: 'sku-21', kategoriBarang: 'Paper Cup & Food Pack', noBarang: 'AKK-PRD-028', namaBarang: 'Paper Bowl Kraft 650 ml + Tutup PP Food Grade', stokTersedia: 190, satuan: 'Karton', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' },
-  { id: 'sku-22', kategoriBarang: 'Paper Cup & Food Pack', noBarang: 'AKK-PRD-031', namaBarang: 'Lunch Box Paper Eco Kraft Size L (Isi 500 Pcs)', stokTersedia: 340, satuan: 'Karton', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' },
-  { id: 'sku-23', kategoriBarang: 'Paper Cup & Food Pack', noBarang: 'AKK-PRD-035', namaBarang: 'Gelas Plastik PET Cup 16 Oz Oval + Dome Lid', stokTersedia: 415, satuan: 'Karton', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' },
-  { id: 'sku-24', kategoriBarang: 'Karton Box Corrugated', noBarang: 'AKK-KBX-040', namaBarang: 'Partisi Sekat Botol Karton Corrugated 12 Slot', stokTersedia: 6300, satuan: 'Pcs', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' }
+  { id: 'sku-5', kategoriBarang: 'Karton Box Corrugated', noBarang: 'AKK-KBX-005', namaBarang: 'Karton Box C-Flute Tebal 50x35x35 cm', stokTersedia: 4100, satuan: 'Pcs', cabang: 'Banyuwangi', lokasiStock: 'Gudang Utama Argopuro', tanggalStok: '2026-10-29' }
 ];
 
 const INITIAL_KARTU_STOK_ANALYSIS: KartuStokAnalysisRecord[] = [
@@ -260,7 +241,7 @@ const INITIAL_KARTU_STOK_ANALYSIS: KartuStokAnalysisRecord[] = [
   }
 ];
 
-const LS_KEY_MASTER_SKU = 'akk_wms_master_sku_v2';
+const LS_KEY_MASTER_SKU = 'akk_wms_master_sku_v3';
 const LS_KEY_KARTU_STOK = 'akk_wms_kartu_stok_analysis_v2';
 const LS_KEY_LOKASI_LIST = 'akk_wms_lokasi_stock_list_v1';
 
