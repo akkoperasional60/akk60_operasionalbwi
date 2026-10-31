@@ -129,7 +129,7 @@ export const getDefaultPermissionsForRole = (role: UserRole | string): UserPermi
         dashboard_logistik: isAll || isLogistikStaff ? 'full_access' : 'none',
         armada_ceklis: isAll || isLogistikStaff ? 'full_access' : 'none',
         live_map: isAll || isLogistikStaff ? 'full_access' : 'none',
-        monitoring_sla: isAll || isLogistikStaff || isCrew ? 'full_access' : 'none',
+        monitoring_sla: isAll || isLogistikStaff ? 'full_access' : 'none',
         rencana_rute: isAll || isLogistikStaff ? 'full_access' : 'none',
         portal_driver: isAll || isLogistikStaff || isCrew ? 'full_access' : 'none'
       }
@@ -274,7 +274,8 @@ const TAB_TO_MODULE_MAP: Record<string, { moduleId: string; subMenuId?: string }
   fuel_efficiency: { moduleId: 'logistics', subMenuId: 'armada_ceklis' },
   crew_history: { moduleId: 'logistics', subMenuId: 'monitoring_sla' },
   tracking_eval: { moduleId: 'logistics', subMenuId: 'monitoring_sla' },
-  fleet_forms: { moduleId: 'logistics', subMenuId: 'armada_ceklis' },
+  fleet_forms: { moduleId: 'logistics', subMenuId: 'monitoring_sla' },
+  customer_map: { moduleId: 'logistics', subMenuId: 'live_map' },
   sales_dashboard: { moduleId: 'sales_admin', subMenuId: 'dashboard_penjualan' },
   sales_activities: { moduleId: 'sales_admin', subMenuId: 'aktivitas_harian' },
   sales_schedules: { moduleId: 'sales_admin', subMenuId: 'jadwal_admin' },
@@ -285,6 +286,7 @@ const TAB_TO_MODULE_MAP: Record<string, { moduleId: string; subMenuId?: string }
   sales_kpi_individual: { moduleId: 'sales_admin', subMenuId: 'data_kpi' },
   sales_kpi_fines: { moduleId: 'sales_admin', subMenuId: 'data_kpi' },
   sales_kpi_nusantara: { moduleId: 'sales_admin', subMenuId: 'data_kpi' },
+  sales_kpi_omset: { moduleId: 'sales_admin', subMenuId: 'data_kpi' },
   warehouse_dashboard: { moduleId: 'warehouse', subMenuId: 'stok_barang' },
   warehouse_inventory: { moduleId: 'warehouse', subMenuId: 'stok_barang' },
   warehouse_inbound: { moduleId: 'warehouse', subMenuId: 'permintaan_barang' },
@@ -294,8 +296,8 @@ const TAB_TO_MODULE_MAP: Record<string, { moduleId: string; subMenuId?: string }
   warehouse_opname: { moduleId: 'warehouse', subMenuId: 'opname_stok' },
   warehouse_cubication: { moduleId: 'warehouse', subMenuId: 'stok_barang' },
   warehouse_fleet_cubication: { moduleId: 'logistics', subMenuId: 'armada_ceklis' },
+  marketing_online: { moduleId: 'marketing', subMenuId: 'kampanye' },
   marketing_offline: { moduleId: 'marketing', subMenuId: 'leads_pipeline' },
-  customer_map: { moduleId: 'marketing', subMenuId: 'laporan_kunjungan' },
   purchasing_dashboard: { moduleId: 'purchasing', subMenuId: 'permintaan_pembelian' },
   purchasing_stock_overview: { moduleId: 'purchasing', subMenuId: 'po_vendor' },
   purchasing_stock_forecast: { moduleId: 'purchasing', subMenuId: 'po_vendor' },
@@ -313,11 +315,56 @@ const TAB_TO_MODULE_MAP: Record<string, { moduleId: string; subMenuId?: string }
   architecture: { moduleId: 'sistem_pengguna', subMenuId: 'manajemen_hak_akses' }
 };
 
+function getSavedBranchModulePerms(
+  userId: string,
+  moduleId: string
+): { enabled: boolean; subMenus: Record<string, 'none' | 'read_only' | 'full_access'> } | null {
+  try {
+    if (typeof localStorage === 'undefined' || !userId) return null;
+    const raw = localStorage.getItem('akk_user_branch_permissions_v1');
+    if (!raw) return null;
+    const allUsers = JSON.parse(raw);
+    const userBranches = allUsers?.[userId];
+    if (!userBranches || typeof userBranches !== 'object') return null;
+
+    let anyBranchModEnabled = false;
+    const mergedSubMenus: Record<string, 'none' | 'read_only' | 'full_access'> = {};
+    Object.values(userBranches).forEach((bEntry: any) => {
+      if (!bEntry || !bEntry.enabled) return;
+      const m = bEntry.modules?.[moduleId];
+      if (m && m.enabled) {
+        anyBranchModEnabled = true;
+        Object.entries(m.subMenus || {}).forEach(([subId, lvl]) => {
+          if (lvl === 'full_access') {
+            mergedSubMenus[subId] = 'full_access';
+          } else if (lvl === 'read_only' && mergedSubMenus[subId] !== 'full_access') {
+            mergedSubMenus[subId] = 'read_only';
+          } else if (!mergedSubMenus[subId]) {
+            mergedSubMenus[subId] = 'none';
+          }
+        });
+      }
+    });
+
+    return {
+      enabled: anyBranchModEnabled,
+      subMenus: mergedSubMenus
+    };
+  } catch {
+    return null;
+  }
+}
+
 export const canAccess = (user: UserProfile, moduleId: string, subMenuId?: string): boolean => {
   if (!user) return false;
   if (user.status === 'inactive') return false;
   if (isSuperAdminRole(user.role)) return true;
   if (user.role === 'unassigned') return false;
+
+  // Special case: customer_map is accessible if user has live_map in logistics OR laporan_kunjungan in marketing
+  if (moduleId === 'customer_map' && !subMenuId) {
+    return canAccess(user, 'logistics', 'live_map') || canAccess(user, 'marketing', 'laporan_kunjungan');
+  }
 
   // Map NavTab to (moduleId, subMenuId) if moduleId is a tab name
   let resolvedModuleId = moduleId;
@@ -327,16 +374,22 @@ export const canAccess = (user: UserProfile, moduleId: string, subMenuId?: strin
     resolvedSubMenuId = TAB_TO_MODULE_MAP[moduleId].subMenuId;
   }
 
-  // 1. Granular permissions check if explicitly configured in user profile
-  const userModules = user.permissions?.modules;
   const defaultModules = getDefaultPermissionsForRole(user.role);
   const defaultMod = defaultModules[resolvedModuleId];
+
+  // 1. Check per-branch saved permissions first if configured in User Management
+  const branchModPerms = getSavedBranchModulePerms(user.id, resolvedModuleId);
+
+  // 2. Fall back to user.permissions.modules or role default
+  const userModules = user.permissions?.modules;
   const userMod = userModules?.[resolvedModuleId];
 
-  // If user has a primary role for this module (e.g., spv_logistik / operasional / pengiriman for 'logistics'),
-  // and userMod was left disabled or only partially initialized from 'unassigned', fall back to role defaults.
   const isPrimaryLogisticsRole = resolvedModuleId === 'logistics' && isSpvLogistikRole(user.role);
-  const modulePerms = userMod
+  const isCrew = isDriverRole(user.role);
+
+  const modulePerms = branchModPerms
+    ? branchModPerms
+    : userMod
     ? (isPrimaryLogisticsRole && !userMod.enabled && defaultMod?.enabled ? defaultMod : userMod)
     : defaultMod;
 
@@ -344,9 +397,31 @@ export const canAccess = (user: UserProfile, moduleId: string, subMenuId?: strin
 
   if (resolvedSubMenuId) {
     let subPerm = modulePerms.subMenus?.[resolvedSubMenuId];
+
+    // Legacy migration guard: for driver / crew_helper accounts that had old default (portal_driver + monitoring_sla only)
+    // without explicit branch permissions, only portal_driver is enabled by default.
+    if (
+      !branchModPerms &&
+      isCrew &&
+      resolvedModuleId === 'logistics' &&
+      resolvedSubMenuId === 'monitoring_sla' &&
+      userMod?.subMenus
+    ) {
+      const activeKeys = Object.entries(userMod.subMenus)
+        .filter(([, v]) => v === 'full_access' || v === 'read_only')
+        .map(([k]) => k);
+      if (
+        activeKeys.length === 2 &&
+        activeKeys.includes('portal_driver') &&
+        activeKeys.includes('monitoring_sla')
+      ) {
+        subPerm = 'none';
+      }
+    }
+
     // Fix bug where a new SPV Logistik / Operasional / Pengiriman user has logistics.enabled = true
     // but subMenus other than dashboard_logistik were stuck on 'none' from initial registration
-    if ((!subPerm || subPerm === 'none') && isPrimaryLogisticsRole && modulePerms.enabled) {
+    if ((!subPerm || subPerm === 'none') && !branchModPerms && isPrimaryLogisticsRole && modulePerms.enabled) {
       const subValues = Object.values(modulePerms.subMenus || {});
       const activeCount = subValues.filter(v => v === 'full_access' || v === 'read_only').length;
       if (activeCount <= 1) {
