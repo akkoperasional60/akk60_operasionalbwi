@@ -404,7 +404,13 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
 
   const handleCreateFleet = async (e: React.FormEvent) => {
     e.preventDefault();
-    const validation = validateFleet(newFleet, fleets, false);
+    const effectiveBrand = (newFleet.brand && newFleet.brand.trim()) ? newFleet.brand.trim() : 'Mitsubishi L300';
+    const fleetToCreate = {
+      ...newFleet,
+      brand: effectiveBrand
+    };
+
+    const validation = validateFleet(fleetToCreate, fleets, false);
     if (!validation.isValid) {
       setFleetFormErrors(validation.errors);
       const firstError = Object.values(validation.errors)[0] || 'Mohon periksa data armada yang masih salah.';
@@ -417,7 +423,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     setFleetFormErrors({});
 
     const created = logisticsStore.addFleet({
-      ...newFleet,
+      ...fleetToCreate,
       driverId: newFleetAssignedCrewId || undefined
     });
     if (created) {
@@ -506,13 +512,15 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
   const handleEditFleetClick = (fleet: Fleet) => {
     setFleetFormErrors({});
     setEditingFleetBranchId(branchStore.getFleetBranchId(fleet.id));
+    const effectiveBrand = (fleet.brand && fleet.brand.trim()) ? fleet.brand.trim() : 'Mitsubishi L300';
     const boxM3 = fleet.boxCapacityM3 !== undefined ? fleet.boxCapacityM3 : getFleetBoxCapacity(fleet);
-    const boxDim = fleet.boxDimensions || getDefaultBoxDimensions(fleet.vehicleType, fleet.brand);
+    const boxDim = fleet.boxDimensions || getDefaultBoxDimensions(fleet.vehicleType, effectiveBrand);
     const multiplier = fleet.boxInnerMultiplierPercent !== undefined ? fleet.boxInnerMultiplierPercent : 90;
     const innerM3 = fleet.boxInnerCapacityM3 !== undefined ? fleet.boxInnerCapacityM3 : Number((boxM3 * (multiplier / 100)).toFixed(2));
 
     setEditingFleet({
       ...fleet,
+      brand: effectiveBrand,
       boxCapacityM3: boxM3,
       boxDimensions: boxDim,
       boxInnerMultiplierPercent: multiplier,
@@ -529,7 +537,13 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     e.preventDefault();
     if (!editingFleet) return;
 
-    const validation = validateFleet(editingFleet, fleets, true, editingFleet.id);
+    const effectiveBrand = (editingFleet.brand && editingFleet.brand.trim()) ? editingFleet.brand.trim() : 'Mitsubishi L300';
+    const fleetToValidate: Fleet = {
+      ...editingFleet,
+      brand: effectiveBrand
+    };
+
+    const validation = validateFleet(fleetToValidate, fleets, true, fleetToValidate.id);
     if (!validation.isValid) {
       setFleetFormErrors(validation.errors);
       const firstError = Object.values(validation.errors)[0] || 'Mohon periksa data armada yang belum lengkap.';
@@ -541,35 +555,35 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     }
     setFleetFormErrors({});
 
-    const multiplier = editingFleet.boxInnerMultiplierPercent !== undefined ? editingFleet.boxInnerMultiplierPercent : 90;
-    const grossM3 = editingFleet.boxCapacityM3 !== undefined ? editingFleet.boxCapacityM3 : getFleetBoxCapacity(editingFleet);
+    const multiplier = fleetToValidate.boxInnerMultiplierPercent !== undefined ? fleetToValidate.boxInnerMultiplierPercent : 90;
+    const grossM3 = fleetToValidate.boxCapacityM3 !== undefined ? fleetToValidate.boxCapacityM3 : getFleetBoxCapacity(fleetToValidate);
     const innerM3 = Number((grossM3 * (multiplier / 100)).toFixed(2));
 
     setIsSavingFleet(true);
     try {
       // 1. Update fleet record including driverId and inner box dimensions
       const updatedFleetData: Fleet = {
-        ...editingFleet,
+        ...fleetToValidate,
         boxInnerMultiplierPercent: multiplier,
         boxInnerCapacityM3: innerM3,
         driverId: editingAssignedCrewId || undefined
       };
-      logisticsStore.updateFleet(editingFleet.id, updatedFleetData);
-      branchStore.setFleetBranchId(editingFleet.id, editingFleetBranchId);
+      logisticsStore.updateFleet(fleetToValidate.id, updatedFleetData);
+      branchStore.setFleetBranchId(fleetToValidate.id, editingFleetBranchId);
 
       // 2. Synchronize crew currentFleetId
       const allCrews = logisticsStore.getCrews();
       allCrews.forEach(c => {
         if (editingAssignedCrewId && c.id === editingAssignedCrewId) {
-          logisticsStore.updateCrew(c.id, { currentFleetId: editingFleet.id });
-        } else if (c.currentFleetId === editingFleet.id && (!editingAssignedCrewId || c.id !== editingAssignedCrewId)) {
+          logisticsStore.updateCrew(c.id, { currentFleetId: fleetToValidate.id });
+        } else if (c.currentFleetId === fleetToValidate.id && (!editingAssignedCrewId || c.id !== editingAssignedCrewId)) {
           logisticsStore.updateCrew(c.id, { currentFleetId: undefined });
         }
       });
 
       // 3. Persist directly to Hostinger MySQL backend (/api/fleets/:id)
       try {
-        await updateFleetInSupabase(editingFleet.id, updatedFleetData);
+        await updateFleetInSupabase(fleetToValidate.id, updatedFleetData);
       } catch (err) {
         console.warn('[Hostinger MySQL Fleet Sync]', err);
       }
@@ -2279,7 +2293,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                 <div>
                   <label className="text-slate-400 block mb-1">Merk Mobil</label>
                   <select
-                    value={newFleet.brand}
+                    value={newFleet.brand || 'Mitsubishi L300'}
                     onChange={(e) => {
                       const brand = e.target.value;
                       setNewFleet({
@@ -2288,15 +2302,29 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                         boxCapacityM3: getDefaultBoxCapacityM3(newFleet.vehicleType, brand),
                         boxDimensions: getDefaultBoxDimensions(newFleet.vehicleType, brand)
                       });
+                      if (fleetFormErrors.brand) {
+                        setFleetFormErrors({ ...fleetFormErrors, brand: '' });
+                      }
                     }}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white cursor-pointer"
+                    className={`w-full px-3 py-2 rounded-lg bg-slate-950 border text-white cursor-pointer ${
+                      fleetFormErrors.brand ? 'border-rose-500 ring-1 ring-rose-500' : 'border-slate-800'
+                    }`}
                   >
                     <option value="Mitsubishi L300">Mitsubishi L300</option>
                     <option value="Traga">Traga</option>
                     <option value="Mitsubishi Canter">Mitsubishi Canter</option>
                     <option value="Hino">Hino</option>
                     <option value="Isuzu">Isuzu</option>
+                    {newFleet.brand && !['Mitsubishi L300', 'Traga', 'Mitsubishi Canter', 'Hino', 'Isuzu'].includes(newFleet.brand) && (
+                      <option value={newFleet.brand}>{newFleet.brand}</option>
+                    )}
                   </select>
+                  {fleetFormErrors.brand && (
+                    <p className="text-[10px] text-rose-400 mt-1 flex items-center gap-1 font-medium">
+                      <AlertCircle className="w-3 h-3 shrink-0" />
+                      <span>{fleetFormErrors.brand}</span>
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="text-slate-400 block mb-1">Kapasitas Mesin (CC)</label>
@@ -2747,15 +2775,29 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                         boxCapacityM3: getDefaultBoxCapacityM3(editingFleet.vehicleType, brand),
                         boxDimensions: getDefaultBoxDimensions(editingFleet.vehicleType, brand)
                       });
+                      if (fleetFormErrors.brand) {
+                        setFleetFormErrors({ ...fleetFormErrors, brand: '' });
+                      }
                     }}
-                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white cursor-pointer"
+                    className={`w-full px-3 py-2 rounded-lg bg-slate-950 border text-white cursor-pointer ${
+                      fleetFormErrors.brand ? 'border-rose-500 ring-1 ring-rose-500' : 'border-slate-800'
+                    }`}
                   >
                     <option value="Mitsubishi L300">Mitsubishi L300</option>
                     <option value="Traga">Traga</option>
                     <option value="Mitsubishi Canter">Mitsubishi Canter</option>
                     <option value="Hino">Hino</option>
                     <option value="Isuzu">Isuzu</option>
+                    {editingFleet.brand && !['Mitsubishi L300', 'Traga', 'Mitsubishi Canter', 'Hino', 'Isuzu'].includes(editingFleet.brand) && (
+                      <option value={editingFleet.brand}>{editingFleet.brand}</option>
+                    )}
                   </select>
+                  {fleetFormErrors.brand && (
+                    <p className="text-[10px] text-rose-400 mt-1 flex items-center gap-1 font-medium">
+                      <AlertCircle className="w-3 h-3 shrink-0" />
+                      <span>{fleetFormErrors.brand}</span>
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="text-slate-400 block mb-1">Kapasitas Mesin (CC)</label>

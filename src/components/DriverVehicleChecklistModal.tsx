@@ -13,8 +13,10 @@ import {
   FileText,
   Clock,
   RotateCcw,
-  Sparkles
+  Sparkles,
+  Zap
 } from 'lucide-react';
+import { logisticsStore } from '../services/store';
 import {
   DriverVehicleChecklist,
   VehicleChecklistItem,
@@ -538,12 +540,41 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
         </div>
 
         {/* Modal Bottom Actions */}
-        <div className="bg-slate-900 p-3 px-4 border-t border-slate-800 flex items-center justify-end">
+        <div className="bg-slate-900 p-3 px-4 border-t border-slate-800 flex items-center gap-2">
+          {logisticsStore.getCurrentUser()?.role === 'super_admin' && (
+            <button
+              type="button"
+              onClick={() => {
+                const allGoodItems: VehicleChecklistItem[] = checklist.items.map(it => ({
+                  ...it,
+                  status: 'ok' as ChecklistItemStatus,
+                  note: 'Bypass Super Admin'
+                }));
+                const bypassedChecklist = {
+                  ...checklist,
+                  items: allGoodItems,
+                  overallStatus: 'passed' as const,
+                  driverNotes: 'Ditembus & Disimpan oleh Super Admin (Bypass Checklist)',
+                  isSubmitted: true,
+                  submittedAt: new Date().toISOString()
+                };
+                driverChecklistService.saveChecklist(bypassedChecklist);
+                onSaved?.(bypassedChecklist);
+                onClose();
+              }}
+              className="py-2.5 px-3 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-95 shrink-0"
+              title="Tembus & Simpan Otomatis Semua Siap Jalan (Khusus Super Admin)"
+            >
+              <Zap className="w-4 h-4 text-amber-400 fill-current" />
+              <span className="hidden sm:inline">⚡ Tembus Checklist (Super Admin)</span>
+              <span className="sm:hidden">⚡ Tembus</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={handleSave}
             disabled={isSubmitting}
-            className="w-full py-2.5 px-5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-500/20 transition cursor-pointer"
+            className="flex-1 py-2.5 px-5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-500/20 transition cursor-pointer"
           >
             <Save className="w-4 h-4" />
             <span>Simpan Checklist</span>
