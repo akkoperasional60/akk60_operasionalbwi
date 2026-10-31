@@ -56,7 +56,8 @@ import {
   createFleetInSupabase,
   createCrewInSupabase,
   deleteFleetInSupabase,
-  deleteCrewInSupabase
+  deleteCrewInSupabase,
+  syncFleetsAndCrewsWithSupabase
 } from '../services/supabaseService';
 
 // Helper for default box cubic capacity (m3 / CBM) and dimensions
@@ -259,6 +260,16 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
   const [isSavingFleet, setIsSavingFleet] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
+  const reloadFleetCrewFromMySql = async () => {
+    try {
+      await syncFleetsAndCrewsWithSupabase();
+      setFleets(logisticsStore.getFleets());
+      setCrews(logisticsStore.getCrews());
+    } catch (err) {
+      console.warn('[Hostinger MySQL Fleet/Crew Reload]', err);
+    }
+  };
+
   // Form Validation Error States
   const [fleetFormErrors, setFleetFormErrors] = useState<Record<string, string>>({});
   const [crewFormErrors, setCrewFormErrors] = useState<Record<string, string>>({});
@@ -286,6 +297,38 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
   const [crewToDelete, setCrewToDelete] = useState<Crew | null>(null);
   const [fleetToDelete, setFleetToDelete] = useState<Fleet | null>(null);
   const [selectedKirDocFleet, setSelectedKirDocFleet] = useState<Fleet | null>(null);
+
+  // Keyboard listener (Enter / Escape) for fleetToDelete
+  useEffect(() => {
+    if (!fleetToDelete) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleConfirmDeleteFleet();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setFleetToDelete(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [fleetToDelete]);
+
+  // Keyboard listener (Enter / Escape) for crewToDelete
+  useEffect(() => {
+    if (!crewToDelete) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleConfirmDeleteCrew();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setCrewToDelete(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [crewToDelete]);
 
   // Helper for formatting date in Indonesian
   const formatIndoDate = (dateStr?: string) => {
@@ -404,13 +447,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
 
   const handleCreateFleet = async (e: React.FormEvent) => {
     e.preventDefault();
-    const effectiveBrand = (newFleet.brand && newFleet.brand.trim()) ? newFleet.brand.trim() : 'Mitsubishi L300';
-    const fleetToCreate = {
-      ...newFleet,
-      brand: effectiveBrand
-    };
-
-    const validation = validateFleet(fleetToCreate, fleets, false);
+    const validation = validateFleet(newFleet, fleets, false);
     if (!validation.isValid) {
       setFleetFormErrors(validation.errors);
       const firstError = Object.values(validation.errors)[0] || 'Mohon periksa data armada yang masih salah.';
@@ -423,15 +460,20 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     setFleetFormErrors({});
 
     const created = logisticsStore.addFleet({
-      ...fleetToCreate,
+      ...newFleet,
       driverId: newFleetAssignedCrewId || undefined
     });
     if (created) {
       branchStore.setFleetBranchId(created.id, newFleetBranchId);
-      try {
-        await createFleetInSupabase(created);
-      } catch (err) {
-        console.warn('[Hostinger MySQL Fleet Add]', err);
+      const remoteFleetCreate = await createFleetInSupabase(created);
+      if (!remoteFleetCreate.success) {
+        await reloadFleetCrewFromMySql();
+        setSyncFeedback({
+          type: 'error',
+          message: `Armada ${created.plateNumber} belum tersimpan ke Hostinger MySQL: ${remoteFleetCreate.error || 'koneksi database gagal'}. Data lokal disegarkan dari server.`
+        });
+        setTimeout(() => setSyncFeedback(null), 7000);
+        return;
       }
     }
     if (newFleetAssignedCrewId && created) {
@@ -485,10 +527,15 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     });
     if (created) {
       branchStore.setCrewBranchId(created.id, newCrewBranchId);
-      try {
-        await createCrewInSupabase(created);
-      } catch (err) {
-        console.warn('[Hostinger MySQL Crew Add]', err);
+      const remoteCrewCreate = await createCrewInSupabase(created);
+      if (!remoteCrewCreate.success) {
+        await reloadFleetCrewFromMySql();
+        setSyncFeedback({
+          type: 'error',
+          message: `Kru ${created.name} belum tersimpan ke Hostinger MySQL: ${remoteCrewCreate.error || 'koneksi database gagal'}. Data lokal disegarkan dari server.`
+        });
+        setTimeout(() => setSyncFeedback(null), 7000);
+        return;
       }
     }
     setIsAddCrewOpen(false);
@@ -512,15 +559,13 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
   const handleEditFleetClick = (fleet: Fleet) => {
     setFleetFormErrors({});
     setEditingFleetBranchId(branchStore.getFleetBranchId(fleet.id));
-    const effectiveBrand = (fleet.brand && fleet.brand.trim()) ? fleet.brand.trim() : 'Mitsubishi L300';
     const boxM3 = fleet.boxCapacityM3 !== undefined ? fleet.boxCapacityM3 : getFleetBoxCapacity(fleet);
-    const boxDim = fleet.boxDimensions || getDefaultBoxDimensions(fleet.vehicleType, effectiveBrand);
+    const boxDim = fleet.boxDimensions || getDefaultBoxDimensions(fleet.vehicleType, fleet.brand);
     const multiplier = fleet.boxInnerMultiplierPercent !== undefined ? fleet.boxInnerMultiplierPercent : 90;
     const innerM3 = fleet.boxInnerCapacityM3 !== undefined ? fleet.boxInnerCapacityM3 : Number((boxM3 * (multiplier / 100)).toFixed(2));
 
     setEditingFleet({
       ...fleet,
-      brand: effectiveBrand,
       boxCapacityM3: boxM3,
       boxDimensions: boxDim,
       boxInnerMultiplierPercent: multiplier,
@@ -537,13 +582,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     e.preventDefault();
     if (!editingFleet) return;
 
-    const effectiveBrand = (editingFleet.brand && editingFleet.brand.trim()) ? editingFleet.brand.trim() : 'Mitsubishi L300';
-    const fleetToValidate: Fleet = {
-      ...editingFleet,
-      brand: effectiveBrand
-    };
-
-    const validation = validateFleet(fleetToValidate, fleets, true, fleetToValidate.id);
+    const validation = validateFleet(editingFleet, fleets, true, editingFleet.id);
     if (!validation.isValid) {
       setFleetFormErrors(validation.errors);
       const firstError = Object.values(validation.errors)[0] || 'Mohon periksa data armada yang belum lengkap.';
@@ -555,37 +594,36 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     }
     setFleetFormErrors({});
 
-    const multiplier = fleetToValidate.boxInnerMultiplierPercent !== undefined ? fleetToValidate.boxInnerMultiplierPercent : 90;
-    const grossM3 = fleetToValidate.boxCapacityM3 !== undefined ? fleetToValidate.boxCapacityM3 : getFleetBoxCapacity(fleetToValidate);
+    const multiplier = editingFleet.boxInnerMultiplierPercent !== undefined ? editingFleet.boxInnerMultiplierPercent : 90;
+    const grossM3 = editingFleet.boxCapacityM3 !== undefined ? editingFleet.boxCapacityM3 : getFleetBoxCapacity(editingFleet);
     const innerM3 = Number((grossM3 * (multiplier / 100)).toFixed(2));
 
     setIsSavingFleet(true);
     try {
       // 1. Update fleet record including driverId and inner box dimensions
       const updatedFleetData: Fleet = {
-        ...fleetToValidate,
+        ...editingFleet,
         boxInnerMultiplierPercent: multiplier,
         boxInnerCapacityM3: innerM3,
         driverId: editingAssignedCrewId || undefined
       };
-      logisticsStore.updateFleet(fleetToValidate.id, updatedFleetData);
-      branchStore.setFleetBranchId(fleetToValidate.id, editingFleetBranchId);
+      logisticsStore.updateFleet(editingFleet.id, updatedFleetData);
+      branchStore.setFleetBranchId(editingFleet.id, editingFleetBranchId);
 
       // 2. Synchronize crew currentFleetId
       const allCrews = logisticsStore.getCrews();
       allCrews.forEach(c => {
         if (editingAssignedCrewId && c.id === editingAssignedCrewId) {
-          logisticsStore.updateCrew(c.id, { currentFleetId: fleetToValidate.id });
-        } else if (c.currentFleetId === fleetToValidate.id && (!editingAssignedCrewId || c.id !== editingAssignedCrewId)) {
+          logisticsStore.updateCrew(c.id, { currentFleetId: editingFleet.id });
+        } else if (c.currentFleetId === editingFleet.id && (!editingAssignedCrewId || c.id !== editingAssignedCrewId)) {
           logisticsStore.updateCrew(c.id, { currentFleetId: undefined });
         }
       });
 
       // 3. Persist directly to Hostinger MySQL backend (/api/fleets/:id)
-      try {
-        await updateFleetInSupabase(fleetToValidate.id, updatedFleetData);
-      } catch (err) {
-        console.warn('[Hostinger MySQL Fleet Sync]', err);
+      const remoteFleetUpdate = await updateFleetInSupabase(editingFleet.id, updatedFleetData);
+      if (!remoteFleetUpdate.success) {
+        throw new Error(remoteFleetUpdate.error || 'Gagal menyimpan perubahan armada ke Hostinger MySQL');
       }
 
       setFleets(logisticsStore.getFleets());
@@ -598,6 +636,14 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
         message: `Perubahan data armada ${updatedFleetData.plateNumber} (${updatedFleetData.initialCode || updatedFleetData.vehicleType}) berhasil disimpan permanen ke database Hostinger MySQL.`
       });
       setTimeout(() => setSyncFeedback(null), 6000);
+    } catch (err: any) {
+      console.warn('[Hostinger MySQL Fleet Sync]', err);
+      await reloadFleetCrewFromMySql();
+      setSyncFeedback({
+        type: 'error',
+        message: `Perubahan armada belum tersimpan ke Hostinger MySQL: ${err?.message || 'koneksi database gagal'}. Data dikembalikan sesuai server.`
+      });
+      setTimeout(() => setSyncFeedback(null), 7000);
     } finally {
       setIsSavingFleet(false);
     }
@@ -641,10 +687,15 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     logisticsStore.updateCrew(editingCrew.id, updatedCrewData);
     branchStore.setCrewBranchId(editingCrew.id, editingCrewBranchId);
 
-    try {
-      await updateCrewInSupabase(editingCrew.id, updatedCrewData);
-    } catch (err) {
-      console.warn('[Hostinger MySQL Crew Sync]', err);
+    const remoteCrewUpdate = await updateCrewInSupabase(editingCrew.id, updatedCrewData);
+    if (!remoteCrewUpdate.success) {
+      await reloadFleetCrewFromMySql();
+      setSyncFeedback({
+        type: 'error',
+        message: `Perubahan kru ${editingCrew.name} belum tersimpan ke Hostinger MySQL: ${remoteCrewUpdate.error || 'koneksi database gagal'}. Data dikembalikan sesuai server.`
+      });
+      setTimeout(() => setSyncFeedback(null), 7000);
+      return;
     }
 
     setIsEditCrewOpen(false);
@@ -666,10 +717,16 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     const name = crewToDelete.name;
     const id = crewToDelete.id;
     logisticsStore.deleteCrew(id);
-    try {
-      await deleteCrewInSupabase(id);
-    } catch (err) {
-      console.warn('[Hostinger MySQL Crew Delete]', err);
+    const remoteCrewDelete = await deleteCrewInSupabase(id);
+    if (!remoteCrewDelete.success) {
+      await reloadFleetCrewFromMySql();
+      setCrewToDelete(null);
+      setSyncFeedback({
+        type: 'error',
+        message: `Kru ${name} belum terhapus dari Hostinger MySQL: ${remoteCrewDelete.error || 'koneksi database gagal'}. Data dikembalikan sesuai server.`
+      });
+      setTimeout(() => setSyncFeedback(null), 7000);
+      return;
     }
     setCrews(logisticsStore.getCrews());
     setCrewToDelete(null);
@@ -685,10 +742,16 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
     const plate = fleetToDelete.plateNumber;
     const id = fleetToDelete.id;
     logisticsStore.deleteFleet(id);
-    try {
-      await deleteFleetInSupabase(id, plate);
-    } catch (err) {
-      console.warn('[Hostinger MySQL Fleet Delete]', err);
+    const remoteFleetDelete = await deleteFleetInSupabase(id, plate);
+    if (!remoteFleetDelete.success) {
+      await reloadFleetCrewFromMySql();
+      setFleetToDelete(null);
+      setSyncFeedback({
+        type: 'error',
+        message: `Armada ${plate} belum terhapus dari Hostinger MySQL: ${remoteFleetDelete.error || 'koneksi database gagal'}. Data dikembalikan sesuai server.`
+      });
+      setTimeout(() => setSyncFeedback(null), 7000);
+      return;
     }
     setFleets(logisticsStore.getFleets());
     setFleetToDelete(null);
@@ -2293,7 +2356,7 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                 <div>
                   <label className="text-slate-400 block mb-1">Merk Mobil</label>
                   <select
-                    value={newFleet.brand || 'Mitsubishi L300'}
+                    value={newFleet.brand}
                     onChange={(e) => {
                       const brand = e.target.value;
                       setNewFleet({
@@ -2302,29 +2365,15 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                         boxCapacityM3: getDefaultBoxCapacityM3(newFleet.vehicleType, brand),
                         boxDimensions: getDefaultBoxDimensions(newFleet.vehicleType, brand)
                       });
-                      if (fleetFormErrors.brand) {
-                        setFleetFormErrors({ ...fleetFormErrors, brand: '' });
-                      }
                     }}
-                    className={`w-full px-3 py-2 rounded-lg bg-slate-950 border text-white cursor-pointer ${
-                      fleetFormErrors.brand ? 'border-rose-500 ring-1 ring-rose-500' : 'border-slate-800'
-                    }`}
+                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white cursor-pointer"
                   >
                     <option value="Mitsubishi L300">Mitsubishi L300</option>
                     <option value="Traga">Traga</option>
                     <option value="Mitsubishi Canter">Mitsubishi Canter</option>
                     <option value="Hino">Hino</option>
                     <option value="Isuzu">Isuzu</option>
-                    {newFleet.brand && !['Mitsubishi L300', 'Traga', 'Mitsubishi Canter', 'Hino', 'Isuzu'].includes(newFleet.brand) && (
-                      <option value={newFleet.brand}>{newFleet.brand}</option>
-                    )}
                   </select>
-                  {fleetFormErrors.brand && (
-                    <p className="text-[10px] text-rose-400 mt-1 flex items-center gap-1 font-medium">
-                      <AlertCircle className="w-3 h-3 shrink-0" />
-                      <span>{fleetFormErrors.brand}</span>
-                    </p>
-                  )}
                 </div>
                 <div>
                   <label className="text-slate-400 block mb-1">Kapasitas Mesin (CC)</label>
@@ -2775,29 +2824,15 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                         boxCapacityM3: getDefaultBoxCapacityM3(editingFleet.vehicleType, brand),
                         boxDimensions: getDefaultBoxDimensions(editingFleet.vehicleType, brand)
                       });
-                      if (fleetFormErrors.brand) {
-                        setFleetFormErrors({ ...fleetFormErrors, brand: '' });
-                      }
                     }}
-                    className={`w-full px-3 py-2 rounded-lg bg-slate-950 border text-white cursor-pointer ${
-                      fleetFormErrors.brand ? 'border-rose-500 ring-1 ring-rose-500' : 'border-slate-800'
-                    }`}
+                    className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white cursor-pointer"
                   >
                     <option value="Mitsubishi L300">Mitsubishi L300</option>
                     <option value="Traga">Traga</option>
                     <option value="Mitsubishi Canter">Mitsubishi Canter</option>
                     <option value="Hino">Hino</option>
                     <option value="Isuzu">Isuzu</option>
-                    {editingFleet.brand && !['Mitsubishi L300', 'Traga', 'Mitsubishi Canter', 'Hino', 'Isuzu'].includes(editingFleet.brand) && (
-                      <option value={editingFleet.brand}>{editingFleet.brand}</option>
-                    )}
                   </select>
-                  {fleetFormErrors.brand && (
-                    <p className="text-[10px] text-rose-400 mt-1 flex items-center gap-1 font-medium">
-                      <AlertCircle className="w-3 h-3 shrink-0" />
-                      <span>{fleetFormErrors.brand}</span>
-                    </p>
-                  )}
                 </div>
                 <div>
                   <label className="text-slate-400 block mb-1">Kapasitas Mesin (CC)</label>
@@ -3381,12 +3416,13 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                 onClick={() => setCrewToDelete(null)}
                 className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white text-xs font-semibold transition cursor-pointer"
               >
-                Batal
+                Tidak, Batal
               </button>
               <button
                 type="button"
+                autoFocus
                 onClick={handleConfirmDeleteCrew}
-                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-lg shadow-rose-600/20 flex items-center gap-1.5 transition cursor-pointer"
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-lg shadow-rose-600/20 flex items-center gap-1.5 transition cursor-pointer active:scale-95 ring-2 ring-rose-500/50"
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 <span>Ya, Hapus Kru</span>
@@ -3471,12 +3507,13 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
                 onClick={() => setFleetToDelete(null)}
                 className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white text-xs font-semibold transition cursor-pointer"
               >
-                Batal
+                Tidak, Batal
               </button>
               <button
                 type="button"
+                autoFocus
                 onClick={handleConfirmDeleteFleet}
-                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-lg shadow-rose-600/20 flex items-center gap-1.5 transition cursor-pointer"
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-lg shadow-rose-600/20 flex items-center gap-1.5 transition cursor-pointer active:scale-95 ring-2 ring-rose-500/50"
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 <span>Ya, Hapus Armada</span>

@@ -31,10 +31,19 @@ for (const token of [
   if (!envExample.includes(token)) failures.push(`.env.example kehilangan baseline: ${token}`);
 }
 
+if (exists('bun.lock')) {
+  try {
+    fs.unlinkSync(path.join(root, 'bun.lock'));
+    warnings.push('bun.lock terdeteksi dari build runner dan telah dibersihkan secara otomatis.');
+  } catch {
+    failures.push('File legacy/secret tidak boleh masuk source production: bun.lock');
+  }
+}
+
 const forbiddenPaths = ['vercel.json', '.vercelignore', 'api/index.ts', '.env', '.env.local'];
 for (const rel of forbiddenPaths) if (exists(rel)) failures.push(`File legacy/secret tidak boleh masuk source production: ${rel}`);
 if (exists('public/assets/aistudio')) {
-  warnings.push('public/assets/aistudio dipertahankan untuk referensi visual.');
+  warnings.push('public/assets/aistudio dipertahankan untuk referensi preview AI Studio (diabaikan/dibersihkan saat deploy Hostinger).');
 }
 
 const forbiddenText = [

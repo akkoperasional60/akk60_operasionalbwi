@@ -274,7 +274,7 @@ const TAB_TO_MODULE_MAP: Record<string, { moduleId: string; subMenuId?: string }
   fuel_efficiency: { moduleId: 'logistics', subMenuId: 'armada_ceklis' },
   crew_history: { moduleId: 'logistics', subMenuId: 'monitoring_sla' },
   tracking_eval: { moduleId: 'logistics', subMenuId: 'monitoring_sla' },
-  fleet_forms: { moduleId: 'logistics', subMenuId: 'monitoring_sla' },
+  fleet_forms: { moduleId: 'logistics', subMenuId: 'armada_ceklis' },
   customer_map: { moduleId: 'logistics', subMenuId: 'live_map' },
   sales_dashboard: { moduleId: 'sales_admin', subMenuId: 'dashboard_penjualan' },
   sales_activities: { moduleId: 'sales_admin', subMenuId: 'aktivitas_harian' },
@@ -315,46 +315,6 @@ const TAB_TO_MODULE_MAP: Record<string, { moduleId: string; subMenuId?: string }
   architecture: { moduleId: 'sistem_pengguna', subMenuId: 'manajemen_hak_akses' }
 };
 
-function getSavedBranchModulePerms(
-  userId: string,
-  moduleId: string
-): { enabled: boolean; subMenus: Record<string, 'none' | 'read_only' | 'full_access'> } | null {
-  try {
-    if (typeof localStorage === 'undefined' || !userId) return null;
-    const raw = localStorage.getItem('akk_user_branch_permissions_v1');
-    if (!raw) return null;
-    const allUsers = JSON.parse(raw);
-    const userBranches = allUsers?.[userId];
-    if (!userBranches || typeof userBranches !== 'object') return null;
-
-    let anyBranchModEnabled = false;
-    const mergedSubMenus: Record<string, 'none' | 'read_only' | 'full_access'> = {};
-    Object.values(userBranches).forEach((bEntry: any) => {
-      if (!bEntry || !bEntry.enabled) return;
-      const m = bEntry.modules?.[moduleId];
-      if (m && m.enabled) {
-        anyBranchModEnabled = true;
-        Object.entries(m.subMenus || {}).forEach(([subId, lvl]) => {
-          if (lvl === 'full_access') {
-            mergedSubMenus[subId] = 'full_access';
-          } else if (lvl === 'read_only' && mergedSubMenus[subId] !== 'full_access') {
-            mergedSubMenus[subId] = 'read_only';
-          } else if (!mergedSubMenus[subId]) {
-            mergedSubMenus[subId] = 'none';
-          }
-        });
-      }
-    });
-
-    return {
-      enabled: anyBranchModEnabled,
-      subMenus: mergedSubMenus
-    };
-  } catch {
-    return null;
-  }
-}
-
 export const canAccess = (user: UserProfile, moduleId: string, subMenuId?: string): boolean => {
   if (!user) return false;
   if (user.status === 'inactive') return false;
@@ -377,19 +337,16 @@ export const canAccess = (user: UserProfile, moduleId: string, subMenuId?: strin
   const defaultModules = getDefaultPermissionsForRole(user.role);
   const defaultMod = defaultModules[resolvedModuleId];
 
-  // 1. Check per-branch saved permissions first if configured in User Management
-  const branchModPerms = getSavedBranchModulePerms(user.id, resolvedModuleId);
-
-  // 2. Fall back to user.permissions.modules or role default
+  // Authorization must come from the server-synced user profile, never from localStorage.
+  // UserManagement may keep per-branch editor state locally, but it also merges and persists
+  // the effective module permissions through /api/users/:id (Super Admin protected).
   const userModules = user.permissions?.modules;
   const userMod = userModules?.[resolvedModuleId];
 
   const isPrimaryLogisticsRole = resolvedModuleId === 'logistics' && isSpvLogistikRole(user.role);
   const isCrew = isDriverRole(user.role);
 
-  const modulePerms = branchModPerms
-    ? branchModPerms
-    : userMod
+  const modulePerms = userMod
     ? (isPrimaryLogisticsRole && !userMod.enabled && defaultMod?.enabled ? defaultMod : userMod)
     : defaultMod;
 
@@ -401,7 +358,6 @@ export const canAccess = (user: UserProfile, moduleId: string, subMenuId?: strin
     // Legacy migration guard: for driver / crew_helper accounts that had old default (portal_driver + monitoring_sla only)
     // without explicit branch permissions, only portal_driver is enabled by default.
     if (
-      !branchModPerms &&
       isCrew &&
       resolvedModuleId === 'logistics' &&
       resolvedSubMenuId === 'monitoring_sla' &&
@@ -421,7 +377,7 @@ export const canAccess = (user: UserProfile, moduleId: string, subMenuId?: strin
 
     // Fix bug where a new SPV Logistik / Operasional / Pengiriman user has logistics.enabled = true
     // but subMenus other than dashboard_logistik were stuck on 'none' from initial registration
-    if ((!subPerm || subPerm === 'none') && !branchModPerms && isPrimaryLogisticsRole && modulePerms.enabled) {
+    if ((!subPerm || subPerm === 'none') && isPrimaryLogisticsRole && modulePerms.enabled) {
       const subValues = Object.values(modulePerms.subMenus || {});
       const activeCount = subValues.filter(v => v === 'full_access' || v === 'read_only').length;
       if (activeCount <= 1) {

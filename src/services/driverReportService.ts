@@ -69,6 +69,7 @@ class DriverReportService {
   private seqCounter = 0;
   private channel: BroadcastChannel | null = null;
   private eventSource: EventSource | null = null;
+  private reconnectTimer: number | null = null;
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -97,48 +98,50 @@ class DriverReportService {
           } catch {}
         }
       });
-
-      this.initServerRealtimeSync();
     }
   }
 
-  private initServerRealtimeSync() {
-    if (typeof window === 'undefined') return;
-    // Initial pull + push merge with server
-    this.syncWithServer().catch(() => {});
+  private ensureServerRealtimeSync() {
+    if (typeof window === 'undefined' || !('EventSource' in window)) return;
+    if (this.eventSource && this.eventSource.readyState !== EventSource.CLOSED) return;
 
-    // Connect SSE stream for instant (<50ms) report & solution updates
     try {
-      if ('EventSource' in window) {
-        const connectSse = () => {
-          try {
-            if (this.eventSource) {
-              this.eventSource.close();
+      const es = new EventSource('/api/driver-reports/stream');
+      this.eventSource = es;
+
+      es.onmessage = (evt) => {
+        try {
+          const data = JSON.parse(evt.data);
+          if (
+            data.type === 'report_upserted' ||
+            data.type === 'solution_updated' ||
+            data.type === 'solution_acknowledged'
+          ) {
+            if (data.payload && data.payload.id) {
+              this.mergeIncomingReports([data.payload], false);
             }
-            const es = new EventSource('/api/driver-reports/stream');
-            this.eventSource = es;
-            es.onmessage = (evt) => {
-              try {
-                const data = JSON.parse(evt.data);
-                if (data.type === 'report_upserted' || data.type === 'solution_updated' || data.type === 'solution_acknowledged') {
-                  if (data.payload && data.payload.id) {
-                    this.mergeIncomingReports([data.payload], false);
-                  }
-                } else if (data.type === 'reports_synced') {
-                  this.syncWithServer().catch(() => {});
-                }
-              } catch {}
-            };
-            es.onerror = () => {
-              try {
-                es.close();
-              } catch {}
-              setTimeout(connectSse, 4000);
-            };
-          } catch {}
-        };
-        connectSse();
-      }
+          } else if (data.type === 'reports_synced') {
+            this.syncWithServer().catch(() => {});
+          }
+        } catch {}
+      };
+
+      es.onerror = () => {
+        try {
+          es.close();
+        } catch {}
+        if (this.eventSource === es) this.eventSource = null;
+
+        // Re-check the authenticated API first. If the session has expired,
+        // syncWithServer() returns without reopening SSE, avoiding a reconnect loop on the login page.
+        if (this.reconnectTimer !== null) {
+          window.clearTimeout(this.reconnectTimer);
+        }
+        this.reconnectTimer = window.setTimeout(() => {
+          this.reconnectTimer = null;
+          this.syncWithServer().catch(() => {});
+        }, 4000);
+      };
     } catch {}
   }
 
@@ -147,6 +150,7 @@ class DriverReportService {
     try {
       const res = await fetch('/api/driver-reports', { credentials: 'include' });
       if (!res.ok) return;
+      this.ensureServerRealtimeSync();
       const json = await res.json();
       if (Array.isArray(json.reports) && json.reports.length > 0) {
         this.mergeIncomingReports(json.reports, false);

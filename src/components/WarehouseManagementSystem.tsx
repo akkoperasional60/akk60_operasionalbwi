@@ -242,6 +242,7 @@ const INITIAL_KARTU_STOK_ANALYSIS: KartuStokAnalysisRecord[] = [
 ];
 
 const LS_KEY_MASTER_SKU = 'akk_wms_master_sku_v3';
+const LS_KEY_MASTER_SKU_LEGACY = 'akk_wms_master_sku_v2';
 const LS_KEY_KARTU_STOK = 'akk_wms_kartu_stok_analysis_v2';
 const LS_KEY_LOKASI_LIST = 'akk_wms_lokasi_stock_list_v1';
 
@@ -394,14 +395,32 @@ export const WarehouseManagementSystem: React.FC<{
   // Master SKU State (persisted in localStorage)
   const [skuItems, setSkuItems] = useState<MasterSkuRecord[]>(() => {
     try {
-      const saved = localStorage.getItem(LS_KEY_MASTER_SKU);
+      // Prefer the current v3 store, but migrate existing v2 data instead of
+      // silently discarding user-imported Master SKU records on upgrade.
+      const savedV3 = localStorage.getItem(LS_KEY_MASTER_SKU);
+      const savedLegacy = localStorage.getItem(LS_KEY_MASTER_SKU_LEGACY);
+      const saved = savedV3 || savedLegacy;
+
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          // If legacy dummy data (> 5 items with old mock SKU ids) is detected, reset to the 5 requested items
-          if (parsed.length > 5 && parsed.some((item: any) => item.id === 'sku-6' || item.id === 'sku-24' || item.noBarang === 'AKK-KBX-006')) {
+          // Only replace the exact 24-row legacy demo dataset. Do not wipe
+          // arbitrary user-imported data merely because it contains sku-6.
+          const legacyDemoCodes = new Set([
+            'AKK-KBX-001', 'AKK-KBX-002', 'AKK-KBX-003', 'AKK-KBX-004', 'AKK-KBX-005',
+            'AKK-KBX-006', 'AKK-KBX-007', 'AKK-KBX-008', 'AKK-KBX-009', 'AKK-KBX-010',
+            'AKK-PLS-014', 'AKK-PLS-019', 'AKK-PLS-022', 'AKK-PLS-030', 'AKK-PLS-034',
+            'AKK-MPK-007', 'AKK-MPK-008', 'AKK-MPK-011', 'AKK-MPK-015',
+            'AKK-PRD-025', 'AKK-PRD-028', 'AKK-PRD-031', 'AKK-PRD-035', 'AKK-KBX-040'
+          ]);
+          const isExactLegacyDemo =
+            parsed.length === legacyDemoCodes.size &&
+            parsed.every((item: any) => legacyDemoCodes.has(String(item?.noBarang || '').toUpperCase()));
+
+          if (isExactLegacyDemo) {
             return INITIAL_MASTER_SKUS;
           }
+
           return parsed.map((item: any) => ({
             ...item,
             kategoriBarang: inferKategoriBarang(item.noBarang || '', item.namaBarang || '', item.kategoriBarang)
@@ -409,7 +428,7 @@ export const WarehouseManagementSystem: React.FC<{
         }
       }
     } catch {
-      // ignore
+      // ignore malformed local cache and fall back to initial data
     }
     return INITIAL_MASTER_SKUS;
   });

@@ -5,6 +5,7 @@ Dokumen ini adalah guardrail untuk Google AI Studio, GitHub, dan Hostinger. Jang
 ## Production tetap
 
 - Domain: `https://akkoperasional.com`
+- GitHub repository: `akkoperasional60/akk-operasional-hostinger`
 - GitHub branch: `main`
 - Hostinger framework: Express
 - Node.js: `24.x`
@@ -33,3 +34,19 @@ Dokumen ini adalah guardrail untuk Google AI Studio, GitHub, dan Hostinger. Jang
 `Google AI Studio → GitHub main → Hostinger auto-deploy → npm install → npm run build → node server.js`
 
 `npm run build` menjalankan baseline validator. Jika AI Studio merusak konfigurasi production, build sengaja dihentikan sebelum deploy.
+
+## Environment Variables production
+
+Gunakan hanya variabel runtime berikut di Hostinger:
+
+- `NODE_ENV=production`
+- `APP_URL=https://akkoperasional.com`
+- `DB_HOST=localhost`
+- `DB_PORT=3306`
+- `DB_NAME=u649808503_ops_node`
+- `DB_USER=u649808503_ops_node`
+- `DB_PASSWORD` (secret Hostinger)
+- `SESSION_SECRET` (minimal 32 karakter acak)
+- `GEMINI_API_KEY` (opsional; hapus jika tidak dipakai)
+
+`BOOTSTRAP_ADMIN_*` dan `PREVIEW_ADMIN_*` tidak dipakai pada production yang sudah memiliki Super Admin.

@@ -1255,6 +1255,26 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
   const [isUploadConfigModalOpen, setIsUploadConfigModalOpen] = useState<boolean>(false);
   const [activeSubPage, setActiveSubPage] = useState<'schedule' | 'upload_excel' | 'upload_process'>('schedule');
   const [deleteConfirmModal, setDeleteConfirmModal] = useState<{ p: DeliveryAssignment; dayNumber: number; tripIndex: number; dateString: string } | null>(null);
+
+  useEffect(() => {
+    if (!deleteConfirmModal) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleDeleteTrip(
+          deleteConfirmModal.p,
+          deleteConfirmModal.dayNumber,
+          deleteConfirmModal.tripIndex
+        );
+        setDeleteConfirmModal(null);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setDeleteConfirmModal(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [deleteConfirmModal]);
   const [importMonth, setImportMonth] = useState<string>('Januari');
   const [importYear, setImportYear] = useState<string>('2026');
   const [importMode, setImportMode] = useState<'tambahkan' | 'ganti'>('tambahkan');
@@ -2541,6 +2561,11 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
     const retIsoDate = returnDateIso || fallbackIso;
     const depIsoDate = departureDateIso || retIsoDate;
+
+    if (depIsoDate > retIsoDate || (depIsoDate === retIsoDate && depTime > retTime)) {
+      alert('Tanggal/jam kepulangan tidak boleh lebih awal dari keberangkatan. Silakan sesuaikan Tanggal Kepulangan sesuai Tanggal Kirim.');
+      return;
+    }
 
     // Penempatan jadwal di kalender selalu mengikuti Tanggal Kepulangan (sesuai Tanggal Kirim)
     const effectiveCalendarIso = retIsoDate;
@@ -4625,36 +4650,46 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                     {logisticsStore.getCurrentUser()?.role === 'super_admin' && currentStatus !== 'delivered' && (
                                       <button
                                         type="button"
-                                        onClick={() => {
+                                        onClick={async () => {
                                           const schId = matchedSch?.id || p.id;
                                           if (!schId) return;
                                           if (!confirm(`Tembus jadwal ${p.area} (${p.driver}) langsung ke status Selesai tanpa checklist? (Khusus Super Admin)`)) return;
-                                          const adminName = logisticsStore.getCurrentUser()?.fullName || 'Super Admin';
-                                          const todayIso = new Date().toISOString();
-                                          logisticsStore.updateSchedule(schId, {
-                                            status: 'delivered',
-                                            actualDeparture: matchedSch?.departureDate || todayIso,
-                                            actualArrival: matchedSch?.estimatedArrival || todayIso,
-                                            isChecklistBypassed: true,
-                                            checklistBypassedBy: adminName,
-                                            checklistBypassedAt: todayIso,
-                                            notes: `${matchedSch?.notes || ''} [Bypass Checklist Super Admin]`
-                                          });
-                                          logisticsStore.updateScheduleStatus(schId, 'delivered');
-                                          if (matchedSch) {
-                                            driverWaybillService.getWaybillForSchedule({ ...matchedSch, status: 'delivered' });
-                                            driverWaybillService.updateWaybillStatus(`WB-${schId}`, 'delivered', 'Bypass Checklist Super Admin');
+                                          try {
+                                            const response = await fetch(`/api/schedules/${encodeURIComponent(schId)}/bypass-checklist`, {
+                                              method: 'POST',
+                                              credentials: 'same-origin',
+                                              headers: { 'Content-Type': 'application/json' },
+                                              body: JSON.stringify({
+                                                note: `Input histori jadwal ${p.area}`,
+                                                postTripFleetStatus: 'available'
+                                              })
+                                            });
+                                            const payload = await response.json().catch(() => ({}));
+                                            if (!response.ok || !payload?.success) {
+                                              throw new Error(payload?.error || `HTTP ${response.status}`);
+                                            }
+
+                                            const adminName = payload?.schedule?.checklistBypassedBy || logisticsStore.getCurrentUser()?.fullName || 'Super Admin';
+                                            await logisticsStore.hydrateOperationalDataFromHostinger();
+
+                                            if (matchedSch) {
+                                              const deliveredSchedule = { ...matchedSch, ...(payload?.schedule || {}), status: 'delivered' as const };
+                                              const wb = driverWaybillService.getWaybillForSchedule(deliveredSchedule);
+                                              driverWaybillService.updateWaybillStatus(wb.id, 'delivered', 'Bypass Checklist Super Admin');
+                                            }
+                                            logisticsStore.addScheduleChangeLog({
+                                              actionType: 'manual_edit',
+                                              fileName: `Bypass Checklist Admin (${p.area})`,
+                                              userName: adminName,
+                                              userRole: 'Super Admin',
+                                              summary: `Tembus jadwal ${p.area} tanpa checklist`,
+                                              changes: [
+                                                `Jadwal ${p.area} berhasil ditembus dan disimpan ke status Selesai tanpa checklist oleh Super Admin.`
+                                              ]
+                                            });
+                                          } catch (err: any) {
+                                            alert(`Gagal menembus jadwal: ${err?.message || 'perubahan belum tersimpan ke Hostinger MySQL'}`);
                                           }
-                                          logisticsStore.addScheduleChangeLog({
-                                            actionType: 'manual_edit',
-                                            fileName: `Bypass Checklist Admin (${p.area})`,
-                                            userName: adminName,
-                                            userRole: 'Super Admin',
-                                            summary: `Tembus jadwal ${p.area} tanpa checklist`,
-                                            changes: [
-                                              `Jadwal ${p.area} berhasil ditembus dan disimpan ke status Selesai tanpa checklist oleh Super Admin.`
-                                            ]
-                                          });
                                         }}
                                         className="p-1 rounded-md bg-amber-500/15 hover:bg-amber-500/30 text-amber-500 dark:text-amber-400 border border-amber-500/40 transition cursor-pointer"
                                         title="Tembus & Simpan Selesai Tanpa Checklist (Super Admin)"
@@ -6761,6 +6796,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               </button>
               <button
                 type="button"
+                autoFocus
                 onClick={() => {
                   handleDeleteTrip(
                     deleteConfirmModal.p,
@@ -6769,7 +6805,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   );
                   setDeleteConfirmModal(null);
                 }}
-                className="flex-1 py-3 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition shadow-lg shadow-rose-600/30 cursor-pointer"
+                className="flex-1 py-3 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition shadow-lg shadow-rose-600/30 cursor-pointer active:scale-95 ring-2 ring-rose-500/50"
               >
                 Ya, Hapus Jadwal
               </button>
