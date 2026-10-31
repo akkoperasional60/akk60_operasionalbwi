@@ -1379,6 +1379,159 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
   });
 
+  // Real-Time Driver Reports & Solutions Synchronization (In-Memory + MySQL app_state + SSE Push Stream)
+  let inMemoryDriverReports: any[] = [];
+  let inMemoryReportsLoadedFromDb = false;
+  const driverReportSseClients = new Set<express.Response>();
+
+  const loadDriverReportsFromDbIfNeeded = async (): Promise<any[]> => {
+    if (inMemoryReportsLoadedFromDb) return inMemoryDriverReports;
+    inMemoryReportsLoadedFromDb = true;
+    if (!isDatabaseConfigured()) return inMemoryDriverReports;
+    try {
+      const rows = await mysqlQuery<any[]>("SELECT state_json FROM app_state WHERE state_key = ? LIMIT 1", ['driver_reports_payload']);
+      if (Array.isArray(rows) && rows.length > 0 && rows[0].state_json) {
+        const parsed = typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          inMemoryDriverReports = parsed;
+        }
+      }
+    } catch {}
+    return inMemoryDriverReports;
+  };
+
+  const persistDriverReportsToDb = async (reportsList: any[]) => {
+    inMemoryDriverReports = reportsList;
+    if (!isDatabaseConfigured()) return;
+    try {
+      // Keep max 100 latest reports in DB state to avoid packet size limits
+      const trimmed = reportsList.slice(0, 100);
+      await mysqlQuery(
+        `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
+         ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+        ['driver_reports_payload', JSON.stringify(trimmed)]
+      );
+    } catch {}
+  };
+
+  const broadcastDriverReportEvent = (eventType: string, payload: any) => {
+    const dataStr = `data: ${JSON.stringify({ type: eventType, payload, timestamp: new Date().toISOString() })}\n\n`;
+    for (const client of driverReportSseClients) {
+      try {
+        client.write(dataStr);
+      } catch {
+        driverReportSseClients.delete(client);
+      }
+    }
+  };
+
+  app.get("/api/driver-reports/stream", (req, res) => {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders?.();
+    res.write(`data: ${JSON.stringify({ type: "connected", timestamp: new Date().toISOString() })}\n\n`);
+    driverReportSseClients.add(res);
+    req.on("close", () => {
+      driverReportSseClients.delete(res);
+    });
+  });
+
+  app.get("/api/driver-reports", async (_req, res) => {
+    const list = await loadDriverReportsFromDbIfNeeded();
+    return res.json({ success: true, reports: list, count: list.length });
+  });
+
+  app.post("/api/driver-reports", express.json({ limit: '35mb' }), async (req, res) => {
+    await loadDriverReportsFromDbIfNeeded();
+    const { report, reports } = req.body || {};
+    if (report && report.id) {
+      const idx = inMemoryDriverReports.findIndex((r: any) => r.id === report.id);
+      if (idx >= 0) {
+        inMemoryDriverReports[idx] = { ...inMemoryDriverReports[idx], ...report };
+      } else {
+        inMemoryDriverReports.unshift(report);
+      }
+      await persistDriverReportsToDb(inMemoryDriverReports);
+      broadcastDriverReportEvent("report_upserted", report);
+      return res.json({ success: true, report, count: inMemoryDriverReports.length });
+    }
+    if (Array.isArray(reports)) {
+      const map = new Map<string, any>();
+      for (const r of [...reports, ...inMemoryDriverReports]) {
+        if (!r || !r.id) continue;
+        const existing = map.get(r.id);
+        if (!existing) {
+          map.set(r.id, r);
+        } else {
+          // Prefer whichever has a solution or newer solutionAt/timestamp
+          const rHasSol = Boolean(r.solution && String(r.solution).trim());
+          const exHasSol = Boolean(existing.solution && String(existing.solution).trim());
+          if (rHasSol && !exHasSol) {
+            map.set(r.id, { ...existing, ...r });
+          } else if (!rHasSol && exHasSol) {
+            map.set(r.id, { ...r, ...existing });
+          } else {
+            const rTime = new Date(r.solutionAt || r.verifiedAt || r.timestamp || 0).getTime();
+            const exTime = new Date(existing.solutionAt || existing.verifiedAt || existing.timestamp || 0).getTime();
+            map.set(r.id, rTime >= exTime ? { ...existing, ...r } : { ...r, ...existing });
+          }
+        }
+      }
+      inMemoryDriverReports = Array.from(map.values()).sort(
+        (a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime()
+      );
+      await persistDriverReportsToDb(inMemoryDriverReports);
+      broadcastDriverReportEvent("reports_synced", { count: inMemoryDriverReports.length });
+      return res.json({ success: true, reports: inMemoryDriverReports, count: inMemoryDriverReports.length });
+    }
+    return res.status(400).json({ success: false, error: "Payload report tidak valid" });
+  });
+
+  app.patch("/api/driver-reports/:id/solution", express.json(), async (req, res) => {
+    await loadDriverReportsFromDbIfNeeded();
+    const reportId = req.params.id;
+    const { solution, solutionBy, status, reportSnapshot } = req.body || {};
+    let idx = inMemoryDriverReports.findIndex((r: any) => r.id === reportId);
+    if (idx < 0 && reportSnapshot && reportSnapshot.id) {
+      inMemoryDriverReports.unshift(reportSnapshot);
+      idx = 0;
+    }
+    if (idx >= 0) {
+      inMemoryDriverReports[idx] = {
+        ...inMemoryDriverReports[idx],
+        solution: String(solution || '').trim(),
+        solutionBy: solutionBy || 'SPV Logistik DC',
+        solutionAt: new Date().toISOString(),
+        status: status === 'pending' ? 'resolved' : (status || 'resolved'),
+        driverAcknowledged: false
+      };
+      const updated = inMemoryDriverReports[idx];
+      await persistDriverReportsToDb(inMemoryDriverReports);
+      broadcastDriverReportEvent("solution_updated", updated);
+      return res.json({ success: true, report: updated });
+    }
+    return res.status(404).json({ success: false, error: "Laporan tidak ditemukan" });
+  });
+
+  app.patch("/api/driver-reports/:id/acknowledge", express.json(), async (req, res) => {
+    await loadDriverReportsFromDbIfNeeded();
+    const reportId = req.params.id;
+    const idx = inMemoryDriverReports.findIndex((r: any) => r.id === reportId);
+    if (idx >= 0) {
+      inMemoryDriverReports[idx] = {
+        ...inMemoryDriverReports[idx],
+        driverAcknowledged: true,
+        driverAcknowledgedAt: new Date().toISOString()
+      };
+      const updated = inMemoryDriverReports[idx];
+      await persistDriverReportsToDb(inMemoryDriverReports);
+      broadcastDriverReportEvent("solution_acknowledged", updated);
+      return res.json({ success: true, report: updated });
+    }
+    return res.status(404).json({ success: false, error: "Laporan tidak ditemukan" });
+  });
+
   app.patch("/api/schedules/:id/status", requireScheduleStatusWrite, express.json(), async (req, res) => {
     try {
       const scheduleId = req.params.id;
