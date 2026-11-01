@@ -302,7 +302,9 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
   useEffect(() => {
     if (!fleetToDelete) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Enter') {
+      const target = e.target as HTMLElement | null;
+      const isInteractiveTarget = Boolean(target?.closest('button, input, textarea, select, [contenteditable="true"]'));
+      if (e.key === 'Enter' && !isInteractiveTarget) {
         e.preventDefault();
         handleConfirmDeleteFleet();
       } else if (e.key === 'Escape') {
@@ -318,7 +320,9 @@ export const FleetCrewManagement: React.FC<FleetCrewManagementProps> = ({
   useEffect(() => {
     if (!crewToDelete) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Enter') {
+      const target = e.target as HTMLElement | null;
+      const isInteractiveTarget = Boolean(target?.closest('button, input, textarea, select, [contenteditable="true"]'));
+      if (e.key === 'Enter' && !isInteractiveTarget) {
         e.preventDefault();
         handleConfirmDeleteCrew();
       } else if (e.key === 'Escape') {

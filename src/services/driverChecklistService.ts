@@ -4,7 +4,7 @@ import {
   OverallChecklistStatus
 } from '../types';
 
-const STORAGE_KEY = 'akk_driver_vehicle_checklists_v2';
+const STORAGE_KEY = 'akk_driver_vehicle_checklists_v3';
 
 export const STANDARD_CHECKLIST_ITEMS: Omit<VehicleChecklistItem, 'id' | 'status' | 'note' | 'photoUrl'>[] = [
   // 1. Mesin & Fluida
@@ -32,38 +32,8 @@ export const STANDARD_CHECKLIST_ITEMS: Omit<VehicleChecklistItem, 'id' | 'status
     name: 'Air Wiper Washer & Nozzle',
     description: 'Cairan wiper terisi penuh dan semprotan nozzle kaca depan bekerja lancar'
   },
-  {
-    category: 'mesin_fluida',
-    categoryLabel: 'Mesin & Cairan Fluida',
-    name: 'Pemeriksaan Kolong Mesin (Kebocoran)',
-    description: 'Tidak ada tetesan oli, solar, atau air pendingin di bawah kolong mesin/transmisi'
-  },
 
   // 2. Rem, Roda & Kaki-kaki
-  {
-    category: 'rem_roda',
-    categoryLabel: 'Rem & Roda (Kaki-Kaki)',
-    name: 'Rem Kaki (Pedal Rem Utama)',
-    description: 'Pedal rem padat dan tidak ambles saat ditekan, respons pengereman pakem'
-  },
-  {
-    category: 'rem_roda',
-    categoryLabel: 'Rem & Roda (Kaki-Kaki)',
-    name: 'Rem Parkir / Handbrake',
-    description: 'Mampu menahan kendaraan pada kemiringan dan tuas mengunci dengan presisi'
-  },
-  {
-    category: 'rem_roda',
-    categoryLabel: 'Rem & Roda (Kaki-Kaki)',
-    name: 'Tekanan & Kondisi Ban Depan',
-    description: 'Tekanan ban sesuai standar (60-70 PSI), alur kembang ban tidak gundul, tanpa robek samping'
-  },
-  {
-    category: 'rem_roda',
-    categoryLabel: 'Rem & Roda (Kaki-Kaki)',
-    name: 'Tekanan & Kondisi Ban Belakang / Gandar',
-    description: 'Tekanan ban belakang ganda (75-85 PSI), baut roda kencang lengkap, sela ban bersih dari batu'
-  },
   {
     category: 'rem_roda',
     categoryLabel: 'Rem & Roda (Kaki-Kaki)',
@@ -72,30 +42,6 @@ export const STANDARD_CHECKLIST_ITEMS: Omit<VehicleChecklistItem, 'id' | 'status
   },
 
   // 3. Lampu & Kelistrikan
-  {
-    category: 'lampu_listrik',
-    categoryLabel: 'Lampu & Sistem Kelistrikan',
-    name: 'Lampu Utama (Dekat & Jauh)',
-    description: 'Headlamp menyala terang di kedua sisi, sorot lampu fokus, kaca headlamp tidak pecah'
-  },
-  {
-    category: 'lampu_listrik',
-    categoryLabel: 'Lampu & Sistem Kelistrikan',
-    name: 'Lampu Sein (L/R) & Hazard',
-    description: 'Lampu sein depan, samping, belakang berkedip normal; hazard darurat berfungsi serentak'
-  },
-  {
-    category: 'lampu_listrik',
-    categoryLabel: 'Lampu & Sistem Kelistrikan',
-    name: 'Lampu Rem & Lampu Mundur',
-    description: 'Lampu rem menyala merah terang saat diinjak, lampu mundur putih & sirine buzzer aktif'
-  },
-  {
-    category: 'lampu_listrik',
-    categoryLabel: 'Lampu & Sistem Kelistrikan',
-    name: 'Klakson & Karet Wiper Depan',
-    description: 'Klakson bersuara lantang, bilah wiper fleksibel dan menyeka kaca depan dengan bersih'
-  },
   {
     category: 'lampu_listrik',
     categoryLabel: 'Lampu & Sistem Kelistrikan',
@@ -121,42 +67,29 @@ export const STANDARD_CHECKLIST_ITEMS: Omit<VehicleChecklistItem, 'id' | 'status
     categoryLabel: 'Fisik Kendaraan & Dokumen Jalan',
     name: 'Kaca Spion & Kaca Depan',
     description: 'Spion kiri-kanan-dalam kokoh dan bersih dari debu/retak, visibilitas pandangan jelas'
-  },
-  {
-    category: 'fisik_dokumen',
-    categoryLabel: 'Fisik Kendaraan & Dokumen Jalan',
-    name: 'Pintu Boks & Engsel Pengunci',
-    description: 'Engsel dan tuas kunci pintu boks belakang rapat, karet penutup kedap air dan tidak bocor'
-  },
-
-  // 5. Keselamatan K3 & Perlengkapan Darurat
-  {
-    category: 'darurat_k3',
-    categoryLabel: 'Perlengkapan K3 & Darurat',
-    name: 'APAR (Alat Pemadam Api Ringan)',
-    description: 'APAR terpasang di kabin, jarum manometer berada di zona hijau, segel pengaman utuh'
-  },
-  {
-    category: 'darurat_k3',
-    categoryLabel: 'Perlengkapan K3 & Darurat',
-    name: 'Segitiga Pengaman & Kotak P3K',
-    description: 'Minimal 2 unit segitiga pengaman reflektor dan kotak P3K lengkap dengan kasa & antiseptik'
-  },
-  {
-    category: 'darurat_k3',
-    categoryLabel: 'Perlengkapan K3 & Darurat',
-    name: 'Dongkrak Hidrolik & Kunci Roda',
-    description: 'Kapasitas dongkrak sesuai tonase armada (min 5 ton) dan kunci roda pas dengan mur'
-  },
-  {
-    category: 'darurat_k3',
-    categoryLabel: 'Perlengkapan K3 & Darurat',
-    name: 'Terpal Cadangan & Tali Pengikat Muatan',
-    description: 'Terpal pelindung muatan anti air utuh dan tali tambang webbing pengikat koli siap pakai'
   }
 ];
 
 class DriverChecklistService {
+  public syncItemsWithStandard(existingItems?: VehicleChecklistItem[]): VehicleChecklistItem[] {
+    const existingMap = new Map<string, VehicleChecklistItem>();
+    if (Array.isArray(existingItems)) {
+      existingItems.forEach(item => {
+        existingMap.set(item.name.toLowerCase(), item);
+      });
+    }
+    return STANDARD_CHECKLIST_ITEMS.map((std, idx) => {
+      const matched = existingMap.get(std.name.toLowerCase());
+      return {
+        id: matched?.id || `item-${Date.now()}-${idx + 1}`,
+        ...std,
+        status: matched?.status || 'ok',
+        note: matched?.note || '',
+        photoUrl: matched?.photoUrl
+      };
+    });
+  }
+
   private generateInitialSampleChecklists(): DriverVehicleChecklist[] {
     const today = new Date().toISOString().split('T')[0];
     const items = STANDARD_CHECKLIST_ITEMS.map((item, idx) => ({
@@ -201,6 +134,18 @@ class DriverChecklistService {
         list = [];
       }
 
+      list = list.map(chk => {
+        const syncedItems = this.syncItemsWithStandard(chk.items);
+        const { overallStatus, passedCount, issueCount } = this.calculateStatus(syncedItems);
+        return {
+          ...chk,
+          items: syncedItems,
+          overallStatus,
+          passedCount,
+          issueCount
+        };
+      });
+
       if (driverId) {
         list = list.filter(c => c.driverId === driverId || c.driverName.toLowerCase().includes(driverId.toLowerCase()));
       }
@@ -221,12 +166,21 @@ class DriverChecklistService {
 
   public saveChecklist(checklist: DriverVehicleChecklist): boolean {
     try {
+      const syncedItems = this.syncItemsWithStandard(checklist.items);
+      const { overallStatus, passedCount, issueCount } = this.calculateStatus(syncedItems);
+      const normalizedChecklist: DriverVehicleChecklist = {
+        ...checklist,
+        items: syncedItems,
+        overallStatus,
+        passedCount,
+        issueCount
+      };
       const all = this.getChecklists();
-      const existingIdx = all.findIndex(c => c.id === checklist.id);
+      const existingIdx = all.findIndex(c => c.id === normalizedChecklist.id);
       if (existingIdx >= 0) {
-        all[existingIdx] = checklist;
+        all[existingIdx] = normalizedChecklist;
       } else {
-        all.unshift(checklist);
+        all.unshift(normalizedChecklist);
       }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
       return true;

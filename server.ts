@@ -293,32 +293,19 @@ async function startServer() {
   // Tidak ada credential default/hardcoded. Preview hanya aktif bila PREVIEW_ADMIN_*
   // diberikan secara eksplisit di environment preview, bukan di Hostinger production.
   const isPreviewRuntime = Boolean(process.env.K_SERVICE) || process.env.NODE_ENV !== 'production';
-  const previewAdminEmail = String(
-    process.env.PREVIEW_ADMIN_EMAIL ||
-    process.env.BOOTSTRAP_ADMIN_EMAIL ||
-    (isPreviewRuntime ? 'akkoperasional60@gmail.com' : '')
-  ).trim().toLowerCase();
-  const previewAdminPass = String(
-    process.env.PREVIEW_ADMIN_PASSWORD ||
-    process.env.BOOTSTRAP_ADMIN_PASSWORD ||
-    (isPreviewRuntime ? ['operasional', '123'].join('') : '')
-  ).trim();
-  const previewAdminName = String(
-    process.env.PREVIEW_ADMIN_NAME ||
-    process.env.BOOTSTRAP_ADMIN_NAME ||
-    'Super Admin'
-  ).trim() || 'Super Admin';
-
+  const previewAdminEmail = String(process.env.PREVIEW_ADMIN_EMAIL || '').trim().toLowerCase();
+  const previewAdminPass = String(process.env.PREVIEW_ADMIN_PASSWORD || '').trim();
+  const previewAdminName = String(process.env.PREVIEW_ADMIN_NAME || 'Super Admin').trim() || 'Super Admin';
   const previewSessionUsers = new Map<string, any>();
-  if (isPreviewRuntime && previewAdminEmail) {
+  if (isPreviewRuntime && previewAdminEmail && previewAdminPass.length >= 8) {
     previewSessionUsers.set('usr-preview-admin', {
       id: 'usr-preview-admin',
       email: previewAdminEmail,
-      password_hash: hashPassword(previewAdminPass || ['operasional', '123'].join('')),
+      password_hash: hashPassword(previewAdminPass),
       full_name: previewAdminName,
       role: 'super_admin',
       department: 'Manajemen & Direksi',
-      phone: '0811-3000-0001',
+      phone: '',
       status: 'approved',
       created_at: new Date().toISOString(),
       approved_at: new Date().toISOString(),
@@ -648,7 +635,7 @@ async function startServer() {
 
   const handlePreviewLogin = (loginIdentifier: string, cleanPass: string, res: any) => {
     const cleanId = loginIdentifier.trim().toLowerCase();
-    if (!cleanId || cleanPass.length < 3) {
+    if (!cleanId || cleanPass.length < 6) {
       return res.status(401).json({ success: false, error: 'Email/username atau password salah' });
     }
 
@@ -662,44 +649,21 @@ async function startServer() {
         cleanId === String(u.id || '').toLowerCase() ||
         cleanId === uPrefix ||
         cleanId === uName ||
-        (u.role === 'super_admin' && ['admin', 'superadmin', 'super admin', 'akkoperasional60', 'akkoperasional60@gmail.com', 'hendri123@gmail.com'].includes(cleanId))
+        (u.role === 'super_admin' && ['admin', 'superadmin', 'super admin'].includes(cleanId))
       ) {
         matchedUser = u;
         break;
       }
     }
 
-    if (!matchedUser && isPreviewRuntime && ['akkoperasional60@gmail.com', 'akkoperasional60', 'admin', 'superadmin', 'hendri123@gmail.com', 'bayun791@gmail.com'].includes(cleanId)) {
-      matchedUser = {
-        id: 'usr-preview-admin',
-        email: 'akkoperasional60@gmail.com',
-        password_hash: hashPassword(previewAdminPass || ['operasional', '123'].join('')),
-        full_name: 'Super Admin',
-        role: 'super_admin',
-        department: 'Manajemen & Direksi',
-        phone: '0811-3000-0001',
-        status: 'approved',
-        created_at: new Date().toISOString(),
-        approved_at: new Date().toISOString()
-      };
-    }
-
     if (!matchedUser) {
       return res.status(401).json({ success: false, error: 'Email/username atau password salah' });
     }
-
     if (String(matchedUser.status || 'approved') !== 'approved') {
       return res.status(403).json({ success: false, error: `Akun berstatus ${matchedUser.status || 'pending'} dan belum dapat login` });
     }
-
-    const defaultPass = ['operasional', '123'].join('');
-    const adminPass = ['admin', '123'].join('');
     if (!verifyPassword(cleanPass, String(matchedUser.password_hash || ''))) {
-      if (isPreviewRuntime && [defaultPass, adminPass, 'operasional', 'admin'].includes(cleanPass)) {
-        // Accept valid preview password fallbacks
-      } else {
-        return res.status(401).json({ success: false, error: 'Email/username atau password salah' });
-      }
+      return res.status(401).json({ success: false, error: 'Email/username atau password salah' });
     }
 
     const token = createSessionToken(String(matchedUser.id));
@@ -735,9 +699,6 @@ async function startServer() {
       }
 
       if (!Array.isArray(mysqlUsers) || mysqlUsers.length === 0) {
-        if (isPreviewRuntime) {
-          return handlePreviewLogin(loginIdentifier, cleanPass, res);
-        }
         const countRows = await mysqlQuery<any[]>(`SELECT COUNT(*) AS total FROM users`);
         const totalUsers = Number(countRows?.[0]?.total || 0);
         if (totalUsers === 0) {
@@ -753,9 +714,6 @@ async function startServer() {
         return res.status(403).json({ success: false, error: `Akun berstatus ${u.status || 'pending'} dan belum dapat login` });
       }
       if (!verifyPassword(cleanPass, String(u.password_hash || ''))) {
-        if (isPreviewRuntime) {
-          return handlePreviewLogin(loginIdentifier, cleanPass, res);
-        }
         return res.status(401).json({ success: false, error: 'Email/username atau password salah' });
       }
       if (!String(u.password_hash || '').startsWith('scrypt$')) {
@@ -765,10 +723,11 @@ async function startServer() {
       setSessionCookie(res, token);
       return res.json({ success: true, source: 'hostinger_mysql', user: publicUser(u) });
     } catch (err: any) {
-      if (isPreviewRuntime) {
+      const errMsg = String(err?.message || err || '');
+      const isPreviewEnv = Boolean(process.env.K_SERVICE) || process.env.NODE_ENV !== 'production';
+      if (isPreviewEnv && (errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND') || errMsg.includes('ETIMEDOUT'))) {
         return handlePreviewLogin(loginIdentifier, cleanPass, res);
       }
-      const errMsg = String(err?.message || err || '');
       console.warn('[Auth MySQL Warning]', errMsg);
       return res.status(503).json({
         success: false,

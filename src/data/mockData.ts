@@ -14,7 +14,16 @@ export const CENTRAL_WAREHOUSE = {
   rating: '4.7 (55 ulasan)'
 };
 
-const IS_PROD_BUILD = typeof import.meta !== 'undefined' && Boolean((import.meta as any).env?.PROD);
+const IS_AISTUDIO_PREVIEW =
+  typeof window !== 'undefined' &&
+  (window.location.hostname.endsWith('.run.app') ||
+    window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1');
+
+const IS_PROD_BUILD =
+  typeof import.meta !== 'undefined' &&
+  Boolean((import.meta as any).env?.PROD) &&
+  !IS_AISTUDIO_PREVIEW;
 
 export const INITIAL_PROFILES: UserProfile[] = IS_PROD_BUILD ? [] : [
   {
@@ -188,7 +197,7 @@ export const INITIAL_PROFILES: UserProfile[] = IS_PROD_BUILD ? [] : [
   }
 ];
 
-export const INITIAL_FLEETS: Fleet[] = IS_PROD_BUILD ? [] : [
+export const INITIAL_FLEETS: Fleet[] = [
   {
     id: 'flt-01',
     plateNumber: 'P 8125 VC',
@@ -469,6 +478,32 @@ export const INITIAL_FLEETS: Fleet[] = IS_PROD_BUILD ? [] : [
     kirExpiryDate: '2026-10-08'
   }
 ];
+
+export function resolveCanonicalFleetMeta(
+  fleetOrPlate?: Partial<Fleet> | string | null
+): Fleet | undefined {
+  if (!fleetOrPlate) return undefined;
+  const rawId = typeof fleetOrPlate === 'string' ? fleetOrPlate : (fleetOrPlate.id || '');
+  const rawPlate = typeof fleetOrPlate === 'string' ? fleetOrPlate : (fleetOrPlate.plateNumber || '');
+  const rawInit = typeof fleetOrPlate === 'string' ? fleetOrPlate : (fleetOrPlate.initialCode || '');
+
+  const cleanPlate = rawPlate.trim().toUpperCase().replace(/[\s\-_]+/g, '');
+  const cleanId = rawId.trim().toLowerCase();
+  const cleanInit = rawInit.trim().toUpperCase();
+
+  return INITIAL_FLEETS.find(f => {
+    if (cleanId && f.id.toLowerCase() === cleanId) return true;
+    const fPlate = (f.plateNumber || '').trim().toUpperCase().replace(/[\s\-_]+/g, '');
+    if (cleanPlate && fPlate === cleanPlate) return true;
+    if (cleanInit && f.initialCode) {
+      const fInit = f.initialCode.trim().toUpperCase();
+      if (fInit === cleanInit) return true;
+      const parts = fInit.split('/').map(p => p.trim());
+      if (parts.includes(cleanInit)) return true;
+    }
+    return false;
+  });
+}
 
 export const INITIAL_CREWS: Crew[] = IS_PROD_BUILD ? [] : [
   {

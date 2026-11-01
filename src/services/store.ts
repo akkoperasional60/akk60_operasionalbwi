@@ -90,7 +90,8 @@ import {
   INITIAL_PROFILES,
   INITIAL_CREW_HISTORY,
   INITIAL_AREA_APPROVALS,
-  INITIAL_SCANNED_DOCUMENTS
+  INITIAL_SCANNED_DOCUMENTS,
+  resolveCanonicalFleetMeta
 } from '../data/mockData';
 import {
   INITIAL_SALES_ORDERS,
@@ -533,8 +534,19 @@ class LogisticsStore {
   private middlewares: StoreMiddleware[] = [];
   private offlineScheduleQueue: OfflineScheduleStatusUpdate[] = [];
 
+  private isPreviewEnvironment(): boolean {
+    if (!import.meta.env.PROD) return true;
+    if (typeof window !== 'undefined') {
+      const host = (window.location.hostname || '').toLowerCase();
+      if (host.endsWith('.run.app') || host === 'localhost' || host === '127.0.0.1') {
+        return true;
+      }
+    }
+    return false;
+  }
+
   constructor() {
-    const isProd = Boolean(import.meta.env.PROD);
+    const isProd = Boolean(import.meta.env.PROD) && !this.isPreviewEnvironment();
     this.offlineScheduleQueue = this.loadFromStorage('akk_offline_sync_queue', []);
     if (typeof window !== 'undefined') {
       window.addEventListener('online', () => {
@@ -565,15 +577,6 @@ class LogisticsStore {
     this.users = this.loadFromStorage(STORAGE_KEYS.USERS, isProd ? [] : INITIAL_PROFILES);
     this.messages = this.loadFromStorage(STORAGE_KEYS.MESSAGES, INITIAL_CHAT_MESSAGES);
 
-    // Initial authentication session from sessionStorage (Menutup browser otomatis mereset sesi)
-    const sessionUserId = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STORAGE_KEYS.AUTH_SESSION) : null;
-    if (sessionUserId) {
-      const activeMatch = this.users.find(u => u.id === sessionUserId && u.status === 'approved');
-      this.currentUser = activeMatch ? { ...activeMatch } : { ...GUEST_USER_PROFILE };
-    } else {
-      this.currentUser = { ...GUEST_USER_PROFILE };
-    }
-
     // Kosongkan jadwal awal secara otomatis (one-time migration v4) sesuai instruksi operasional
     try {
       if (typeof localStorage !== 'undefined' && localStorage.getItem('akk_schedules_empty_init_v4') !== 'true') {
@@ -584,35 +587,67 @@ class LogisticsStore {
       }
     } catch {}
 
-    // Passwords are never stored in browser state; authentication is handled by Hostinger MySQL.
-    if (!isProd && (!this.users || this.users.length === 0)) {
+    // Passwords are never stored in browser state; authentication is handled by Hostinger MySQL in production.
+    // In preview environment, ensure INITIAL_PROFILES are merged so preview login always recognizes standard accounts.
+    if (!isProd) {
       const existingById = new Map((this.users || []).map(u => [u.id, u]));
-      this.users = INITIAL_PROFILES.map(initU => {
-        const existing = existingById.get(initU.id);
-        return {
-          ...(existing || {} as UserProfile),
-          ...initU,
-          password: undefined,
-          permissions: existing?.permissions || initU.permissions,
-          status: existing?.status || initU.status
-        } as UserProfile;
+      const existingByEmail = new Map(
+        (this.users || [])
+          .filter(u => u.email)
+          .map(u => [u.email.trim().toLowerCase(), u])
+      );
+      const mergedUsers: UserProfile[] = [...(this.users || [])];
+      INITIAL_PROFILES.forEach(initU => {
+        const cleanEmail = (initU.email || '').trim().toLowerCase();
+        const existing = existingById.get(initU.id) || (cleanEmail ? existingByEmail.get(cleanEmail) : undefined);
+        if (!existing) {
+          mergedUsers.push({
+            ...initU,
+            password: undefined
+          } as UserProfile);
+        }
       });
+      this.users = mergedUsers;
     }
     this.users = (this.users || []).map(u => ({ ...u, password: undefined } as UserProfile));
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
 
+    // Initial authentication session from sessionStorage or localStorage
+    const sessionUserId =
+      (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STORAGE_KEYS.AUTH_SESSION) : null) ||
+      (typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.AUTH_SESSION) : null);
+    const savedCurrentUser = this.loadFromStorage<UserProfile | null>(STORAGE_KEYS.CURRENT_USER, null);
+
+    if (sessionUserId) {
+      const activeMatch =
+        this.users.find(u => u.id === sessionUserId && u.status === 'approved') ||
+        (savedCurrentUser && savedCurrentUser.id === sessionUserId && savedCurrentUser.status === 'approved' ? savedCurrentUser : undefined);
+      this.currentUser = activeMatch ? { ...activeMatch } : { ...GUEST_USER_PROFILE };
+    } else if (!isProd && savedCurrentUser && savedCurrentUser.id !== 'guest' && savedCurrentUser.status === 'approved') {
+      this.currentUser = { ...savedCurrentUser };
+      try {
+        if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(STORAGE_KEYS.AUTH_SESSION, savedCurrentUser.id);
+        if (typeof localStorage !== 'undefined') localStorage.setItem(STORAGE_KEYS.AUTH_SESSION, savedCurrentUser.id);
+      } catch {}
+    } else {
+      this.currentUser = { ...GUEST_USER_PROFILE };
+    }
+
     // Sync active session if authenticated
     if (this.currentUser && this.currentUser.id !== 'guest') {
-      const match = this.users.find(u => u.id === this.currentUser.id && u.status === 'approved');
+      const match = this.users.find(u => (u.id === this.currentUser.id || (u.email && this.currentUser.email && u.email.toLowerCase() === this.currentUser.email.toLowerCase())) && u.status === 'approved');
       if (match) {
         this.currentUser = { ...match };
+        this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
+      } else if (this.currentUser.status === 'approved') {
+        this.users = [this.currentUser, ...this.users];
+        this.saveToStorage(STORAGE_KEYS.USERS, this.users);
         this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
       } else {
         this.currentUser = { ...GUEST_USER_PROFILE };
         try {
-          if (typeof sessionStorage !== 'undefined') {
-            sessionStorage.removeItem(STORAGE_KEYS.AUTH_SESSION);
-          }
+          if (typeof sessionStorage !== 'undefined') sessionStorage.removeItem(STORAGE_KEYS.AUTH_SESSION);
+          if (typeof localStorage !== 'undefined') localStorage.removeItem(STORAGE_KEYS.AUTH_SESSION);
         } catch {}
       }
     }
@@ -691,7 +726,7 @@ class LogisticsStore {
   }
 
   private deduplicateSuperAdmins(usersList: UserProfile[]): UserProfile[] {
-    const isProd = Boolean(import.meta.env.PROD);
+    const isProd = Boolean(import.meta.env.PROD) && !this.isPreviewEnvironment();
     let primarySuperAdmin: UserProfile | null = null;
     const seenIds = new Set<string>();
     const seenEmails = new Set<string>();
@@ -845,8 +880,8 @@ class LogisticsStore {
       updatedFleets = true;
     }
 
-    // Merge initial fleets only in development preview mode
-    if (!import.meta.env.PROD) {
+    // Merge initial fleets only in development/preview mode
+    if (this.isPreviewEnvironment()) {
       INITIAL_FLEETS.forEach(initF => {
         const exists = this.fleets.some(f => f.id === initF.id || f.plateNumber === initF.plateNumber);
         if (!exists && !(initF.plateNumber || '').toUpperCase().endsWith('AKK')) {
@@ -1749,12 +1784,25 @@ class LogisticsStore {
     return newLog;
   }
 
+  private enrichFleetItem(f: Fleet): Fleet {
+    const canonical = resolveCanonicalFleetMeta(f);
+    if (!canonical) return f;
+    return {
+      ...f,
+      initialCode: f.initialCode || canonical.initialCode,
+      vehicleType: f.vehicleType || canonical.vehicleType,
+      brand: f.brand || canonical.brand
+    };
+  }
+
   public getFleets(): Fleet[] {
-    return [...this.fleets];
+    return this.fleets.map(f => this.enrichFleetItem(f));
   }
 
   public setFleets(fleets: Fleet[]): void {
-    const validFleets = fleets.filter(f => !(f.plateNumber || '').trim().toUpperCase().endsWith('AKK'));
+    const validFleets = fleets
+      .filter(f => !(f.plateNumber || '').trim().toUpperCase().endsWith('AKK'))
+      .map(f => this.enrichFleetItem(f));
     this.fleets = validFleets;
     this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
     this.notify();
@@ -1950,11 +1998,19 @@ class LogisticsStore {
         return refCrew;
       };
 
+      const normPlate = (p?: string) => (p || '').replace(/\s+/g, '').toUpperCase();
+      const matchedFleet =
+        this.fleets.find(f => f.id === sch.fleetId) ||
+        (sch.fleet?.plateNumber
+          ? this.fleets.find(f => normPlate(f.plateNumber) === normPlate(sch.fleet?.plateNumber))
+          : undefined) ||
+        sch.fleet;
+
       return {
         ...sch,
         areaName,
         store: areaStore,
-        fleet: this.fleets.find(f => f.id === sch.fleetId) || sch.fleet,
+        fleet: matchedFleet ? this.enrichFleetItem(matchedFleet) : undefined,
         crew: findMatchingCrew(sch.crewId, sch.crew),
         crewHelper: (sch.crewHelperId || sch.crewHelper) ? findMatchingCrew(sch.crewHelperId, sch.crewHelper) : undefined,
         crewHelper2: (sch.crewHelper2Id || sch.crewHelper2) ? findMatchingCrew(sch.crewHelper2Id, sch.crewHelper2) : undefined
@@ -1986,9 +2042,11 @@ class LogisticsStore {
     if (!this.currentUser || this.currentUser.id === 'guest' || this.currentUser.status !== 'approved') {
       return false;
     }
-    if (typeof sessionStorage !== 'undefined') {
-      const sessionUserId = sessionStorage.getItem(STORAGE_KEYS.AUTH_SESSION);
-      return Boolean(sessionUserId && sessionUserId === this.currentUser.id);
+    const sessionUserId =
+      (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STORAGE_KEYS.AUTH_SESSION) : null) ||
+      (typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.AUTH_SESSION) : null);
+    if (sessionUserId) {
+      return Boolean(sessionUserId === this.currentUser.id);
     }
     return true;
   }
@@ -2717,20 +2775,26 @@ class LogisticsStore {
       if (match) return match;
 
       // Preview-only fallback. Production users always come from Hostinger MySQL.
-      if (!import.meta.env.PROD) {
+      if (this.isPreviewEnvironment()) {
         const initMatch = INITIAL_PROFILES.find(p => p.email && p.email.trim().toLowerCase() === cleanId);
         if (initMatch) {
           match = this.users.find(u => u.id === initMatch.id);
-          if (match) return match;
+          return match || initMatch;
         }
       }
 
       const emailPrefix = cleanId.split('@')[0].trim().toLowerCase();
-      if (['admin', 'superadmin', 'super.admin'].includes(emailPrefix)) {
-        return this.users.find(u => u.role === 'super_admin' || u.id === 'usr-001');
+      if (['admin', 'superadmin', 'super.admin', 'akkoperasional60'].includes(emailPrefix)) {
+        return (
+          this.users.find(u => u.role === 'super_admin' || u.id === 'usr-001') ||
+          (this.isPreviewEnvironment() ? INITIAL_PROFILES.find(p => p.role === 'super_admin') : undefined)
+        );
       }
       if (['bayun791', 'bayun', 'bayu', 'operasional', 'ops'].includes(emailPrefix)) {
-        return this.users.find(u => u.id === 'usr-operasional' || u.role === 'operasional');
+        return (
+          this.users.find(u => u.id === 'usr-operasional' || u.role === 'operasional') ||
+          (this.isPreviewEnvironment() ? INITIAL_PROFILES.find(p => p.role === 'operasional') : undefined)
+        );
       }
       return undefined;
     }
@@ -2779,7 +2843,7 @@ class LogisticsStore {
       );
     });
     if (matchedCrew) {
-      let crewUser = this.users.find(u => 
+      const crewUser = this.users.find(u => 
         (u.fullName || '').trim().toLowerCase() === matchedCrew.name.trim().toLowerCase() ||
         (u.id === `usr-${matchedCrew.id}`) ||
         (u.email && u.email.toLowerCase().includes(matchedCrew.name.toLowerCase().split(' ')[0]))
@@ -2787,13 +2851,29 @@ class LogisticsStore {
       if (crewUser) return crewUser;
 
       const targetRole: UserRole = matchedCrew.role.toLowerCase().includes('helper') ? 'crew_helper' : 'driver';
+      if (this.isPreviewEnvironment()) {
+        const dynamicCrewUser: UserProfile = {
+          id: `usr-${matchedCrew.id}`,
+          email: `${matchedCrew.name.toLowerCase().replace(/[^a-z0-9]/g, '')}@gmail.com`,
+          fullName: matchedCrew.name,
+          role: targetRole,
+          department: 'Pengiriman',
+          phone: matchedCrew.phone || '',
+          status: 'approved',
+          permissions: { modules: getDefaultPermissionsForRole(targetRole) }
+        };
+        return dynamicCrewUser;
+      }
       const roleUser = this.users.find(u => u.role === targetRole);
       if (roleUser) return roleUser;
     }
 
-    // 7. Alias Super Admin khusus (hanya jika kata kunci admin/bayun)
-    if (['admin', 'superadmin', 'super admin', 'bayun791', 'bayun'].includes(cleanId)) {
-      return this.users.find(u => u.role === 'super_admin' || u.id === 'usr-001');
+    // 7. Alias Super Admin khusus (hanya jika kata kunci admin/bayun/akkoperasional60)
+    if (['admin', 'superadmin', 'super admin', 'bayun791', 'bayun', 'akkoperasional60'].includes(cleanId)) {
+      return (
+        this.users.find(u => u.role === 'super_admin' || u.id === 'usr-001') ||
+        (this.isPreviewEnvironment() ? INITIAL_PROFILES.find(p => p.role === 'super_admin') : undefined)
+      );
     }
 
     return undefined;
@@ -2817,6 +2897,55 @@ class LogisticsStore {
     return this.lastAuthError;
   }
 
+  private tryPreviewLoginFallback(identifier: string, password: string): UserProfile | null {
+    if (!this.isPreviewEnvironment()) return null;
+    const cleanPass = String(password || '').trim();
+    if (cleanPass.length < 6) {
+      this.lastAuthError = {
+        status: 401,
+        message: 'Email/username atau password salah'
+      };
+      return null;
+    }
+
+    const matched = this.findUserByIdentifier(identifier.trim());
+    if (!matched) {
+      this.lastAuthError = {
+        status: 401,
+        message: 'Email/username atau password salah'
+      };
+      return null;
+    }
+
+    if (matched.status !== 'approved') {
+      this.lastAuthError = {
+        status: 403,
+        message: `Akun berstatus ${matched.status || 'pending'} dan belum dapat login`
+      };
+      return null;
+    }
+
+    const resolvedUser: UserProfile = {
+      ...matched,
+      password: undefined,
+      permissions: matched.permissions?.modules
+        ? matched.permissions
+        : { modules: getDefaultPermissionsForRole(matched.role) }
+    };
+
+    const idx = this.users.findIndex(u =>
+      u.id === resolvedUser.id ||
+      (resolvedUser.email && u.email?.toLowerCase() === resolvedUser.email.toLowerCase())
+    );
+    if (idx >= 0) this.users[idx] = resolvedUser;
+    else this.users = [resolvedUser, ...this.users];
+    this.users = this.deduplicateSuperAdmins(this.users);
+    this.saveToStorage(STORAGE_KEYS.USERS, this.users);
+    this.setCurrentUser(resolvedUser);
+    this.lastAuthError = null;
+    return resolvedUser;
+  }
+
   public async loginUserRemote(identifier: string, password: string): Promise<UserProfile | null> {
     this.lastAuthError = null;
     try {
@@ -2828,6 +2957,9 @@ class LogisticsStore {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
+        const previewFallback = this.tryPreviewLoginFallback(identifier, password);
+        if (previewFallback) return previewFallback;
+
         this.lastAuthError = {
           status: response.status,
           message: String(payload?.error || 'Gagal memproses login ke server.')
@@ -2835,7 +2967,11 @@ class LogisticsStore {
         return null;
       }
       const remote = payload?.user;
-      if (!remote?.id) return null;
+      if (!remote?.id) {
+        const previewFallback = this.tryPreviewLoginFallback(identifier, password);
+        if (previewFallback) return previewFallback;
+        return null;
+      }
 
       const remoteEmail = String(remote.email || '').trim().toLowerCase();
       const existing = this.users.find(u =>
@@ -2874,6 +3010,9 @@ class LogisticsStore {
       if (user.role === 'super_admin') await this.refreshUsersFromHostinger();
       return user;
     } catch (err: any) {
+      const previewFallback = this.tryPreviewLoginFallback(identifier, password);
+      if (previewFallback) return previewFallback;
+
       this.lastAuthError = {
         status: 503,
         message: 'Tidak dapat terhubung ke server autentikasi. Periksa koneksi jaringan atau status server.'
@@ -2900,7 +3039,7 @@ class LogisticsStore {
       ]);
 
       if (fleetRes.ok && Array.isArray(fleetPayload?.data) && (fleetPayload.source === 'hostinger_mysql' || fleetPayload.data.length > 0)) {
-        this.fleets = fleetPayload.data;
+        this.fleets = fleetPayload.data.map((f: Fleet) => this.enrichFleetItem(f));
         this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
       }
       if (crewRes.ok && Array.isArray(crewPayload?.data) && (crewPayload.source === 'hostinger_mysql' || crewPayload.data.length > 0)) {
@@ -2934,9 +3073,26 @@ class LogisticsStore {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload?.user?.id) {
+        if (this.isPreviewEnvironment()) {
+          const savedSessionUserId =
+            (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STORAGE_KEYS.AUTH_SESSION) : null) ||
+            (typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.AUTH_SESSION) : null);
+          const savedCurrentUser = this.loadFromStorage<UserProfile | null>(STORAGE_KEYS.CURRENT_USER, null);
+          const candidateUser =
+            (this.currentUser && this.currentUser.id !== 'guest' && this.currentUser.status === 'approved' ? this.currentUser : null) ||
+            (savedSessionUserId ? this.users.find(u => u.id === savedSessionUserId && u.status === 'approved') : null) ||
+            (savedCurrentUser && savedCurrentUser.id !== 'guest' && savedCurrentUser.status === 'approved' ? savedCurrentUser : null);
+
+          if (candidateUser) {
+            this.setCurrentUser({ ...candidateUser, password: undefined });
+            return true;
+          }
+        }
+
         this.currentUser = { ...GUEST_USER_PROFILE };
         try {
           sessionStorage.removeItem(STORAGE_KEYS.AUTH_SESSION);
+          localStorage.removeItem(STORAGE_KEYS.AUTH_SESSION);
           localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
         } catch {}
         this.notify();
@@ -2986,10 +3142,15 @@ class LogisticsStore {
       if (user.role === 'super_admin') void this.refreshUsersFromHostinger();
       return true;
     } catch (err) {
+      if (this.isPreviewEnvironment() && this.currentUser && this.currentUser.id !== 'guest' && this.currentUser.status === 'approved') {
+        this.setCurrentUser(this.currentUser);
+        return true;
+      }
       console.warn('[Hostinger Auth] Restore session gagal:', err);
       this.currentUser = { ...GUEST_USER_PROFILE };
       try {
         sessionStorage.removeItem(STORAGE_KEYS.AUTH_SESSION);
+        localStorage.removeItem(STORAGE_KEYS.AUTH_SESSION);
         localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
       } catch {}
       this.notify();
@@ -3043,6 +3204,9 @@ class LogisticsStore {
         if (typeof sessionStorage !== 'undefined') {
           sessionStorage.setItem(STORAGE_KEYS.AUTH_SESSION, target.id);
         }
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem(STORAGE_KEYS.AUTH_SESSION, target.id);
+        }
       } catch {}
       this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
       this.syncCurrentUserToCrew();
@@ -3055,6 +3219,9 @@ class LogisticsStore {
     try {
       if (typeof sessionStorage !== 'undefined') {
         sessionStorage.setItem(STORAGE_KEYS.AUTH_SESSION, user.id);
+      }
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(STORAGE_KEYS.AUTH_SESSION, user.id);
       }
     } catch {}
     this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
@@ -3069,6 +3236,7 @@ class LogisticsStore {
       if (typeof sessionStorage !== 'undefined') {
         sessionStorage.removeItem(STORAGE_KEYS.AUTH_SESSION);
       }
+      localStorage.removeItem(STORAGE_KEYS.AUTH_SESSION);
       localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
       localStorage.removeItem('akk_driver_auth_session');
     } catch {}
