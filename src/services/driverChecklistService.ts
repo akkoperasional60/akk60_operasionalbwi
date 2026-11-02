@@ -3,79 +3,108 @@ import {
   VehicleChecklistItem,
   OverallChecklistStatus
 } from '../types';
+import { getLocalDateStr } from './driverReportService';
+import { safeSetItem } from './store';
 
-const STORAGE_KEY = 'akk_driver_vehicle_checklists_v3';
+const STORAGE_KEY = 'akk_driver_vehicle_checklists_v4';
 
 export const STANDARD_CHECKLIST_ITEMS: Omit<VehicleChecklistItem, 'id' | 'status' | 'note' | 'photoUrl'>[] = [
-  // 1. Mesin & Fluida
+  // 1. Oli Mesin
   {
     category: 'mesin_fluida',
     categoryLabel: 'Mesin & Cairan Fluida',
-    name: 'Oli Mesin & Indikator Dipstick',
-    description: 'Volume oli berada di antara batas MIN dan MAX, tidak ada perubahan warna pekat terbakar'
+    name: 'Oli Mesin',
+    description: 'Periksa volume dan kondisi warna oli mesin pada dipstick berada di batas aman'
   },
+  // 2. Air Radiator
   {
     category: 'mesin_fluida',
     categoryLabel: 'Mesin & Cairan Fluida',
-    name: 'Air Radiator (Coolant) & Reservoir',
-    description: 'Level tabung cadangan air radiator cukup dan tutup radiator terpasang rapat'
+    name: 'Air Radiator',
+    description: 'Periksa level air radiator (coolant) pada tabung reservoir dan pastikan tutup rapat'
   },
+  // 3. Foto Oli Mesin & Air Radiator
   {
     category: 'mesin_fluida',
     categoryLabel: 'Mesin & Cairan Fluida',
-    name: 'Minyak Rem & Minyak Kopling',
-    description: 'Ketinggian minyak rem pada tangki cadangan aman, tidak ada kebocoran master silinder'
+    name: 'Foto Oli Mesin & Air Radiator',
+    description: 'Ambil foto bukti fisik pengecekan oli mesin dan air radiator armada'
   },
-  {
-    category: 'mesin_fluida',
-    categoryLabel: 'Mesin & Cairan Fluida',
-    name: 'Air Wiper Washer & Nozzle',
-    description: 'Cairan wiper terisi penuh dan semprotan nozzle kaca depan bekerja lancar'
-  },
-
-  // 2. Rem, Roda & Kaki-kaki
-  {
-    category: 'rem_roda',
-    categoryLabel: 'Rem & Roda (Kaki-Kaki)',
-    name: 'Ban Serep & Tekanan Udara',
-    description: 'Ban cadangan terpasang kuat pada bracket pengunci dan memiliki tekanan udara siap pakai'
-  },
-
-  // 3. Lampu & Kelistrikan
+  // 4. Air Accu
   {
     category: 'lampu_listrik',
-    categoryLabel: 'Lampu & Sistem Kelistrikan',
-    name: 'Baterai / Aki & Indikator Dashboard',
-    description: 'Terminal aki bersih kencang, alternator mengisi normal, tidak ada check-engine menyala'
+    categoryLabel: 'Kelistrikan & Accu',
+    name: 'Air Accu',
+    description: 'Periksa batas level cairan air accu (aki) berada di antara garis Upper dan Lower'
   },
-
-  // 4. Fisik, Bodi & Legalitas Dokumen
+  // 5. Rem Mobil & Minyak Rem
+  {
+    category: 'rem_roda',
+    categoryLabel: 'Rem & Roda',
+    name: 'Rem Mobil & Minyak Rem',
+    description: 'Periksa fungsi pijakan rem mobil pakem serta level minyak rem pada tabung master'
+  },
+  // 6. Foto Minyak Rem
+  {
+    category: 'rem_roda',
+    categoryLabel: 'Rem & Roda',
+    name: 'Foto Minyak Rem',
+    description: 'Ambil foto bukti fisik level tabung minyak rem armada'
+  },
+  // 7. Kebersihan Kabin
   {
     category: 'fisik_dokumen',
-    categoryLabel: 'Fisik Kendaraan & Dokumen Jalan',
-    name: 'STNK Asli & Masa Pajak Aktif',
-    description: 'STNK asli berada di dashboard dan masa berlaku pajak tahunan / 5 tahunan masih aktif'
+    categoryLabel: 'Kabin & Inventaris',
+    name: 'Kebersihan Kabin',
+    description: 'Pastikan ruang kabin pengemudi bersih, rapi, dan bebas dari sampah/kotoran'
   },
+  // 8. Inventaris Mobil
   {
     category: 'fisik_dokumen',
-    categoryLabel: 'Fisik Kendaraan & Dokumen Jalan',
-    name: 'Buku Uji KIR Dishub Aktif',
-    description: 'Buku uji berkala KIR Dishub valid, stempel tanggal uji berikutnya belum terlewat'
+    categoryLabel: 'Kabin & Inventaris',
+    name: 'Inventaris Mobil',
+    description: 'Periksa kelengkapan inventaris wajib mobil (dongkrak, kunci roda, dokumen jalan)'
   },
+  // 9. Ban Cadangan
   {
-    category: 'fisik_dokumen',
-    categoryLabel: 'Fisik Kendaraan & Dokumen Jalan',
-    name: 'Kaca Spion & Kaca Depan',
-    description: 'Spion kiri-kanan-dalam kokoh dan bersih dari debu/retak, visibilitas pandangan jelas'
+    category: 'rem_roda',
+    categoryLabel: 'Rem & Roda',
+    name: 'Ban Cadangan',
+    description: 'Pastikan ban cadangan terpasang kuat dan memiliki tekanan angin siap pakai'
   }
 ];
 
+const LEGACY_NAME_ALIASES: Record<string, string> = {
+  'oli mesin & indikator dipstick': 'oli mesin',
+  'air radiator (coolant) & reservoir': 'air radiator',
+  'baterai / aki & indikator dashboard': 'air accu',
+  'minyak rem & minyak kopling': 'rem mobil & minyak rem',
+  'ban serep & tekanan udara': 'ban cadangan'
+};
+
 class DriverChecklistService {
+  private memoryChecklists: DriverVehicleChecklist[] | null = null;
+
+  constructor() {
+    if (typeof window !== 'undefined') {
+      window.addEventListener('storage', (evt) => {
+        if (evt.key === STORAGE_KEY || evt.key === 'akk_driver_vehicle_checklists_v3') {
+          this.memoryChecklists = null;
+        }
+      });
+    }
+  }
+
   public syncItemsWithStandard(existingItems?: VehicleChecklistItem[]): VehicleChecklistItem[] {
     const existingMap = new Map<string, VehicleChecklistItem>();
     if (Array.isArray(existingItems)) {
       existingItems.forEach(item => {
-        existingMap.set(item.name.toLowerCase(), item);
+        const lower = item.name.toLowerCase().trim();
+        existingMap.set(lower, item);
+        const mappedAlias = LEGACY_NAME_ALIASES[lower];
+        if (mappedAlias && !existingMap.has(mappedAlias)) {
+          existingMap.set(mappedAlias, item);
+        }
       });
     }
     return STANDARD_CHECKLIST_ITEMS.map((std, idx) => {
@@ -91,7 +120,7 @@ class DriverChecklistService {
   }
 
   private generateInitialSampleChecklists(): DriverVehicleChecklist[] {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getLocalDateStr();
     const items = STANDARD_CHECKLIST_ITEMS.map((item, idx) => ({
       id: `chk-item-${idx + 1}`,
       ...item,
@@ -126,9 +155,12 @@ class DriverChecklistService {
     ];
   }
 
-  public getChecklists(driverId?: string, fleetId?: string): DriverVehicleChecklist[] {
+  private loadAllChecklists(): DriverVehicleChecklist[] {
+    if (this.memoryChecklists !== null) {
+      return this.memoryChecklists;
+    }
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem('akk_driver_vehicle_checklists_v3');
       let list: DriverVehicleChecklist[] = raw ? JSON.parse(raw) : [];
       if (!Array.isArray(list)) {
         list = [];
@@ -146,17 +178,26 @@ class DriverChecklistService {
         };
       });
 
-      if (driverId) {
-        list = list.filter(c => c.driverId === driverId || c.driverName.toLowerCase().includes(driverId.toLowerCase()));
-      }
-      if (fleetId) {
-        list = list.filter(c => c.fleetId === fleetId || c.plateNumber === fleetId);
-      }
-
-      return list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      this.memoryChecklists = list;
+      return list;
     } catch {
-      return this.generateInitialSampleChecklists();
+      const fallback = this.generateInitialSampleChecklists();
+      this.memoryChecklists = fallback;
+      return fallback;
     }
+  }
+
+  public getChecklists(driverId?: string, fleetId?: string): DriverVehicleChecklist[] {
+    let list = [...this.loadAllChecklists()];
+    if (driverId) {
+      const lowerDriver = driverId.toLowerCase();
+      list = list.filter(c => c.driverId === driverId || c.driverName.toLowerCase().includes(lowerDriver));
+    }
+    if (fleetId) {
+      list = list.filter(c => c.fleetId === fleetId || c.plateNumber === fleetId);
+    }
+    return list;
   }
 
   public getLatestChecklistForDriver(driverId: string): DriverVehicleChecklist | null {
@@ -182,7 +223,29 @@ class DriverChecklistService {
       } else {
         all.unshift(normalizedChecklist);
       }
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+      const trimmedAll = all.slice(0, 40).map((chk, idx) => {
+        // Keep full photos for recent 8 checklists; strip heavy base64 on older historical entries to prevent QuotaExceededError
+        if (idx < 8) return chk;
+        return {
+          ...chk,
+          photoEvidenceUrl: chk.photoEvidenceUrl?.startsWith('data:') ? undefined : chk.photoEvidenceUrl,
+          items: chk.items.map(it => ({
+            ...it,
+            photoUrl: it.photoUrl?.startsWith('data:') ? undefined : it.photoUrl
+          }))
+        };
+      });
+      this.memoryChecklists = trimmedAll;
+      const savedOk = safeSetItem(STORAGE_KEY, JSON.stringify(trimmedAll));
+      if (!savedOk) {
+        // Fallback: keep only the latest 3 checklists if device storage is critically full
+        safeSetItem(STORAGE_KEY, JSON.stringify(trimmedAll.slice(0, 3)));
+      }
+      try {
+        if (typeof sessionStorage !== 'undefined') {
+          sessionStorage.setItem(STORAGE_KEY, JSON.stringify(trimmedAll.slice(0, 5)));
+        }
+      } catch {}
       return true;
     } catch (err) {
       console.error('Failed to save checklist:', err);
@@ -200,7 +263,7 @@ class DriverChecklistService {
     fuelPercent: number = 80
   ): DriverVehicleChecklist {
     const now = new Date();
-    const dateStr = now.toISOString().split('T')[0];
+    const dateStr = getLocalDateStr(now);
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
     const items: VehicleChecklistItem[] = STANDARD_CHECKLIST_ITEMS.map((item, idx) => ({
@@ -251,6 +314,21 @@ class DriverChecklistService {
     }
 
     return { overallStatus, passedCount, issueCount };
+  }
+
+  public deleteChecklist(id: string): boolean {
+    const cleanId = String(id || '').trim();
+    if (!cleanId) return false;
+    try {
+      const list = this.loadAllChecklists();
+      const filtered = list.filter(c => c.id !== cleanId);
+      this.memoryChecklists = filtered;
+      safeSetItem(STORAGE_KEY, JSON.stringify(filtered));
+      safeSetItem('akk_driver_vehicle_checklists_v3', JSON.stringify(filtered));
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 

@@ -144,6 +144,7 @@ const STORAGE_KEYS = {
   DEVICES: 'akk_devices_v1',
   CURRENT_USER: 'akk_user_v2',
   AUTH_SESSION: 'akk_auth_session_active_v1',
+  SESSION_TOKEN: 'akk_session_token_v1',
   USERS: 'akk_users_list_v5',
   SUPABASE_CONFIG: 'akk_supabase_config_v1',
   CREW_HISTORY: 'akk_crew_history_v1',
@@ -621,9 +622,9 @@ class LogisticsStore {
     if (sessionUserId) {
       const activeMatch =
         this.users.find(u => u.id === sessionUserId && u.status === 'approved') ||
-        (savedCurrentUser && savedCurrentUser.id === sessionUserId && savedCurrentUser.status === 'approved' ? savedCurrentUser : undefined);
+        (savedCurrentUser && savedCurrentUser.id !== 'guest' && savedCurrentUser.status === 'approved' ? savedCurrentUser : undefined);
       this.currentUser = activeMatch ? { ...activeMatch } : { ...GUEST_USER_PROFILE };
-    } else if (!isProd && savedCurrentUser && savedCurrentUser.id !== 'guest' && savedCurrentUser.status === 'approved') {
+    } else if (savedCurrentUser && savedCurrentUser.id !== 'guest' && savedCurrentUser.status === 'approved') {
       this.currentUser = { ...savedCurrentUser };
       try {
         if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(STORAGE_KEYS.AUTH_SESSION, savedCurrentUser.id);
@@ -639,10 +640,18 @@ class LogisticsStore {
       if (match) {
         this.currentUser = { ...match };
         this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
+        try {
+          if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(STORAGE_KEYS.AUTH_SESSION, this.currentUser.id);
+          if (typeof localStorage !== 'undefined') localStorage.setItem(STORAGE_KEYS.AUTH_SESSION, this.currentUser.id);
+        } catch {}
       } else if (this.currentUser.status === 'approved') {
         this.users = [this.currentUser, ...this.users];
         this.saveToStorage(STORAGE_KEYS.USERS, this.users);
         this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
+        try {
+          if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(STORAGE_KEYS.AUTH_SESSION, this.currentUser.id);
+          if (typeof localStorage !== 'undefined') localStorage.setItem(STORAGE_KEYS.AUTH_SESSION, this.currentUser.id);
+        } catch {}
       } else {
         this.currentUser = { ...GUEST_USER_PROFILE };
         try {
@@ -850,13 +859,22 @@ class LogisticsStore {
     });
     this.saveToStorage(STORAGE_KEYS.USERS, this.users);
 
-    if (this.currentUser) {
-      const matchedUser = this.users.find(u => u.id === this.currentUser.id || u.role === this.currentUser.role);
+    if (this.currentUser && this.currentUser.id !== 'guest') {
+      const currEmail = (this.currentUser.email || '').trim().toLowerCase();
+      const matchedUser = this.users.find(
+        u =>
+          u.id === this.currentUser.id ||
+          (currEmail && (u.email || '').trim().toLowerCase() === currEmail)
+      );
       if (matchedUser) {
         this.currentUser = {
           ...matchedUser
         };
         this.saveToStorage(STORAGE_KEYS.CURRENT_USER, this.currentUser);
+        try {
+          if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(STORAGE_KEYS.AUTH_SESSION, this.currentUser.id);
+          if (typeof localStorage !== 'undefined') localStorage.setItem(STORAGE_KEYS.AUTH_SESSION, this.currentUser.id);
+        } catch {}
       } else if (!this.currentUser.permissions) {
         this.currentUser = {
           ...this.currentUser,
@@ -1566,7 +1584,22 @@ class LogisticsStore {
     }
   }
 
+  private cachedFleets: Fleet[] | null = null;
+  private cachedCrews: Crew[] | null = null;
+  private cachedStores: RetailStore[] | null = null;
+  private cachedSchedules: Schedule[] | null = null;
+  private hydratePromise: Promise<boolean> | null = null;
+  private lastHydrateAt = 0;
+
+  private invalidateReadCaches() {
+    this.cachedFleets = null;
+    this.cachedCrews = null;
+    this.cachedStores = null;
+    this.cachedSchedules = null;
+  }
+
   private saveToStorage(key: string, data: any) {
+    this.invalidateReadCaches();
     try {
       let sanitizedData = data;
       if (Array.isArray(data)) {
@@ -1620,6 +1653,7 @@ class LogisticsStore {
   }
 
   private notify() {
+    this.invalidateReadCaches();
     queueMicrotask(() => {
       this.listeners.forEach(l => {
         try {
@@ -1796,7 +1830,11 @@ class LogisticsStore {
   }
 
   public getFleets(): Fleet[] {
-    return this.fleets.map(f => this.enrichFleetItem(f));
+    if (this.cachedFleets !== null) {
+      return this.cachedFleets;
+    }
+    this.cachedFleets = this.fleets.map(f => this.enrichFleetItem(f));
+    return this.cachedFleets;
   }
 
   public setFleets(fleets: Fleet[]): void {
@@ -1871,6 +1909,8 @@ class LogisticsStore {
   public syncUsersWithCrews(): Crew[] {
     const syncedCrews = this.computeSyncedCrews();
     this.crews = syncedCrews;
+    this.cachedCrews = syncedCrews;
+    this.cachedSchedules = null;
     try {
       safeSetItem(STORAGE_KEYS.CREWS, JSON.stringify(this.crews));
     } catch {}
@@ -1878,7 +1918,11 @@ class LogisticsStore {
   }
 
   public getCrews(): Crew[] {
-    return this.computeSyncedCrews();
+    if (this.cachedCrews !== null) {
+      return this.cachedCrews;
+    }
+    this.cachedCrews = this.computeSyncedCrews();
+    return this.cachedCrews;
   }
 
   public getDriverCrews(): Crew[] {
@@ -1962,13 +2006,48 @@ class LogisticsStore {
   }
 
   public getStores(): RetailStore[] {
-    return this.stores.filter(s => !isAreaRouteItem(s));
+    if (this.cachedStores !== null) {
+      return this.cachedStores;
+    }
+    this.cachedStores = this.stores.filter(s => !isAreaRouteItem(s));
+    return this.cachedStores;
   }
 
   public getSchedules(): Schedule[] {
-    return this.schedules.map(sch => {
+    if (this.cachedSchedules !== null) {
+      return this.cachedSchedules;
+    }
+    const crewById = new Map<string, Crew>();
+    const crewByName = new Map<string, Crew>();
+    for (const c of this.crews) {
+      if (c.id) crewById.set(c.id, c);
+      if (c.name) crewByName.set(c.name.trim().toLowerCase(), c);
+    }
+
+    const normPlate = (p?: string) => (p || '').replace(/\s+/g, '').toUpperCase();
+    const fleetById = new Map<string, Fleet>();
+    const fleetByPlate = new Map<string, Fleet>();
+    for (const f of this.fleets) {
+      if (f.id) fleetById.set(f.id, f);
+      if (f.plateNumber) fleetByPlate.set(normPlate(f.plateNumber), f);
+    }
+
+    const findMatchingCrew = (id?: string, refCrew?: Crew): Crew | undefined => {
+      if (id) {
+        const byId = crewById.get(id);
+        if (byId) return byId;
+      }
+      if (refCrew?.name) {
+        const byName = crewByName.get(refCrew.name.trim().toLowerCase());
+        if (byName) return byName;
+      }
+      return refCrew;
+    };
+
+    this.cachedSchedules = this.schedules.map(sch => {
       const areaName = resolveScheduleAreaName(sch);
-      const isBali = sch.isInterIsland || areaName.toUpperCase().includes('BALI') || areaName.toUpperCase().includes('DENPASAR') || areaName.toUpperCase().includes('SINGARAJA') || areaName.toUpperCase().includes('NEGARA');
+      const upperArea = areaName.toUpperCase();
+      const isBali = sch.isInterIsland || upperArea.includes('BALI') || upperArea.includes('DENPASAR') || upperArea.includes('SINGARAJA') || upperArea.includes('NEGARA');
 
       const areaStore: RetailStore = {
         id: sch.storeId && !sch.storeId.startsWith('str-fix-') ? sch.storeId : `area-${areaName.toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
@@ -1976,7 +2055,7 @@ class LogisticsStore {
         storeName: areaName, // ALWAYS NAMA AREA KIRIM
         island: isBali ? 'Bali & Nusa Tenggara' : 'Jawa',
         province: isBali ? 'Bali' : 'Jawa Timur',
-        city: isBali ? 'Denpasar' : (areaName.toUpperCase().includes('JEMBER') ? 'Jember' : (areaName.toUpperCase().includes('SITUBONDO') ? 'Situbondo' : (areaName.toUpperCase().includes('BONDOWOSO') ? 'Bondowoso' : 'Banyuwangi'))),
+        city: isBali ? 'Denpasar' : (upperArea.includes('JEMBER') ? 'Jember' : (upperArea.includes('SITUBONDO') ? 'Situbondo' : (upperArea.includes('BONDOWOSO') ? 'Bondowoso' : 'Banyuwangi'))),
         address: `Area Pengiriman Distribusi ${areaName}`,
         latitude: isBali ? -8.6705 : -8.219,
         longitude: isBali ? 115.2126 : 114.369,
@@ -1986,24 +2065,9 @@ class LogisticsStore {
         storeCategory: 'Distribution Hub'
       };
 
-      const findMatchingCrew = (id?: string, refCrew?: Crew): Crew | undefined => {
-        if (id) {
-          const byId = this.crews.find(c => c.id === id);
-          if (byId) return byId;
-        }
-        if (refCrew?.name) {
-          const byName = this.crews.find(c => c.name.trim().toLowerCase() === refCrew.name.trim().toLowerCase());
-          if (byName) return byName;
-        }
-        return refCrew;
-      };
-
-      const normPlate = (p?: string) => (p || '').replace(/\s+/g, '').toUpperCase();
       const matchedFleet =
-        this.fleets.find(f => f.id === sch.fleetId) ||
-        (sch.fleet?.plateNumber
-          ? this.fleets.find(f => normPlate(f.plateNumber) === normPlate(sch.fleet?.plateNumber))
-          : undefined) ||
+        (sch.fleetId ? fleetById.get(sch.fleetId) : undefined) ||
+        (sch.fleet?.plateNumber ? fleetByPlate.get(normPlate(sch.fleet.plateNumber)) : undefined) ||
         sch.fleet;
 
       return {
@@ -2016,6 +2080,7 @@ class LogisticsStore {
         crewHelper2: (sch.crewHelper2Id || sch.crewHelper2) ? findMatchingCrew(sch.crewHelper2Id, sch.crewHelper2) : undefined
       };
     });
+    return this.cachedSchedules;
   }
 
   public getDevices(): TracksolidDevice[] {
@@ -2042,12 +2107,15 @@ class LogisticsStore {
     if (!this.currentUser || this.currentUser.id === 'guest' || this.currentUser.status !== 'approved') {
       return false;
     }
-    const sessionUserId =
-      (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STORAGE_KEYS.AUTH_SESSION) : null) ||
-      (typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.AUTH_SESSION) : null);
-    if (sessionUserId) {
-      return Boolean(sessionUserId === this.currentUser.id);
-    }
+    try {
+      const sessionUserId =
+        (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STORAGE_KEYS.AUTH_SESSION) : null) ||
+        (typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.AUTH_SESSION) : null);
+      if (sessionUserId !== this.currentUser.id) {
+        if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(STORAGE_KEYS.AUTH_SESSION, this.currentUser.id);
+        if (typeof localStorage !== 'undefined') localStorage.setItem(STORAGE_KEYS.AUTH_SESSION, this.currentUser.id);
+      }
+    } catch {}
     return true;
   }
 
@@ -2973,6 +3041,13 @@ class LogisticsStore {
         return null;
       }
 
+      if (payload?.sessionToken) {
+        try {
+          if (typeof localStorage !== 'undefined') localStorage.setItem(STORAGE_KEYS.SESSION_TOKEN, String(payload.sessionToken));
+          if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(STORAGE_KEYS.SESSION_TOKEN, String(payload.sessionToken));
+        } catch {}
+      }
+
       const remoteEmail = String(remote.email || '').trim().toLowerCase();
       const existing = this.users.find(u =>
         u.id === remote.id ||
@@ -3022,71 +3097,99 @@ class LogisticsStore {
     }
   }
 
-  public async hydrateOperationalDataFromHostinger(): Promise<boolean> {
-    try {
-      const [fleetRes, crewRes, storeRes, scheduleRes] = await Promise.all([
-        fetch('/api/fleets', { credentials: 'same-origin' }),
-        fetch('/api/crews', { credentials: 'same-origin' }),
-        fetch('/api/stores', { credentials: 'same-origin' }),
-        fetch('/api/schedules/persisted', { credentials: 'same-origin' })
-      ]);
-
-      const [fleetPayload, crewPayload, storePayload, schedulePayload] = await Promise.all([
-        fleetRes.ok ? fleetRes.json().catch(() => ({})) : Promise.resolve({}),
-        crewRes.ok ? crewRes.json().catch(() => ({})) : Promise.resolve({}),
-        storeRes.ok ? storeRes.json().catch(() => ({})) : Promise.resolve({}),
-        scheduleRes.ok ? scheduleRes.json().catch(() => ({})) : Promise.resolve({})
-      ]);
-
-      if (fleetRes.ok && Array.isArray(fleetPayload?.data) && (fleetPayload.source === 'hostinger_mysql' || fleetPayload.data.length > 0)) {
-        this.fleets = fleetPayload.data.map((f: Fleet) => this.enrichFleetItem(f));
-        this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
-      }
-      if (crewRes.ok && Array.isArray(crewPayload?.data) && (crewPayload.source === 'hostinger_mysql' || crewPayload.data.length > 0)) {
-        this.crews = crewPayload.data;
-        this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
-      }
-      if (storeRes.ok && Array.isArray(storePayload?.data) && (storePayload.source === 'hostinger_mysql' || storePayload.data.length > 0)) {
-        this.stores = storePayload.data.filter((item: RetailStore) => !isAreaRouteItem(item));
-        this.saveToStorage(STORAGE_KEYS.STORES, this.stores);
-      }
-      if (scheduleRes.ok && (schedulePayload?.source === 'hostinger_mysql' || schedulePayload?.exists)) {
-        this.schedules = Array.isArray(schedulePayload?.schedules) ? schedulePayload.schedules : [];
-        this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
-      }
-
-      this.syncUsersWithCrews();
-      this.notify();
-      return fleetRes.ok || crewRes.ok || storeRes.ok || scheduleRes.ok;
-    } catch (err) {
-      console.warn('[Hostinger MySQL] Gagal hydrate data operasional:', err);
-      return false;
+  public async hydrateOperationalDataFromHostinger(force: boolean = false): Promise<boolean> {
+    if (this.hydratePromise) {
+      return this.hydratePromise;
     }
+    const nowMs = Date.now();
+    if (!force && nowMs - this.lastHydrateAt < 5000) {
+      return true;
+    }
+    this.lastHydrateAt = nowMs;
+    this.hydratePromise = (async () => {
+      try {
+        const [fleetRes, crewRes, storeRes, scheduleRes] = await Promise.all([
+          fetch('/api/fleets', { credentials: 'same-origin' }),
+          fetch('/api/crews', { credentials: 'same-origin' }),
+          fetch('/api/stores', { credentials: 'same-origin' }),
+          fetch('/api/schedules/persisted', { credentials: 'same-origin' })
+        ]);
+
+        const [fleetPayload, crewPayload, storePayload, schedulePayload] = await Promise.all([
+          fleetRes.ok ? fleetRes.json().catch(() => ({})) : Promise.resolve({}),
+          crewRes.ok ? crewRes.json().catch(() => ({})) : Promise.resolve({}),
+          storeRes.ok ? storeRes.json().catch(() => ({})) : Promise.resolve({}),
+          scheduleRes.ok ? scheduleRes.json().catch(() => ({})) : Promise.resolve({})
+        ]);
+
+        if (fleetRes.ok && Array.isArray(fleetPayload?.data) && (fleetPayload.source === 'hostinger_mysql' || fleetPayload.data.length > 0)) {
+          this.fleets = fleetPayload.data.map((f: Fleet) => this.enrichFleetItem(f));
+          this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
+        }
+        if (crewRes.ok && Array.isArray(crewPayload?.data) && (crewPayload.source === 'hostinger_mysql' || crewPayload.data.length > 0)) {
+          this.crews = crewPayload.data;
+          this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
+        }
+        if (storeRes.ok && Array.isArray(storePayload?.data) && (storePayload.source === 'hostinger_mysql' || storePayload.data.length > 0)) {
+          this.stores = storePayload.data.filter((item: RetailStore) => !isAreaRouteItem(item));
+          this.saveToStorage(STORAGE_KEYS.STORES, this.stores);
+        }
+        if (scheduleRes.ok && (schedulePayload?.source === 'hostinger_mysql' || schedulePayload?.exists)) {
+          this.schedules = Array.isArray(schedulePayload?.schedules) ? schedulePayload.schedules : [];
+          this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
+        }
+
+        this.syncUsersWithCrews();
+        this.notify();
+        return fleetRes.ok || crewRes.ok || storeRes.ok || scheduleRes.ok;
+      } catch (err) {
+        console.warn('[Hostinger MySQL] Gagal hydrate data operasional:', err);
+        return false;
+      } finally {
+        this.hydratePromise = null;
+      }
+    })();
+    return this.hydratePromise;
+  }
+
+  private resolveLocalCandidateUser(): UserProfile | null {
+    const savedSessionUserId =
+      (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STORAGE_KEYS.AUTH_SESSION) : null) ||
+      (typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.AUTH_SESSION) : null);
+    const savedCurrentUser = this.loadFromStorage<UserProfile | null>(STORAGE_KEYS.CURRENT_USER, null);
+    return (
+      (this.currentUser && this.currentUser.id !== 'guest' && this.currentUser.status === 'approved' ? this.currentUser : null) ||
+      (savedSessionUserId ? this.users.find(u => u.id === savedSessionUserId && u.status === 'approved') || null : null) ||
+      (savedCurrentUser && savedCurrentUser.id !== 'guest' && savedCurrentUser.status === 'approved' ? savedCurrentUser : null)
+    );
   }
 
   public async restoreServerSession(): Promise<boolean> {
     try {
+      const savedToken =
+        (typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.SESSION_TOKEN) : null) ||
+        (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STORAGE_KEYS.SESSION_TOKEN) : null) ||
+        '';
+      const reqHeaders: Record<string, string> = { 'Accept': 'application/json' };
+      if (savedToken) {
+        reqHeaders['Authorization'] = `Bearer ${savedToken}`;
+        reqHeaders['x-akk-session-token'] = savedToken;
+      }
+
       const response = await fetch('/api/auth/me', {
         method: 'GET',
         credentials: 'same-origin',
-        headers: { 'Accept': 'application/json' }
+        headers: reqHeaders
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload?.user?.id) {
-        if (this.isPreviewEnvironment()) {
-          const savedSessionUserId =
-            (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(STORAGE_KEYS.AUTH_SESSION) : null) ||
-            (typeof localStorage !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.AUTH_SESSION) : null);
-          const savedCurrentUser = this.loadFromStorage<UserProfile | null>(STORAGE_KEYS.CURRENT_USER, null);
-          const candidateUser =
-            (this.currentUser && this.currentUser.id !== 'guest' && this.currentUser.status === 'approved' ? this.currentUser : null) ||
-            (savedSessionUserId ? this.users.find(u => u.id === savedSessionUserId && u.status === 'approved') : null) ||
-            (savedCurrentUser && savedCurrentUser.id !== 'guest' && savedCurrentUser.status === 'approved' ? savedCurrentUser : null);
-
-          if (candidateUser) {
-            this.setCurrentUser({ ...candidateUser, password: undefined });
-            return true;
-          }
+        // Jaga agar sesi perangkat lapangan (Android WebView / Mobile Browser) TIDAK keluar sendiri
+        // apabila terjadi pergantian jaringan (Wi-Fi ke Data Seluler), drop cookie WebView saat buka kamera, atau server sibuk.
+        const candidateUser = this.resolveLocalCandidateUser();
+        if (candidateUser) {
+          this.setCurrentUser({ ...candidateUser, password: undefined });
+          void this.hydrateOperationalDataFromHostinger();
+          return true;
         }
 
         this.currentUser = { ...GUEST_USER_PROFILE };
@@ -3097,6 +3200,13 @@ class LogisticsStore {
         } catch {}
         this.notify();
         return false;
+      }
+
+      if (payload?.sessionToken) {
+        try {
+          if (typeof localStorage !== 'undefined') localStorage.setItem(STORAGE_KEYS.SESSION_TOKEN, String(payload.sessionToken));
+          if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(STORAGE_KEYS.SESSION_TOKEN, String(payload.sessionToken));
+        } catch {}
       }
 
       const remote = payload.user;
@@ -3142,8 +3252,9 @@ class LogisticsStore {
       if (user.role === 'super_admin') void this.refreshUsersFromHostinger();
       return true;
     } catch (err) {
-      if (this.isPreviewEnvironment() && this.currentUser && this.currentUser.id !== 'guest' && this.currentUser.status === 'approved') {
-        this.setCurrentUser(this.currentUser);
+      const candidateUser = this.resolveLocalCandidateUser();
+      if (candidateUser) {
+        this.setCurrentUser({ ...candidateUser, password: undefined });
         return true;
       }
       console.warn('[Hostinger Auth] Restore session gagal:', err);
@@ -3235,8 +3346,10 @@ class LogisticsStore {
     try {
       if (typeof sessionStorage !== 'undefined') {
         sessionStorage.removeItem(STORAGE_KEYS.AUTH_SESSION);
+        sessionStorage.removeItem(STORAGE_KEYS.SESSION_TOKEN);
       }
       localStorage.removeItem(STORAGE_KEYS.AUTH_SESSION);
+      localStorage.removeItem(STORAGE_KEYS.SESSION_TOKEN);
       localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
       localStorage.removeItem('akk_driver_auth_session');
     } catch {}
