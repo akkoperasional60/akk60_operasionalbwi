@@ -4913,6 +4913,38 @@ class LogisticsStore {
     const latestBattery = getLatest('aki');
     const latestFilter = getLatest('filter');
 
+    const getLatestTireByPosition = (positionKeyword: string) => {
+      const kw = positionKeyword.toLowerCase();
+      const specificMatch = usages
+        .filter(u => {
+          if (u.category !== 'ban') return false;
+          const text = `${u.partName || ''} ${u.notes || ''}`.toLowerCase();
+          return text.includes(kw);
+        })
+        .sort((a, b) => new Date(b.replacementDate).getTime() - new Date(a.replacementDate).getTime())[0];
+      if (specificMatch) return specificMatch;
+
+      // Fallback: if a general tire usage exists without any position keyword, apply it
+      const generalMatch = usages
+        .filter(u => {
+          if (u.category !== 'ban') return false;
+          const text = `${u.partName || ''} ${u.notes || ''}`.toLowerCase();
+          return (
+            !text.includes('depan kanan') &&
+            !text.includes('depan kiri') &&
+            !text.includes('belakang kanan') &&
+            !text.includes('belakang kiri')
+          );
+        })
+        .sort((a, b) => new Date(b.replacementDate).getTime() - new Date(a.replacementDate).getTime())[0];
+      return generalMatch;
+    };
+
+    const latestTireFR = getLatestTireByPosition('depan kanan');
+    const latestTireFL = getLatestTireByPosition('depan kiri');
+    const latestTireRR = getLatestTireByPosition('belakang kanan');
+    const latestTireRL = getLatestTireByPosition('belakang kiri');
+
     const calculateStatus = (usage: SparePartUsage | undefined, defaultDays: number, defaultKm: number) => {
       if (!usage) {
         return {
@@ -4969,6 +5001,26 @@ class LogisticsStore {
       tire: {
         latest: latestTire,
         ...calculateStatus(latestTire, 365, 50000) // Ban: 1 tahun / 50.000 KM
+      },
+      tireFrontRight: {
+        positionLabel: 'Ban Armada Depan Kanan',
+        latest: latestTireFR,
+        ...calculateStatus(latestTireFR, 365, 50000)
+      },
+      tireFrontLeft: {
+        positionLabel: 'Ban Armada Depan Kiri',
+        latest: latestTireFL,
+        ...calculateStatus(latestTireFL, 365, 50000)
+      },
+      tireRearRight: {
+        positionLabel: 'Ban Armada Belakang Kanan',
+        latest: latestTireRR,
+        ...calculateStatus(latestTireRR, 365, 50000)
+      },
+      tireRearLeft: {
+        positionLabel: 'Ban Armada Belakang Kiri',
+        latest: latestTireRL,
+        ...calculateStatus(latestTireRL, 365, 50000)
       },
       battery: {
         latest: latestBattery,
