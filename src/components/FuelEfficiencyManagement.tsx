@@ -2842,8 +2842,9 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                     required
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500 cursor-pointer"
                   >
-                    <option value="SPBU Farly">SPBU Farly</option>
-                    <option value="SPBU Gajah Mada">SPBU Gajah Mada</option>
+                    <option value="SPBU Farly">Farly</option>
+                    <option value="SPBU Gajah Mada">Gajah Mada</option>
+                    <option value="SPBU Lain (Urgent)">SPBU Lain (Urgent)</option>
                   </select>
                 </div>
 

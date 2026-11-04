@@ -24,6 +24,13 @@ import {
 } from '../types';
 import { driverChecklistService } from '../services/driverChecklistService';
 import { useToast } from '../context/ToastContext';
+import {
+  ExifMetadataBadge,
+  ExifTimestampMetadata,
+  createExifMetadataFromDate,
+  extractExifFromFile,
+  drawExifMetadataOnCanvas
+} from '../utils/exifMetadata';
 
 interface DriverVehicleChecklistModalProps {
   isOpen: boolean;
@@ -90,6 +97,7 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
   );
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [photoUrl, setPhotoUrl] = useState<string | null>(initialChecklist?.photoEvidenceUrl || null);
+  const [photoExifMap, setPhotoExifMap] = useState<Record<string, ExifTimestampMetadata>>({});
   const cameraInputRef = React.useRef<HTMLInputElement>(null);
   const odometerRef = React.useRef<HTMLInputElement>(null);
 
@@ -170,7 +178,13 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
     }
   }, [isOpen, stopLiveCamera]);
 
-  const applyCapturedDataUrl = (dataUrl: string, target: 'evidence' | string) => {
+  const applyCapturedDataUrl = (
+    dataUrl: string,
+    target: 'evidence' | string,
+    exifMeta?: ExifTimestampMetadata
+  ) => {
+    const resolvedExif = exifMeta || createExifMetadataFromDate(new Date(), 'CAMERA_CAPTURE_SENSOR');
+    setPhotoExifMap(prev => ({ ...prev, [target]: resolvedExif }));
     if (target === 'evidence') {
       setPhotoUrl(dataUrl);
     } else {
@@ -189,6 +203,7 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
       });
       if (!photoUrl) {
         setPhotoUrl(dataUrl);
+        setPhotoExifMap(prev => ({ ...prev, evidence: resolvedExif }));
       }
     }
   };
@@ -213,6 +228,9 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
       ctx.setTransform(1, 0, 0, 1, 0, 0);
     }
 
+    const exifMeta = createExifMetadataFromDate(new Date(), 'CAMERA_CAPTURE_SENSOR');
+    drawExifMetadataOnCanvas(ctx, 1280, 720, exifMeta);
+
     const targetItem = cameraTarget !== 'evidence' ? checklist.items.find(i => i.id === cameraTarget) : null;
     const labelTitle = targetItem ? targetItem.name.toUpperCase() : 'INSPEKSI ARMADA / ODOMETER';
 
@@ -226,9 +244,13 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
     ctx.fillText(`${labelTitle}: ${plateNumber} (${vehicleType}) | DRIVER: ${driverName}`, 20, 655);
     ctx.fillStyle = '#f59e0b';
     ctx.font = 'bold 16px monospace';
-    ctx.fillText(`WAKTU: ${new Date().toLocaleString('id-ID')} WIB | STATUS: ${inspectionType === 'pre_trip' ? 'PRA-JALAN' : 'PASCA-JALAN'}`, 20, 690);
+    ctx.fillText(
+      `EXIF DateTimeOriginal: ${exifMeta.DateTimeOriginal}.${exifMeta.SubSecTimeOriginal} (${exifMeta.OffsetTimeOriginal}) | STATUS: ${inspectionType === 'pre_trip' ? 'PRA-JALAN' : 'PASCA-JALAN'}`,
+      20,
+      690
+    );
 
-    applyCapturedDataUrl(canvas.toDataURL('image/jpeg', 0.85), cameraTarget);
+    applyCapturedDataUrl(canvas.toDataURL('image/jpeg', 0.85), cameraTarget, exifMeta);
     stopLiveCamera();
   };
 
@@ -238,34 +260,41 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
     const activeTarget = cameraTarget;
     const targetItem = activeTarget !== 'evidence' ? checklist.items.find(i => i.id === activeTarget) : null;
     const labelTitle = targetItem ? targetItem.name.toUpperCase() : 'INSPEKSI ARMADA / ODOMETER';
-    const reader = new FileReader();
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = 1280;
-        canvas.height = 720;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-        ctx.drawImage(img, 0, 0, 1280, 720);
-        // Watermark
-        ctx.fillStyle = 'rgba(2, 6, 23, 0.85)';
-        ctx.fillRect(0, 620, 1280, 100);
-        ctx.fillStyle = '#06b6d4';
-        ctx.fillRect(0, 620, 1280, 3);
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 20px system-ui, sans-serif';
-        ctx.fillText(`${labelTitle}: ${plateNumber} (${vehicleType}) | DRIVER: ${driverName}`, 20, 655);
-        ctx.fillStyle = '#f59e0b';
-        ctx.font = 'bold 16px monospace';
-        ctx.fillText(`WAKTU: ${new Date().toLocaleString('id-ID')} WIB | STATUS: ${inspectionType === 'pre_trip' ? 'PRA-JALAN' : 'PASCA-JALAN'}`, 20, 690);
+    extractExifFromFile(file).then(exifMeta => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = 1280;
+          canvas.height = 720;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return;
+          ctx.drawImage(img, 0, 0, 1280, 720);
+          drawExifMetadataOnCanvas(ctx, 1280, 720, exifMeta);
+          // Watermark
+          ctx.fillStyle = 'rgba(2, 6, 23, 0.85)';
+          ctx.fillRect(0, 620, 1280, 100);
+          ctx.fillStyle = '#06b6d4';
+          ctx.fillRect(0, 620, 1280, 3);
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 20px system-ui, sans-serif';
+          ctx.fillText(`${labelTitle}: ${plateNumber} (${vehicleType}) | DRIVER: ${driverName}`, 20, 655);
+          ctx.fillStyle = '#f59e0b';
+          ctx.font = 'bold 16px monospace';
+          ctx.fillText(
+            `EXIF DateTimeOriginal: ${exifMeta.DateTimeOriginal}.${exifMeta.SubSecTimeOriginal} (${exifMeta.OffsetTimeOriginal}) | STATUS: ${inspectionType === 'pre_trip' ? 'PRA-JALAN' : 'PASCA-JALAN'}`,
+            20,
+            690
+          );
 
-        applyCapturedDataUrl(canvas.toDataURL('image/jpeg', 0.85), activeTarget);
-        stopLiveCamera();
+          applyCapturedDataUrl(canvas.toDataURL('image/jpeg', 0.85), activeTarget, exifMeta);
+          stopLiveCamera();
+        };
+        img.src = reader.result as string;
       };
-      img.src = reader.result as string;
-    };
-    reader.readAsDataURL(file);
+      reader.readAsDataURL(file);
+    });
     e.target.value = '';
   };
 
@@ -797,6 +826,9 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
                               Hapus
                             </button>
                           </div>
+                          <div className="p-2 bg-slate-950 border-t border-slate-800">
+                            <ExifMetadataBadge exif={photoExifMap[item.id]} compact />
+                          </div>
                         </div>
                       ) : (
                         <button
@@ -875,16 +907,19 @@ export const DriverVehicleChecklistModal: React.FC<DriverVehicleChecklistModalPr
             {isLiveCameraOpen && cameraTarget === 'evidence' ? (
               renderInlineCameraBox('evidence', 'Jepret Foto Armada / Odometer Sekarang')
             ) : photoUrl ? (
-              <div className="relative rounded-xl overflow-hidden border border-slate-700 bg-slate-950">
-                <img src={photoUrl} alt="Bukti Checklist" className="w-full max-h-48 object-cover" />
-                <button
-                  type="button"
-                  onClick={() => startLiveCamera('environment', 'evidence')}
-                  className="absolute bottom-2 right-2 px-2.5 py-1 rounded-lg bg-slate-900/90 text-amber-300 font-bold text-[10px] flex items-center gap-1 border border-amber-500/40 cursor-pointer hover:bg-slate-900"
-                >
-                  <Camera className="w-3 h-3" />
-                  <span>Foto Ulang (Kamera Langsung)</span>
-                </button>
+              <div className="space-y-2">
+                <div className="relative rounded-xl overflow-hidden border border-slate-700 bg-slate-950">
+                  <img src={photoUrl} alt="Bukti Checklist" className="w-full max-h-48 object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => startLiveCamera('environment', 'evidence')}
+                    className="absolute bottom-2 right-2 px-2.5 py-1 rounded-lg bg-slate-900/90 text-amber-300 font-bold text-[10px] flex items-center gap-1 border border-amber-500/40 cursor-pointer hover:bg-slate-900"
+                  >
+                    <Camera className="w-3 h-3" />
+                    <span>Foto Ulang (Kamera Langsung)</span>
+                  </button>
+                </div>
+                <ExifMetadataBadge exif={photoExifMap.evidence} />
               </div>
             ) : (
               <button

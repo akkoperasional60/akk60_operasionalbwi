@@ -1,16 +1,19 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useSalesAdminOptions } from './SalesHeaderFilter';
 import { AdminActivitiesTab } from './AdminActivitiesTab';
 import { AdminSchedulesTab } from './AdminSchedulesTab';
 import { LoadingDurationTab } from './LoadingDurationTab';
 import { SkillMatrixTab } from './SkillMatrixTab';
 import { JobdeskConfigTab } from './JobdeskConfigTab';
+import { SalesInvoiceSoTab, SalesRfidScannerAppTab } from './SalesLoadingRfidSystem';
 
 export type SalesAdminSubTab =
   | 'dashboard'
   | 'activities'
   | 'schedules'
   | 'loading_duration'
+  | 'invoice_so'
+  | 'rfid_scanner'
   | 'skill_matrix'
   | 'jobdesk';
 
@@ -24,6 +27,7 @@ export const SalesAdminHub: React.FC<SalesAdminHubProps> = ({
   onSelectSubTab
 }) => {
   const adminOptions = useSalesAdminOptions();
+  const [selectedRfidInvoiceId, setSelectedRfidInvoiceId] = useState<string | null>(null);
   const effectiveTab: SalesAdminSubTab = activeSubTab === 'dashboard' ? 'activities' : activeSubTab;
 
   return (
@@ -36,6 +40,20 @@ export const SalesAdminHub: React.FC<SalesAdminHubProps> = ({
       )}
       {effectiveTab === 'loading_duration' && (
         <LoadingDurationTab onNavigateSubTab={onSelectSubTab} adminOptions={adminOptions} />
+      )}
+      {effectiveTab === 'invoice_so' && (
+        <SalesInvoiceSoTab
+          onOpenRfidScannerForInvoice={(invoiceId) => {
+            setSelectedRfidInvoiceId(invoiceId);
+            onSelectSubTab('rfid_scanner');
+          }}
+        />
+      )}
+      {effectiveTab === 'rfid_scanner' && (
+        <SalesRfidScannerAppTab
+          initialInvoiceId={selectedRfidInvoiceId}
+          onNavigateToInvoiceInput={() => onSelectSubTab('invoice_so')}
+        />
       )}
       {effectiveTab === 'skill_matrix' && (
         <SkillMatrixTab adminOptions={adminOptions} />

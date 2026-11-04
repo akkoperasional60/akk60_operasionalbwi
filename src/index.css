@@ -571,16 +571,40 @@ html.light .bg-slate-950 {
   border-color: #e5eaf2 !important;
 }
 
-html.light .bg-slate-950\/90,
-html.light .bg-slate-950\/85,
-html.light .bg-slate-950\/80,
-html.light .bg-slate-950\/75,
-html.light .bg-slate-950\/70,
-html.light .bg-slate-950\/60,
-html.light .bg-slate-950\/50,
-html.light .bg-slate-950\/40 {
+html.light .bg-slate-950\/90:not(.fixed),
+html.light .bg-slate-950\/85:not(.fixed),
+html.light .bg-slate-950\/80:not(.fixed),
+html.light .bg-slate-950\/75:not(.fixed),
+html.light .bg-slate-950\/70:not(.fixed),
+html.light .bg-slate-950\/60:not(.fixed),
+html.light .bg-slate-950\/50:not(.fixed),
+html.light .bg-slate-950\/40:not(.fixed) {
   background-color: #f8fafc !important;
   border-color: #e5eaf2 !important;
+}
+
+/* Global Modal Overlay Fix: Ensure all fixed modals sit above sticky header (z-1050) & sidebar (z-1100)
+   and never clip their top content when viewport zoom is 80% - 150% */
+div.fixed.inset-0.z-50,
+div.fixed.inset-0.z-\[1300\] {
+  z-index: 1300 !important;
+  overflow-y: auto !important;
+  align-items: flex-start !important;
+  padding-top: 1rem !important;
+  padding-bottom: 1rem !important;
+}
+
+div.fixed.inset-0.z-50 > div,
+div.fixed.inset-0.z-\[1300\] > div {
+  margin-top: auto !important;
+  margin-bottom: auto !important;
+}
+
+html.light div.fixed.inset-0.bg-slate-950\/80,
+html.light div.fixed.inset-0.bg-slate-950\/85,
+html.light div.fixed.inset-0.bg-slate-950\/60,
+html.light div.fixed.inset-0.bg-slate-900\/60 {
+  background-color: rgba(15, 23, 42, 0.55) !important;
 }
 
 html.light .bg-slate-900 {
