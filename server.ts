@@ -3,7 +3,7 @@ import path from "path";
 import fs from "fs";
 import crypto from "crypto";
 import dotenv from "dotenv";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import * as XLSX from "xlsx";
 import { query as mysqlQuery, testConnection as testMysqlConnection, isDatabaseConfigured } from "./server/db";
 
@@ -12,7 +12,16 @@ dotenv.config();
 // Initialize Gemini Client if API key is present and not set to 'disabled'
 const rawGeminiKey = String(process.env.GEMINI_API_KEY || '').trim();
 const apiKey = rawGeminiKey && rawGeminiKey.toLowerCase() !== 'disabled' ? rawGeminiKey : '';
-const genAI = apiKey ? new GoogleGenAI({ apiKey }) : null;
+const genAI = apiKey
+  ? new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    })
+  : null;
 
 const BASE_SYSTEM_INSTRUCTION = `
 Anda adalah "Operasional AI Assistant" untuk PT Anugrah Kemasan Kreatif (PT AKK Logistics Banyuwangi DC).
@@ -85,7 +94,6 @@ async function generateChatReply(message: string, contextTab?: string, history?:
           contents,
           config: {
             systemInstruction: dynamicSystemInstruction,
-            temperature: 0.7,
           }
         });
 
@@ -1236,7 +1244,6 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
           model: 'gemini-3.8-flash',
           contents: [{ role: 'user', parts: [{ text: prompt }] }],
           config: {
-            temperature: 0.3,
             responseMimeType: 'application/json'
           }
         }),
@@ -2440,8 +2447,7 @@ Tugas Anda:
           model: 'gemini-3.8-flash',
           contents: { parts: [imagePart, textPart] },
           config: {
-            responseMimeType: 'application/json',
-            temperature: 0.1
+            responseMimeType: 'application/json'
           }
         });
 
@@ -2493,6 +2499,9 @@ Tugas Anda:
         image_base64,
         timestamp = new Date().toISOString(),
         target_item_code,
+        target_item_name,
+        reference_image_base64,
+        live_preview_only = false,
         qty_scanned = 1,
         expected_items = [],
         master_items = [],
@@ -2505,6 +2514,8 @@ Tugas Anda:
       if (!rawImagePayload) {
         return res.status(400).json({
           status: 'error',
+          is_valid_packaging: false,
+          is_matching_target: false,
           extracted_code: '-',
           product_name: 'Gambar Kosong',
           total_loaded: 0,
@@ -2517,12 +2528,26 @@ Tugas Anda:
       const normalizedExpected = Array.isArray(expected_items) ? expected_items : [];
       const normalizedMaster = Array.isArray(master_items) ? master_items : [];
 
-      let extractedCode = String(target_item_code || '').trim().toUpperCase();
+      const requestedTargetCode = String(target_item_code || '').trim().toUpperCase();
+      const matchedTargetExpected = normalizedExpected.find(
+        (it: any) => String(it.skuCode || it.code || it.noBarang || '').trim().toUpperCase() === requestedTargetCode
+      );
+      const requestedTargetName = String(
+        target_item_name ||
+          matchedTargetExpected?.itemName ||
+          matchedTargetExpected?.name ||
+          matchedTargetExpected?.keteranganBarang ||
+          ''
+      ).trim();
+
+      let extractedCode = requestedTargetCode;
       let extractedName = '';
       let ocrConfidence = 0.964;
       let ocrRawText = '';
       let yoloBbox = [142, 96, 980, 520];
       let cvPipelineSource = 'ultralytics_yolov8n_roi_ocr';
+      let isValidPackaging = true;
+      let isMatchingTarget = true;
 
       // 1A. Jika Python Ultralytics YOLO Microservice aktif (misal http://127.0.0.1:8001/cv/detect-ocr), panggil terlebih dahulu
       const yoloServiceUrl = String(process.env.YOLO_CV_SERVICE_URL || '').trim();
@@ -2564,6 +2589,8 @@ Tugas Anda:
       let visionRejectedReason = '';
 
       if (forceMismatch) {
+        isValidPackaging = true;
+        isMatchingTarget = false;
         extractedCode = String(req.body?.simulated_wrong_code || 'BRG-SALAH-999').toUpperCase();
         extractedName = String(req.body?.simulated_wrong_name || 'Kemasan Barang Berbeda / Tidak Sesuai Database Barang');
         visionRejectedReason = `Barang yang terfoto [${extractedCode}] (${extractedName}) TIDAK SESUAI dengan target barang pada Database Barang & Faktur!`;
@@ -2579,9 +2606,11 @@ Tugas Anda:
             .join('\n');
 
           const ocrPrompt = `Anda adalah sistem AI Vision Verifikasi Ketat Gudang & Muat Armada PT Anugrah Kemasan Kreatif (WMS Scanner) yang terintegrasi langsung dengan Database Barang.
-Tugas Anda: Periksa apakah objek di dalam foto kamera benar-benar kemasan barang / karton box / label produk yang sesuai dengan target barang di Database Barang dan Faktur aktif.
+Tugas Anda: Periksa apakah objek di dalam foto kamera benar-benar kemasan barang / karton box / label produk yang SESUAI dengan Target Barang Aktif di Faktur & Database Barang.
+
 Surat Jalan / Faktur Aktif: ${surat_jalan_id} (${resolvedGate})
-Target Kode Barang yang sedang harus difoto: ${extractedCode || 'AUTO'}
+Target Kode Barang Aktif: ${requestedTargetCode || 'AUTO'}
+Target Nama / Spesifikasi Barang Aktif: ${requestedTargetName || 'Sesuai Daftar Faktur'}
 
 Daftar Barang pada Faktur Aktif:
 ${catalogContext || '-'}
@@ -2589,14 +2618,34 @@ ${catalogContext || '-'}
 Contoh Katalog Database Barang Gudang:
 ${dbBarangContext || '-'}
 
-Instruksi Verifikasi Ketat:
-1. Periksa objek pada foto secara jujur. Jika foto menampilkan objek BUKAN kemasan barang gudang (misalnya keyboard komputer, layar monitor, meja, tangan kosong, lantai, dinding, wajah, atau benda acak lainnya), WAJIB set "is_valid_packaging": false, "is_matching_target": false, "extracted_code": "BUKAN-KEMASAN", dan jelaskan objek apa yang terlihat pada "product_name" serta "mismatch_reason".
-2. Jika foto menampilkan kemasan/label barang, baca kode barang/SKU atau nama deskripsi barangnya. Jika berbeda dengan Target Kode Barang (${extractedCode || 'AUTO'}) atau tidak sesuai dengan daftar Faktur & Database Barang, WAJIB set "is_matching_target": false dan isi "extracted_code" dengan kode yang terbaca (atau "BARANG-BERBEDA") beserta alasan di "mismatch_reason".
-3. Hanya set "is_valid_packaging": true dan "is_matching_target": true jika foto benar-benar menunjukkan kemasan/produk/label yang sesuai dengan barang di Database Barang & Faktur.
+ATURAN VERIFIKASI SANGAT KETAT:
+1. CEK APAKAH ADA KEMASAN BARANG: Periksa foto secara jujur. Jika kamera mengarah ke lantai, ubin, sepatu, kaki, dinding, meja kosong, layar monitor, tangan kosong, atau gambar blur tanpa kardus/kemasan barang yang jelas, WAJIB set:
+   - "is_valid_packaging": false
+   - "is_matching_target": false
+   - "confidence": 0
+   - "extracted_code": "BUKAN-BARANG"
+   - "product_name": "Kamera Tidak Mengarah ke Barang"
+   - "mismatch_reason": "Kamera mengarah ke lantai/objek lain, bukan kemasan barang."
+
+2. CEK UKURAN (OZ / ML / DIMENSI) & TANDA LINGKARAN SPIDOL/BOLPOIN PADA KARDUS:
+   - Pada kardus cup plastik / kemasan (misal Jaguar / Olala), perhatikan baris "SIZE" (contoh: "8,5 OZ / 10 OZ / 12 OZ / 14 OZ / 16 OZ" atau "18 OZ").
+   - Perhatikan angka ukuran mana yang DILINGKARI bolpoin/spidol pada kardus (misalnya angka "10" atau "10 OZ" yang dilingkari!), serta baris "QUANTITY" (misal "2000 PCS" = 40SLP/CRT @50, sedangkan "1000 PCS" = 20SLP/CRT @50).
+   - Bandingkan ukuran yang tertulis/dilingkari pada kardus dengan Target Nama Barang Aktif ("${requestedTargetName}").
+   - CONTOH KRITIS: Jika pada kardus tertulis atau dilingkari ukuran "10 OZ" (atau QUANTITY 2000 PCS), sedangkan Target Barang Aktif adalah "18 OZ" (misal "[7GPJA181] CUP PLST JAGUAR 18 OZ 7GR @50 (20SLP/CRT)"), maka ukuran tersebut TIDAK SESUAI (10 OZ != 18 OZ)!
+   - Jika ukuran OZ / dimensi / jenis produk pada kardus berbeda dengan Target Barang Aktif, WAJIB set:
+     - "is_valid_packaging": true
+     - "is_matching_target": false
+     - "extracted_code": kode barang yang sesuai dengan kardus di foto (misal "7GPJA001" untuk 10 OZ) atau "UKURAN-BERBEDA"
+     - "product_name": nama & ukuran kardus yang terlihat di foto (misal "Kardus Cup 10 OZ (2000 PCS)")
+     - "mismatch_reason": jelaskan perbedaan ukurannya secara spesifik (contoh: "Kardus di kamera ukuran 10 OZ (2000 PCS), TIDAK SESUAI dengan Target [7GPJA181] ukuran 18 OZ!")
+
+3. HANYA set "is_valid_packaging": true dan "is_matching_target": true jika kardus/kemasan terlihat jelas DAN ukuran/spesifikasinya benar-benar cocok dengan Target Barang Aktif ("${requestedTargetCode} - ${requestedTargetName}").
+
 Kembalikan HANYA JSON valid:
 {
   "extracted_code": "string",
   "product_name": "string",
+  "detected_size_oz": "string",
   "detected_qty": number,
   "raw_text": "string",
   "confidence": number,
@@ -2606,40 +2655,82 @@ Kembalikan HANYA JSON valid:
   "mismatch_reason": "string"
 }`;
 
+          const contentParts: any[] = [
+            {
+              inlineData: {
+                mimeType: 'image/jpeg',
+                data: cleanBase64
+              }
+            }
+          ];
+
+          if (reference_image_base64 && typeof reference_image_base64 === 'string' && reference_image_base64.startsWith('data:image/jpeg')) {
+            const cleanRef = reference_image_base64.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '');
+            if (cleanRef.length > 100) {
+              contentParts.push({
+                inlineData: {
+                  mimeType: 'image/jpeg',
+                  data: cleanRef
+                }
+              });
+            }
+          }
+
+          contentParts.push({ text: ocrPrompt });
+
           const aiResp = await genAI.models.generateContent({
             model: 'gemini-3.8-flash',
-            contents: {
-              parts: [
-                {
-                  inlineData: {
-                    mimeType: 'image/jpeg',
-                    data: cleanBase64
-                  }
-                },
-                { text: ocrPrompt }
-              ]
-            },
+            contents: { parts: contentParts },
             config: {
               responseMimeType: 'application/json',
-              temperature: 0.1
+              thinkingConfig: { thinkingLevel: ThinkingLevel.LOW }
             }
           });
 
           const rawJsonText = (aiResp.text || '').replace(/```json/g, '').replace(/```/g, '').trim();
           if (rawJsonText) {
             const parsedOcr = JSON.parse(rawJsonText);
-            ocrConfidence = Number(parsedOcr?.confidence || 0.962);
+            ocrConfidence = typeof parsedOcr?.confidence === 'number' ? parsedOcr.confidence : 0.962;
             ocrRawText = String(parsedOcr?.raw_text || '');
+            isValidPackaging = parsedOcr?.is_valid_packaging !== false;
+            isMatchingTarget = parsedOcr?.is_matching_target !== false;
+            const detectedSizeOz = String(parsedOcr?.detected_size_oz || '').trim().toUpperCase();
+
             if (Array.isArray(parsedOcr?.bbox) && parsedOcr.bbox.length === 4) {
               yoloBbox = parsedOcr.bbox;
             }
-            if (parsedOcr?.is_valid_packaging === false || parsedOcr?.is_matching_target === false) {
-              extractedCode = String(parsedOcr?.extracted_code || 'OBJEK-TIDAK-SESUAI').trim().toUpperCase();
-              extractedName = String(parsedOcr?.product_name || 'Objek / Barang Tidak Sesuai Database Barang').trim();
-              visionRejectedReason = String(
-                parsedOcr?.mismatch_reason ||
-                  `Objek terfoto (${extractedName}) tidak sesuai dengan Database Barang & Faktur [${target_item_code || 'Target'}]!`
-              );
+
+            // Deterministic cross-check on OZ size between target_item_name and detected size/text
+            const targetOzMatch = requestedTargetName.match(/\b(8[.,]5|10|12|14|16|18|22)\s*OZ\b/i);
+            const detectedOzFromNameOrField =
+              detectedSizeOz.match(/\b(8[.,]5|10|12|14|16|18|22)\s*(?:OZ)?\b/i) ||
+              String(parsedOcr?.product_name || '').match(/\b(8[.,]5|10|12|14|16|18|22)\s*OZ\b/i);
+
+            if (
+              targetOzMatch &&
+              detectedOzFromNameOrField &&
+              targetOzMatch[1].replace(',', '.') !== detectedOzFromNameOrField[1].replace(',', '.')
+            ) {
+              isMatchingTarget = false;
+              const targetOzStr = `${targetOzMatch[1]} OZ`;
+              const detOzStr = `${detectedOzFromNameOrField[1]} OZ`;
+              visionRejectedReason = `Ukuran pada kardus (${detOzStr}) TIDAK SESUAI dengan Target Master Barang [${requestedTargetCode}] (${targetOzStr})!`;
+            }
+
+            if (!isValidPackaging || !isMatchingTarget) {
+              extractedCode = String(parsedOcr?.extracted_code || 'TIDAK-SESUAI').trim().toUpperCase();
+              extractedName = String(parsedOcr?.product_name || 'Barang Tidak Sesuai Target').trim();
+              if (!visionRejectedReason) {
+                visionRejectedReason = String(
+                  parsedOcr?.mismatch_reason ||
+                    (!isValidPackaging
+                      ? 'Kamera tidak mengarah ke kemasan barang. Arahkan kamera ke label kardus/barang.'
+                      : `Barang di kamera (${extractedName}) tidak sesuai dengan Target [${requestedTargetCode}] ${requestedTargetName}!`)
+                );
+              }
+              if (!isValidPackaging) {
+                ocrConfidence = 0;
+              }
             } else {
               if (parsedOcr?.extracted_code && String(parsedOcr.extracted_code).trim() !== '') {
                 extractedCode = String(parsedOcr.extracted_code).trim().toUpperCase();
@@ -2647,11 +2738,39 @@ Kembalikan HANYA JSON valid:
               if (parsedOcr?.product_name) {
                 extractedName = String(parsedOcr.product_name).trim();
               }
+              // If user selected a specific target item code, verify extractedCode doesn't conflict with another SKU on the invoice
+              if (
+                requestedTargetCode &&
+                requestedTargetCode !== 'AUTO' &&
+                extractedCode &&
+                extractedCode !== 'AUTO' &&
+                extractedCode !== requestedTargetCode
+              ) {
+                isMatchingTarget = false;
+                visionRejectedReason = `Terdeteksi barang [${extractedCode}] (${extractedName}), TIDAK SESUAI dengan target aktif [${requestedTargetCode}] ${requestedTargetName}!`;
+              }
             }
           }
         } catch (ocrErr: any) {
           console.warn('[WMS Scan Muat] AI Vision OCR fallback ke target code:', ocrErr?.message || ocrErr);
         }
+      }
+
+      // Jika hanya pengecekan live preview kamera (tanpa menyimpan ke database / menambah qty muat)
+      if (live_preview_only) {
+        const isOk = isValidPackaging && isMatchingTarget && !visionRejectedReason;
+        return res.json({
+          status: isOk ? 'success' : 'error',
+          is_valid_packaging: isValidPackaging,
+          is_matching_target: isOk,
+          extracted_code: extractedCode || requestedTargetCode || '-',
+          product_name: extractedName || requestedTargetName || '-',
+          confidence: isOk ? Number(ocrConfidence.toFixed(3)) : isValidPackaging ? Number(ocrConfidence.toFixed(3)) : 0,
+          raw_text: ocrRawText,
+          message: isOk
+            ? `BARANG SESUAI: [${ requestedTargetCode || extractedCode }] ${ requestedTargetName || extractedName }`
+            : visionRejectedReason || 'Barang tidak sesuai dengan target aktif.'
+        });
       }
 
       // 2. Pencocokan dengan item pada Surat Jalan / Faktur (DO/SO) aktif & Database Barang
@@ -2666,6 +2785,20 @@ Kembalikan HANYA JSON valid:
             if (extractedName && name && (name.includes(extractedName.toLowerCase()) || extractedName.toLowerCase().includes(name))) return true;
             return false;
           });
+
+      // Jika user sedang menargetkan item spesifik (requestedTargetCode !== 'AUTO') namun matchedExpected berbeda item, tolak sebagai mismatch!
+      if (
+        !visionRejectedReason &&
+        matchedExpected &&
+        requestedTargetCode &&
+        requestedTargetCode !== 'AUTO'
+      ) {
+        const matchedCode = String(matchedExpected.skuCode || matchedExpected.code || matchedExpected.noBarang || '').trim().toUpperCase();
+        if (matchedCode !== requestedTargetCode) {
+          visionRejectedReason = `Barang di kamera adalah [${matchedCode}] ${matchedExpected.itemName || ''}, TIDAK SESUAI dengan target aktif [${requestedTargetCode}] ${requestedTargetName}!`;
+          matchedExpected = undefined;
+        }
+      }
 
       if (!visionRejectedReason && !matchedExpected && (!extractedCode || extractedCode === 'AUTO') && normalizedExpected.length > 0) {
         matchedExpected =
