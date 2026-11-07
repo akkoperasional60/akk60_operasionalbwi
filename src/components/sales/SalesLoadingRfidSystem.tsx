@@ -34,6 +34,7 @@ import {
   Boxes
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import * as ort from 'onnxruntime-web';
 import { logisticsStore } from '../../services/store';
 import { Fleet } from '../../types';
 import { OFFICIAL_DESTINATION_AREAS } from '../../utils/areaNormalizer';
@@ -2713,21 +2714,27 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
   const [masterSearchQuery, setMasterSearchQuery] = useState<string>('');
   const [isMasterSearchOpen, setIsMasterSearchOpen] = useState<boolean>(false);
 
-  // Ultralytics YOLO Real-Time Auto-Detection HUD States
+  // Ultralytics YOLO26 End-to-End ONNX (nms=True, 640x640) Real-Time Auto-Detection HUD States
   const [yoloConfidence, setYoloConfidence] = useState<number>(0);
-  const [yoloInferenceMs, setYoloInferenceMs] = useState<number>(14);
+  const [, setYoloInferenceMs] = useState<number>(14);
+  const [yoloEngineMode, setYoloEngineMode] = useState<'JALUR_A_WEB' | 'JALUR_B_SERVER'>('JALUR_A_WEB');
   const [liveVisionStatus, setLiveVisionStatus] = useState<{
     state: 'matching' | 'mismatch' | 'no_packaging' | 'checking';
     confidence: number;
     detectedCode?: string;
     detectedSummary?: string;
     reason?: string;
+    bbox?: [number, number, number, number];
   }>({
     state: 'no_packaging',
     confidence: 0,
     reason: 'Arahkan kamera ke label kemasan barang'
   });
   const isLiveCheckingRef = useRef<boolean>(false);
+  const ortSessionRef = useRef<ort.InferenceSession | null>(null);
+  const yoloClassesRef = useRef<string[]>([]);
+  const yoloCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const lastAutoVerifyCooldownUntilRef = useRef<number>(0);
 
   // 4 Dedicated Mobile Pages: 'kamera' (Kamera Satu Layar), 'list' (Urutan Pelanggan & List Barang), 'termuat_sisa' (Termuat & Sisa), 'riwayat' (Riwayat Scan)
   const [scannerPage, setScannerPage] = useState<'kamera' | 'list' | 'termuat_sisa' | 'riwayat'>('kamera');
@@ -3027,7 +3034,189 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     return { hasPackaging, edgeConfidence, previewBase64 };
   };
 
-  // Real-Time Visual & AI Vision Validation when Camera is Active
+  // SPESIFIKASI 2: JALUR A — Muat /models/best.onnx & /models/classes.json di Browser HP via onnxruntime-web
+  useEffect(() => {
+    let mounted = true;
+    const initLocalYolo26Onnx = async () => {
+      try {
+        const clsResp = await fetch('/models/classes.json', { cache: 'no-store' });
+        if (clsResp.ok) {
+          const parsed = await clsResp.json();
+          if (mounted) {
+            if (Array.isArray(parsed)) {
+              yoloClassesRef.current = parsed.map((c: unknown) => String(c || '').trim().toUpperCase());
+            } else if (parsed && typeof parsed === 'object') {
+              const obj = parsed as Record<string, unknown>;
+              if (Array.isArray(obj.classes)) {
+                yoloClassesRef.current = obj.classes.map((c: unknown) => String(c || '').trim().toUpperCase());
+              } else {
+                const keys = Object.keys(obj).sort((a, b) => Number(a) - Number(b));
+                yoloClassesRef.current = keys.map(k => String(obj[k] || '').trim().toUpperCase());
+              }
+            }
+          }
+        }
+      } catch {
+        // Fallback ke daftar SKU dari Database Barang jika classes.json belum ada
+      }
+
+      try {
+        let session: ort.InferenceSession | null = null;
+        try {
+          session = await ort.InferenceSession.create('/models/best.onnx', {
+            executionProviders: ['webgl', 'wasm']
+          });
+        } catch {
+          session = await ort.InferenceSession.create('/models/best.onnx', {
+            executionProviders: ['wasm']
+          });
+        }
+        if (mounted && session) {
+          ortSessionRef.current = session;
+          setYoloEngineMode('JALUR_A_WEB');
+        }
+      } catch {
+        if (mounted) {
+          ortSessionRef.current = null;
+          setYoloEngineMode('JALUR_B_SERVER');
+        }
+      }
+    };
+
+    void initLocalYolo26Onnx();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // Helper Jalur A: Inferensi lokal YOLO26 End-to-End ONNX (nms=True, 640x640, output [1, 300, 6] -> [x1, y1, x2, y2, score, class_id])
+  const runJalurALocalOnnxDetection = async (
+    confThreshold: number = 0.25
+  ): Promise<{
+    loaded: boolean;
+    inferenceMs: number;
+    best: {
+      x1: number;
+      y1: number;
+      x2: number;
+      y2: number;
+      score: number;
+      classId: number;
+      skuCode: string;
+      itemName: string;
+      unit: string;
+    } | null;
+  }> => {
+    const t0 = performance.now();
+    const session = ortSessionRef.current;
+    if (
+      !session ||
+      !videoRef.current ||
+      videoRef.current.videoWidth === 0 ||
+      videoRef.current.videoHeight === 0
+    ) {
+      return { loaded: Boolean(session), inferenceMs: 0, best: null };
+    }
+
+    try {
+      const INPUT_SIZE = 640;
+      if (!yoloCanvasRef.current) {
+        yoloCanvasRef.current = document.createElement('canvas');
+        yoloCanvasRef.current.width = INPUT_SIZE;
+        yoloCanvasRef.current.height = INPUT_SIZE;
+      }
+      const canvas = yoloCanvasRef.current;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) {
+        return { loaded: true, inferenceMs: 0, best: null };
+      }
+
+      ctx.drawImage(videoRef.current, 0, 0, INPUT_SIZE, INPUT_SIZE);
+      const rgba = ctx.getImageData(0, 0, INPUT_SIZE, INPUT_SIZE).data;
+      const numPixels = INPUT_SIZE * INPUT_SIZE;
+      const float32Data = new Float32Array(3 * numPixels);
+
+      for (let i = 0; i < numPixels; i++) {
+        const idx = i * 4;
+        float32Data[i] = rgba[idx] / 255.0;
+        float32Data[numPixels + i] = rgba[idx + 1] / 255.0;
+        float32Data[2 * numPixels + i] = rgba[idx + 2] / 255.0;
+      }
+
+      const inputName = session.inputNames[0] || 'images';
+      const inputTensor = new ort.Tensor('float32', float32Data, [1, 3, INPUT_SIZE, INPUT_SIZE]);
+      const outputMap = await session.run({ [inputName]: inputTensor });
+      const outputName = session.outputNames[0] || Object.keys(outputMap)[0];
+      const outputTensor = outputMap[outputName];
+      const outData = outputTensor.data as Float32Array | number[];
+      const dims = outputTensor.dims || [1, 300, 6];
+
+      // Parse End-to-End YOLO26 output tensor [1, 300, 6] dengan urutan [x1, y1, x2, y2, score, class_id]
+      const numRows = dims.length === 3 ? dims[1] : Math.floor(outData.length / 6);
+      const stride = dims.length === 3 ? dims[2] : 6;
+      const classesList =
+        yoloClassesRef.current.length > 0
+          ? yoloClassesRef.current
+          : dbBarangList.map(d => d.noBarang.trim().toUpperCase());
+
+      let bestDet: {
+        x1: number;
+        y1: number;
+        x2: number;
+        y2: number;
+        score: number;
+        classId: number;
+        skuCode: string;
+        itemName: string;
+        unit: string;
+      } | null = null;
+
+      for (let r = 0; r < numRows; r++) {
+        const offset = r * stride;
+        const x1 = Number(outData[offset]);
+        const y1 = Number(outData[offset + 1]);
+        const x2 = Number(outData[offset + 2]);
+        const y2 = Number(outData[offset + 3]);
+        const score = Number(outData[offset + 4]);
+        const classId = Math.round(Number(outData[offset + 5]));
+
+        if (score >= confThreshold && classId >= 0) {
+          if (!bestDet || score > bestDet.score) {
+            const rawSku = classesList[classId] || `SKU-${classId}`;
+            const dbMatch = databaseBarangService.resolveBySkuOrClassName(rawSku);
+            const manifestMatch = activeInvoice?.items.find(
+              it => it.skuCode.trim().toUpperCase() === rawSku
+            );
+            bestDet = {
+              x1: Math.max(0, Math.round(x1)),
+              y1: Math.max(0, Math.round(y1)),
+              x2: Math.min(INPUT_SIZE, Math.round(x2)),
+              y2: Math.min(INPUT_SIZE, Math.round(y2)),
+              score,
+              classId,
+              skuCode: dbMatch?.noBarang || manifestMatch?.skuCode || rawSku,
+              itemName:
+                dbMatch?.deskripsiBarang ||
+                manifestMatch?.itemName ||
+                `Barang SKU ${rawSku}`,
+              unit: dbMatch?.satuan || dbMatch?.unit1 || manifestMatch?.unit || 'CRT'
+            };
+          }
+        }
+      }
+
+      return {
+        loaded: true,
+        inferenceMs: Math.max(6, Math.round(performance.now() - t0)),
+        best: bestDet
+      };
+    } catch {
+      return { loaded: false, inferenceMs: Math.round(performance.now() - t0), best: null };
+    }
+  };
+
+  // Real-Time Visual & YOLO26 Hybrid Validation when Camera is Active
+  // Saat YOLO Auto: ON aktif, Jalur A dieksekusi setiap 250ms-300ms langsung dari <video> tanpa membebani kuota server
   useEffect(() => {
     if (!isCameraActive || scannerPage !== 'kamera' || !activeInvoice) {
       setLiveVisionStatus({
@@ -3042,7 +3231,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     let cancelled = false;
 
     const runLiveCheck = async () => {
-      if (cancelled || isVerifyingScan) return;
+      if (cancelled || isVerifyingScan || isLiveCheckingRef.current) return;
       const tStart = performance.now();
       const frameAnalysis = analyzeVideoFrameForPackaging();
 
@@ -3059,14 +3248,66 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
         return;
       }
 
-      if (isLiveCheckingRef.current) return;
       isLiveCheckingRef.current = true;
 
       try {
         const currentTarget = resolvedTargetItem || activeInvoice.items[0];
         const dbInfo = currentTarget ? getIntegratedDbInfo(currentTarget) : null;
-        const targetCode = dbInfo?.kodeBarang || currentTarget?.skuCode || 'AUTO';
+        const targetCode = (dbInfo?.kodeBarang || currentTarget?.skuCode || 'AUTO').trim().toUpperCase();
         const targetName = dbInfo?.deskripsiBarang || currentTarget?.itemName || '';
+
+        // 1. Jalankan JALUR A (onnxruntime-web lokal di browser HP) terlebih dahulu
+        const localRes = await runJalurALocalOnnxDetection(0.25);
+        if (cancelled) return;
+
+        if (localRes.loaded && localRes.best) {
+          setYoloEngineMode('JALUR_A_WEB');
+          setYoloInferenceMs(localRes.inferenceMs);
+          setYoloConfidence(localRes.best.score);
+
+          const detectedSku = localRes.best.skuCode.trim().toUpperCase();
+          const inManifest = activeInvoice.items.some(
+            it =>
+              it.skuCode.trim().toUpperCase() === detectedSku ||
+              getIntegratedDbInfo(it).kodeBarang.trim().toUpperCase() === detectedSku
+          );
+          const isMatch =
+            inManifest &&
+            (targetScanMode === 'AUTO' || detectedSku === targetCode);
+
+          setLiveVisionStatus({
+            state: isMatch ? 'matching' : 'mismatch',
+            confidence: localRes.best.score,
+            detectedCode: detectedSku,
+            detectedSummary: localRes.best.itemName,
+            bbox: [localRes.best.x1, localRes.best.y1, localRes.best.x2, localRes.best.y2],
+            reason: isMatch
+              ? undefined
+              : `Terdeteksi [${detectedSku}] ${localRes.best.itemName}, target: [${targetCode}]`
+          });
+
+          // Jika YOLO Auto: ON dan status SESUAI (confidence >= 0.75) serta di luar masa cooldown 2 detik:
+          if (
+            autoScanEnabled &&
+            isMatch &&
+            localRes.best.score >= 0.75 &&
+            !scanErrorLock &&
+            Date.now() >= lastAutoVerifyCooldownUntilRef.current
+          ) {
+            const targetInList = activeInvoice.items.find(
+              it =>
+                it.skuCode.trim().toUpperCase() === detectedSku ||
+                getIntegratedDbInfo(it).kodeBarang.trim().toUpperCase() === detectedSku
+            );
+            if (targetInList && targetInList.qtyLoaded < targetInList.qtyOrdered) {
+              lastAutoVerifyCooldownUntilRef.current = Date.now() + 2000;
+              void executeCaptureAndVerify(frameAnalysis.previewBase64, undefined, false);
+            }
+          }
+          return;
+        }
+
+        // 2. Jika model lokal best.onnx belum dimuat di browser, gunakan pemeriksa ringan
         const refImg = dbInfo?.matchedRecord?.dokumentasiUrl?.startsWith('data:image/jpeg')
           ? dbInfo.matchedRecord.dokumentasiUrl
           : undefined;
@@ -3128,15 +3369,17 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     };
 
     void runLiveCheck();
+    // Saat YOLO Auto: ON aktif & model Jalur A tersedia, jalankan inferensi real-time setiap 280ms (250ms-300ms)
+    const intervalMs = autoScanEnabled && ortSessionRef.current ? 280 : 1200;
     const timer = window.setInterval(() => {
       void runLiveCheck();
-    }, 1400);
+    }, intervalMs);
 
     return () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [isCameraActive, scannerPage, activeInvoice, resolvedTargetItem, selectedGate, isVerifyingScan]);
+  }, [isCameraActive, scannerPage, activeInvoice, resolvedTargetItem, selectedGate, isVerifyingScan, autoScanEnabled, targetScanMode, scanErrorLock]);
 
   // Tambah Foto Tambahan (>1 Foto per Barang) langsung dari Kamera tanpa menambah beban antrian atau saat ingin multi-angle dokumentasi
   const handleCaptureExtraPhotoOnly = (overrideItem?: SalesOrderItem) => {
@@ -3411,65 +3654,159 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
           ? dbInfo.matchedRecord.dokumentasiUrl
           : undefined;
 
-        try {
-          const resp = await fetch('/api/scan-muat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              image: captured.base64,
-              image_base64: captured.base64,
-              surat_jalan_id: activeInvoice.invoiceNumber,
-              so_number: activeInvoice.soNumber,
-              gate_id: selectedGate,
-              gate: selectedGate,
-              timestamp: isoTimestamp,
-              target_item_code: desiredCode,
-              target_item_name: desiredName,
-              reference_image_base64: refImg,
-              qty_scanned: cleanQty,
-              expected_items: activeInvoice.items,
-              master_items: masterBarang,
-              force_mismatch: simulateMismatch
-            })
-          });
+        // SMART ROUTER (SPESIFIKASI 2 & 3):
+        // 1) Jalankan Jalur A (onnxruntime-web lokal di browser HP) sebagai pemeriksa utama instan.
+        // 2) Jika Jalur A gagal memuat model ONNX atau confidence < 0.75 (75%), otomatis lempar 1 frame
+        //    ke POST /api/yolo/detect-fallback (Jalur B di server Node.js Hostinger).
+        const jalurAResult = !customImageBase64 && !simulateMismatch
+          ? await runJalurALocalOnnxDetection(0.25)
+          : { loaded: false, inferenceMs: 0, best: null };
 
-          const resultJson = await resp.json().catch(() => null);
-          if (resultJson) {
-            if (resultJson.extracted_code) {
-              serverExtractedCode = String(resultJson.extracted_code).trim().toUpperCase();
-            }
-            if (resultJson.product_name) {
-              serverExtractedName = String(resultJson.product_name).trim();
-            }
-            if (!resp.ok || resultJson.status === 'error' || resultJson.is_matching_target === false || resultJson.is_valid_packaging === false) {
-              serverRejected = true;
-              serverRejectionReason = String(
-                resultJson.message ||
-                  `Barang yang difoto [${serverExtractedCode}] (${serverExtractedName}) TIDAK SESUAI dengan target [${desiredCode}] ${desiredName}!`
-              );
-              setLiveVisionStatus({
-                state: resultJson.is_valid_packaging === false ? 'no_packaging' : 'mismatch',
-                confidence: resultJson.is_valid_packaging === false ? 0 : Number(resultJson.ocr_confidence || 0.96),
-                detectedCode: serverExtractedCode,
-                detectedSummary: serverExtractedName,
-                reason: serverRejectionReason
-              });
-            } else {
-              setLiveVisionStatus({
-                state: 'matching',
-                confidence: Number(resultJson.ocr_confidence || 0.98),
-                detectedCode: serverExtractedCode,
-                detectedSummary: serverExtractedName
-              });
-            }
-          }
-        } catch {
-          // If offline, fall back to liveVisionStatus state
-          if (liveVisionStatus.state === 'mismatch' || liveVisionStatus.state === 'no_packaging') {
+        if (jalurAResult.loaded && jalurAResult.best && jalurAResult.best.score >= 0.75) {
+          setYoloEngineMode('JALUR_A_WEB');
+          setYoloInferenceMs(jalurAResult.inferenceMs);
+          setYoloConfidence(jalurAResult.best.score);
+          serverExtractedCode = jalurAResult.best.skuCode.trim().toUpperCase();
+          serverExtractedName = jalurAResult.best.itemName.trim();
+
+          const isMatchJalurA =
+            activeInvoice.items.some(
+              it =>
+                it.skuCode.trim().toUpperCase() === serverExtractedCode ||
+                getIntegratedDbInfo(it).kodeBarang.trim().toUpperCase() === serverExtractedCode
+            ) &&
+            (desiredCode === 'AUTO' || serverExtractedCode === desiredCode.toUpperCase());
+
+          if (!isMatchJalurA) {
             serverRejected = true;
-            serverExtractedCode = liveVisionStatus.detectedCode || 'TIDAK-SESUAI';
-            serverExtractedName = liveVisionStatus.detectedSummary || 'Barang Tidak Sesuai';
-            serverRejectionReason = liveVisionStatus.reason || 'Barang di kamera tidak sesuai dengan target aktif!';
+            serverRejectionReason = `TIDAK SESUAI: YOLO26 Jalur A mendeteksi [${serverExtractedCode}] ${serverExtractedName} (${Math.round(jalurAResult.best.score * 100)}%), sedangkan target aktif adalah [${desiredCode}] ${desiredName}!`;
+          }
+          setLiveVisionStatus({
+            state: isMatchJalurA ? 'matching' : 'mismatch',
+            confidence: jalurAResult.best.score,
+            detectedCode: serverExtractedCode,
+            detectedSummary: serverExtractedName,
+            bbox: [jalurAResult.best.x1, jalurAResult.best.y1, jalurAResult.best.x2, jalurAResult.best.y2],
+            reason: serverRejectionReason || undefined
+          });
+        } else {
+          // JALUR B FALLBACK: Kirim 1 frame tangkapan kamera ke POST /api/yolo/detect-fallback di server Hostinger
+          setYoloEngineMode('JALUR_B_SERVER');
+          let fallbackHandled = false;
+          try {
+            const fbResp = await fetch('/api/yolo/detect-fallback', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                image: captured.base64,
+                image_base64: captured.base64,
+                surat_jalan_id: activeInvoice.invoiceNumber,
+                target_item_code: desiredCode,
+                target_item_name: desiredName,
+                expected_items: activeInvoice.items,
+                force_mismatch: simulateMismatch
+              })
+            });
+            const fbJson = await fbResp.json().catch(() => null);
+            if (fbJson && fbJson.model_loaded) {
+              fallbackHandled = true;
+              const conf = Number(fbJson.confidence || fbJson.ocr_confidence || 0.96);
+              setYoloConfidence(conf);
+              if (fbJson.inference_ms) setYoloInferenceMs(Number(fbJson.inference_ms));
+              if (fbJson.extracted_code) {
+                serverExtractedCode = String(fbJson.extracted_code).trim().toUpperCase();
+              }
+              if (fbJson.product_name) {
+                serverExtractedName = String(fbJson.product_name).trim();
+              }
+              if (!fbResp.ok || fbJson.status === 'error' || fbJson.is_matching_target === false || fbJson.is_valid_packaging === false) {
+                serverRejected = true;
+                serverRejectionReason = String(
+                  fbJson.message ||
+                    `Barang yang difoto [${serverExtractedCode}] (${serverExtractedName}) TIDAK SESUAI dengan target [${desiredCode}] ${desiredName}!`
+                );
+                setLiveVisionStatus({
+                  state: fbJson.is_valid_packaging === false ? 'no_packaging' : 'mismatch',
+                  confidence: fbJson.is_valid_packaging === false ? 0 : conf,
+                  detectedCode: serverExtractedCode,
+                  detectedSummary: serverExtractedName,
+                  reason: serverRejectionReason
+                });
+              } else {
+                setLiveVisionStatus({
+                  state: 'matching',
+                  confidence: conf,
+                  detectedCode: serverExtractedCode,
+                  detectedSummary: serverExtractedName
+                });
+              }
+            }
+          } catch {
+            // Continue to /api/scan-muat sync & verification
+          }
+
+          try {
+            const resp = await fetch('/api/scan-muat', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                image: captured.base64,
+                image_base64: captured.base64,
+                surat_jalan_id: activeInvoice.invoiceNumber,
+                so_number: activeInvoice.soNumber,
+                gate_id: selectedGate,
+                gate: selectedGate,
+                timestamp: isoTimestamp,
+                target_item_code: desiredCode,
+                target_item_name: desiredName,
+                reference_image_base64: refImg,
+                qty_scanned: cleanQty,
+                expected_items: activeInvoice.items,
+                master_items: masterBarang,
+                force_mismatch: simulateMismatch
+              })
+            });
+
+            const resultJson = await resp.json().catch(() => null);
+            if (resultJson && !fallbackHandled) {
+              const conf = Number(resultJson.ocr_confidence || resultJson.confidence || 0.98);
+              setYoloConfidence(conf);
+              if (resultJson.extracted_code) {
+                serverExtractedCode = String(resultJson.extracted_code).trim().toUpperCase();
+              }
+              if (resultJson.product_name) {
+                serverExtractedName = String(resultJson.product_name).trim();
+              }
+              if (!resp.ok || resultJson.status === 'error' || resultJson.is_matching_target === false || resultJson.is_valid_packaging === false) {
+                serverRejected = true;
+                serverRejectionReason = String(
+                  resultJson.message ||
+                    `Barang yang difoto [${serverExtractedCode}] (${serverExtractedName}) TIDAK SESUAI dengan target [${desiredCode}] ${desiredName}!`
+                );
+                setLiveVisionStatus({
+                  state: resultJson.is_valid_packaging === false ? 'no_packaging' : 'mismatch',
+                  confidence: resultJson.is_valid_packaging === false ? 0 : conf,
+                  detectedCode: serverExtractedCode,
+                  detectedSummary: serverExtractedName,
+                  reason: serverRejectionReason
+                });
+              } else {
+                setLiveVisionStatus({
+                  state: 'matching',
+                  confidence: conf,
+                  detectedCode: serverExtractedCode,
+                  detectedSummary: serverExtractedName
+                });
+              }
+            }
+          } catch {
+            // If offline, fall back to liveVisionStatus state
+            if (!fallbackHandled && (liveVisionStatus.state === 'mismatch' || liveVisionStatus.state === 'no_packaging')) {
+              serverRejected = true;
+              serverExtractedCode = liveVisionStatus.detectedCode || 'TIDAK-SESUAI';
+              serverExtractedName = liveVisionStatus.detectedSummary || 'Barang Tidak Sesuai';
+              serverRejectionReason = liveVisionStatus.reason || 'Barang di kamera tidak sesuai dengan target aktif!';
+            }
           }
         }
       }
@@ -3583,6 +3920,9 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
           return next;
         });
 
+        // Cooldown 2 detik (2000ms) pada YOLO Auto: ON setelah verifikasi +1 berhasil agar kardus yang sama tidak terhitung ganda
+        lastAutoVerifyCooldownUntilRef.current = Date.now() + 2000;
+
         playScannerFeedbackBeep('success', soundEnabled);
         showToast(
           `✅ BARANG SESUAI: [${matchedDbInfo.kodeBarang}] ${matchedDbInfo.deskripsiBarang} (${newItemLoaded}/${matchedItem.qtyOrdered} ${matchedDbInfo.satuan})`,
@@ -3674,7 +4014,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     }
   };
 
-  // Auto-Detect Interval (Every 2.5 Seconds when Auto-Scan is ON, only triggers when liveVisionStatus is matching)
+  // Auto-Detect Interval (dengan Cooldown 2 Detik setelah verifikasi +1 berhasil agar kardus yang sama tidak terhitung ganda)
   useEffect(() => {
     if (!autoScanEnabled || scanErrorLock) {
       if (autoScanTimerRef.current) {
@@ -3685,14 +4025,18 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     }
 
     autoScanTimerRef.current = window.setInterval(() => {
+      if (Date.now() < lastAutoVerifyCooldownUntilRef.current) {
+        return;
+      }
       if (!isVerifyingScan && activeInvoice && !scanErrorLock && liveVisionStatus.state === 'matching') {
         const remainingItem = activeInvoice.items.find(it => it.qtyLoaded < it.qtyOrdered);
         if (!remainingItem && targetScanMode === 'AUTO') {
           return;
         }
+        lastAutoVerifyCooldownUntilRef.current = Date.now() + 2000;
         void executeCaptureAndVerify();
       }
-    }, 2500);
+    }, 2000);
 
     return () => {
       if (autoScanTimerRef.current) {
@@ -4175,7 +4519,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                 </div>
               </div>
 
-              {/* Viewport Kamera Satu Layar Penuh dengan Indikator Tepi Hijau (Sesuai) / Merah (Tidak Sesuai) Tanpa Keterangan Barang di Dalam Kamera */}
+              {/* Viewport Kamera Satu Layar Penuh dengan Badge Deteksi [KODE_SKU] NAMA_BARANG + Status SESUAI / TIDAK SESUAI */}
               <div
                 className={`relative w-full flex-1 min-h-[120px] rounded-2xl bg-slate-950 transition-all overflow-hidden flex flex-col justify-between p-2 ${
                   isVisuallyValid
@@ -4204,8 +4548,41 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                   <div className="absolute inset-0 border-4 border-amber-300/80 shadow-[inset_0_0_90px_rgba(255,255,255,0.75)] pointer-events-none z-20 animate-pulse" />
                 )}
 
-                {/* Corner Brackets Bersih Tanpa Kotak Keterangan Barang di Dalam Kamera */}
-                <div className="relative z-10 w-full h-full rounded-xl flex flex-col justify-end p-1 pointer-events-none">
+                {/* Badge Deteksi Terbaik di Atas Bingkai Kamera: [KODE_SKU] NAMA_BARANG + SESUAI • 98% / TIDAK SESUAI */}
+                <div className="relative z-10 w-full h-full rounded-xl flex flex-col justify-between p-1 pointer-events-none">
+                  <div className="flex items-center justify-between gap-1.5 px-1 pt-0.5">
+                    <div
+                      title={yoloEngineMode === 'JALUR_A_WEB' ? 'YOLO26 Jalur A (ONNX Web)' : 'YOLO26 Jalur B (Hostinger Node.js)'}
+                      className={`px-2.5 py-1 rounded-full text-[10px] font-mono font-extrabold truncate max-w-[66%] border backdrop-blur-md shadow-sm ${
+                        isVisuallyValid
+                          ? 'bg-emerald-950/90 text-emerald-100 border-emerald-400/60'
+                          : 'bg-rose-950/90 text-rose-100 border-rose-400/60'
+                      }`}
+                    >
+                      [{liveVisionStatus.detectedCode || activeDbInfo?.kodeBarang || resolvedTargetItem?.skuCode || '-'}]{' '}
+                      {liveVisionStatus.detectedSummary || activeDbInfo?.deskripsiBarang || resolvedTargetItem?.itemName || 'Arahkan Kamera ke Kemasan'}
+                    </div>
+
+                    <div
+                      className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold shrink-0 flex items-center gap-1 border backdrop-blur-md shadow-sm ${
+                        isVisuallyValid
+                          ? 'bg-emerald-950/90 text-emerald-300 border-emerald-400/60'
+                          : 'bg-rose-950/90 text-rose-200 border-rose-400/60'
+                      }`}
+                    >
+                      <span
+                        className={`w-2 h-2 rounded-full ${
+                          isVisuallyValid ? 'bg-emerald-400 animate-pulse' : 'bg-rose-400'
+                        }`}
+                      />
+                      <span>
+                        {isVisuallyValid
+                          ? `SESUAI • ${Math.round((liveVisionStatus.confidence || yoloConfidence || 0.98) * 100)}%`
+                          : 'TIDAK SESUAI'}
+                      </span>
+                    </div>
+                  </div>
+
                   <div
                     className={`absolute top-0 left-0 w-5 h-5 border-t-4 border-l-4 rounded-tl-md ${
                       isVisuallyValid ? 'border-emerald-400' : 'border-rose-500'
@@ -4229,7 +4606,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                 </div>
               </div>
 
-              {/* Bottom Action Bar: Foto Lagi (Bisa Multi-Upload) + Tombol SCAN & VERIFIKASI */}
+              {/* Bottom Action Bar: Foto Lagi (Bisa Multi-Upload) + Tombol SCAN & VERIFIKASI BARANG (YOLO) (+1) */}
               <div className="shrink-0 w-full space-y-1">
                 {resolvedTargetItem && (
                   <div className="flex items-center justify-between gap-1.5 bg-white dark:bg-slate-950/90 border border-slate-200 dark:border-slate-800 rounded-xl px-2.5 py-1 shadow-2xs">
@@ -4287,7 +4664,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                   >
                     <Camera className="w-4 h-4 shrink-0" />
                     <span className="truncate">
-                      {isVerifyingScan ? 'MEMVERIFIKASI...' : 'SCAN & VERIFIKASI'}
+                      {isVerifyingScan ? 'MEMVERIFIKASI...' : 'SCAN & VERIFIKASI BARANG (YOLO) (+1)'}
                     </span>
                   </button>
                 </div>
