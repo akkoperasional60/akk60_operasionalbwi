@@ -3768,24 +3768,32 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
                     }`}
                   />
 
-                  {/* Top HUD: Ultralytics YOLOv8x Telemetry */}
+                  {/* Top HUD: Ultralytics YOLO Real-Time Item Validation Status */}
                   <div className="w-full flex items-center justify-between gap-1 text-[9px] font-mono">
                     <span
-                      className={`px-2 py-0.5 rounded-md font-bold border flex items-center gap-1 ${
+                      className={`px-2.5 py-1 rounded-lg font-black border flex items-center gap-1.5 min-w-0 max-w-[80%] shadow-md ${
                         scanErrorLock
-                          ? 'bg-rose-600 text-white border-rose-300'
-                          : 'bg-emerald-950/90 text-emerald-300 border-emerald-500/50'
+                          ? 'bg-rose-600 text-white border-rose-300 animate-pulse'
+                          : 'bg-emerald-600 text-white border-emerald-300'
                       }`}
                     >
-                      <span className={`w-1.5 h-1.5 rounded-full animate-ping ${scanErrorLock ? 'bg-rose-200' : 'bg-emerald-400'}`} />
-                      <span>
+                      <span className={`w-2 h-2 rounded-full shrink-0 animate-ping ${scanErrorLock ? 'bg-rose-100' : 'bg-emerald-200'}`} />
+                      <span className="truncate">
                         {scanErrorLock
-                          ? '🚨 BARANG SALAH / MISMATCH • TERKUNCI'
-                          : `BARANG SESUAI • Ultralytics YOLOv8x (${yoloInferenceMs}ms)`}
+                          ? `🚨 [${scanErrorLock.expectedCode}] ${scanErrorLock.expectedName} • BARANG TIDAK SESUAI`
+                          : resolvedTargetItem
+                          ? `[${resolvedTargetItem.skuCode}] ${resolvedTargetItem.itemName} • BARANG SESUAI`
+                          : `BARANG SESUAI (${yoloInferenceMs}ms)`}
                       </span>
                     </span>
-                    <span className="px-2 py-0.5 rounded-md bg-slate-950/85 border border-emerald-500/40 text-emerald-300 font-bold">
-                      Conf {(yoloConfidence * 100).toFixed(1)}% • {selectedGate}
+                    <span
+                      className={`px-2 py-1 rounded-lg font-black shrink-0 border shadow-xs ${
+                        scanErrorLock
+                          ? 'bg-rose-950/95 border-rose-400 text-rose-200'
+                          : 'bg-emerald-950/95 border-emerald-400 text-emerald-200'
+                      }`}
+                    >
+                      {scanErrorLock ? '🔴 TIDAK SESUAI' : '🟢 SESUAI'} • {(yoloConfidence * 100).toFixed(0)}%
                     </span>
                   </div>
 
