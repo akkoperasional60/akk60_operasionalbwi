@@ -3762,6 +3762,48 @@ Kembalikan HANYA JSON valid:
     return Array.from(new Set(fromDb));
   };
 
+  // Serve onnxruntime-web WASM binaries with explicit application/wasm MIME type
+  app.use(
+    '/onnx-wasm',
+    express.static(path.join(process.cwd(), 'node_modules', 'onnxruntime-web', 'dist'), {
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.wasm')) {
+          res.setHeader('Content-Type', 'application/wasm');
+        } else if (filePath.endsWith('.mjs') || filePath.endsWith('.js')) {
+          res.setHeader('Content-Type', 'application/javascript');
+        }
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+      }
+    })
+  );
+
+  // Serve /models/classes.json and /models/best.onnx explicitly so missing files return 404 instead of SPA index.html
+  app.get('/models/classes.json', async (_req, res) => {
+    try {
+      const { items } = await loadMasterBarangForYolo();
+      const classes = resolveYoloClassesList(items);
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(200).json(classes);
+    } catch {
+      return res.status(200).json([]);
+    }
+  });
+
+  app.get('/models/best.onnx', (_req, res) => {
+    const modelPath = resolveYoloModelPath();
+    if (!modelPath) {
+      return res.status(404).json({
+        success: false,
+        exists: false,
+        message: 'Model /models/best.onnx belum tersedia di server; otomatis beralih ke Jalur B.'
+      });
+    }
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    return res.sendFile(modelPath);
+  });
+
   // Serve /models static files (best.onnx & classes.json) for Jalur A (onnxruntime-web)
   app.use('/models', express.static(path.join(process.cwd(), 'public', 'models')));
   app.use('/models', express.static(path.join(process.cwd(), 'models')));

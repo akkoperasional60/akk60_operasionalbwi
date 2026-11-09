@@ -43,6 +43,7 @@ import { AkkLogo } from '../AkkLogo';
 import { useToast } from '../../context/ToastContext';
 import { useRoleAccess } from '../../hooks/useRoleAccess';
 import { canAccess, canEdit } from '../../utils/rbac';
+import { branchStore, BranchRecord } from '../../services/branchStore';
 import {
   ExifMetadataBadge,
   ExifTimestampMetadata,
@@ -85,6 +86,7 @@ export interface SalesOrderInvoice {
   invoiceNumber: string;
   soNumber: string;
   date: string;
+  branchName?: string;
   customerName: string;
   areaName: string;
   fleetLabel: string;
@@ -108,10 +110,10 @@ const MASTER_PACKAGING_CATALOG: Array<{
   { skuCode: '7AT00935', itemName: 'ALU TRAY OX-935 (100PCS/PAK)', unit: 'Pack' },
   { skuCode: '7AT01225', itemName: 'ALU TRAY OX-1225 (100PCS/PAK)', unit: 'Pack' },
   { skuCode: '7AT06005', itemName: 'ALU TRAY OX-6005 (100PCS/PAK)', unit: 'Pack' },
-  { skuCode: 'RFID-KB-001', itemName: 'Karton Box Corrugated B-Flute 60x40x40 Polos', unit: 'Ikat' },
-  { skuCode: 'RFID-KB-006', itemName: 'Mika Daleman Kue Sekat 4 (Isi 100 Pcs)', unit: 'Box' },
-  { skuCode: 'RFID-KB-007', itemName: 'Karton Box Die-Cut Sepatu Ekspor', unit: 'Ikat' },
-  { skuCode: 'RFID-KB-008', itemName: 'Lakban Coklat Packing AKK 48mm x 90Y', unit: 'Box' }
+  { skuCode: 'AKK-KB-001', itemName: 'Karton Box Corrugated B-Flute 60x40x40 Polos', unit: 'Ikat' },
+  { skuCode: 'AKK-KB-006', itemName: 'Mika Daleman Kue Sekat 4 (Isi 100 Pcs)', unit: 'Box' },
+  { skuCode: 'AKK-KB-007', itemName: 'Karton Box Die-Cut Sepatu Ekspor', unit: 'Ikat' },
+  { skuCode: 'AKK-KB-008', itemName: 'Lakban Coklat Packing AKK 48mm x 90Y', unit: 'Box' }
 ];
 
 const PURGED_RFID_CODES = new Set(['RFID-KB-002', 'RFID-KB-003', 'RFID-KB-004', 'RFID-KB-005']);
@@ -134,7 +136,7 @@ function createSampleSvgPhoto(itemName: string, skuCode: string, qty: number, un
     <text x="46" y="54" fill="#ffffff" font-family="sans-serif" font-size="11" font-weight="bold">TAG: ${skuCode}</text>
     <text x="240" y="152" text-anchor="middle" fill="#fef3c7" font-family="sans-serif" font-size="22" font-weight="bold">${qty} ${unit}</text>
     <text x="240" y="232" text-anchor="middle" fill="#f8fafc" font-family="sans-serif" font-size="14" font-weight="bold">${safeName.slice(0, 42)}</text>
-    <text x="240" y="256" text-anchor="middle" fill="#94a3b8" font-family="sans-serif" font-size="11">TERVERIFIKASI KAMERA RFID VISUAL • ${timestamp}</text>
+    <text x="240" y="256" text-anchor="middle" fill="#94a3b8" font-family="sans-serif" font-size="11">TERVERIFIKASI KAMERA VISUAL • ${timestamp}</text>
   </svg>`;
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
@@ -147,6 +149,7 @@ function getInitialInvoices(fleetDefault: string, adminDefault: string): SalesOr
       invoiceNumber: 'FKT/AKK/2026/11/001',
       soNumber: 'SO-BWI-261101',
       date: '2026-11-03',
+      branchName: 'Banyuwangi',
       customerName: 'TK HOLLY GENTENG',
       areaName: 'GENTENG RETAIL',
       fleetLabel: fleetDefault,
@@ -156,7 +159,7 @@ function getInitialInvoices(fleetDefault: string, adminDefault: string): SalesOr
       items: [
         {
           id: 'itm-1',
-          skuCode: 'RFID-KB-001',
+          skuCode: 'AKK-KB-001',
           itemName: 'Karton Box Corrugated B-Flute 60x40x40 Polos',
           unit: 'Ikat',
           qtyOrdered: 20,
@@ -166,7 +169,7 @@ function getInitialInvoices(fleetDefault: string, adminDefault: string): SalesOr
               id: 'sc-1',
               timestamp: '08:15 WIB',
               qtyScanned: 20,
-              photoDataUrl: createSampleSvgPhoto('Karton Box Corrugated B-Flute 60x40x40 Polos', 'RFID-KB-001', 20, 'Ikat', '08:15 WIB'),
+              photoDataUrl: createSampleSvgPhoto('Karton Box Corrugated B-Flute 60x40x40 Polos', 'AKK-KB-001', 20, 'Ikat', '08:15 WIB'),
               scannedBy: initialAdmin,
               notes: 'Kondisi ikatan rapi & lengkap'
             }
@@ -206,6 +209,7 @@ function getInitialInvoices(fleetDefault: string, adminDefault: string): SalesOr
       invoiceNumber: 'FKT/AKK/2026/11/002',
       soNumber: 'SO-DPS-261102',
       date: '2026-11-03',
+      branchName: 'Bali',
       customerName: 'UD SUMBER KEMASAN BALI',
       areaName: 'DENPASAR 1',
       fleetLabel: fleetDefault,
@@ -216,7 +220,7 @@ function getInitialInvoices(fleetDefault: string, adminDefault: string): SalesOr
       items: [
         {
           id: 'itm-201',
-          skuCode: 'RFID-KB-006',
+          skuCode: 'AKK-KB-006',
           itemName: 'Mika Daleman Kue Sekat 4 (Isi 100 Pcs)',
           unit: 'Box',
           qtyOrdered: 25,
@@ -226,7 +230,7 @@ function getInitialInvoices(fleetDefault: string, adminDefault: string): SalesOr
               id: 'sc-201',
               timestamp: '08:50 WIB',
               qtyScanned: 25,
-              photoDataUrl: createSampleSvgPhoto('Mika Daleman Kue Sekat 4 (Isi 100 Pcs)', 'RFID-KB-006', 25, 'Box', '08:50 WIB'),
+              photoDataUrl: createSampleSvgPhoto('Mika Daleman Kue Sekat 4 (Isi 100 Pcs)', 'AKK-KB-006', 25, 'Box', '08:50 WIB'),
               scannedBy: adminDefault,
               notes: 'Muatan sesuai faktur'
             }
@@ -234,7 +238,7 @@ function getInitialInvoices(fleetDefault: string, adminDefault: string): SalesOr
         },
         {
           id: 'itm-202',
-          skuCode: 'RFID-KB-008',
+          skuCode: 'AKK-KB-008',
           itemName: 'Lakban Coklat Packing AKK 48mm x 90Y',
           unit: 'Box',
           qtyOrdered: 30,
@@ -244,7 +248,7 @@ function getInitialInvoices(fleetDefault: string, adminDefault: string): SalesOr
               id: 'sc-202',
               timestamp: '09:05 WIB',
               qtyScanned: 34,
-              photoDataUrl: createSampleSvgPhoto('Lakban Coklat Packing AKK 48mm x 90Y', 'RFID-KB-008', 34, 'Box', '09:05 WIB'),
+              photoDataUrl: createSampleSvgPhoto('Lakban Coklat Packing AKK 48mm x 90Y', 'AKK-KB-008', 34, 'Box', '09:05 WIB'),
               scannedBy: adminDefault,
               notes: 'Terbawa 4 box ekstra dari palet sebelah'
             }
@@ -365,17 +369,21 @@ function useSharedSalesRfidInvoices() {
 
   const sanitizeSavedInvoices = (rawList: SalesOrderInvoice[]): SalesOrderInvoice[] => {
     const replacements: Record<string, { skuCode: string; itemName: string; unit: SalesOrderItem['unit'] }> = {
+      'RFID-KB-001': { skuCode: 'AKK-KB-001', itemName: 'Karton Box Corrugated B-Flute 60x40x40 Polos', unit: 'Ikat' },
       'RFID-KB-002': { skuCode: '7AFBG453', itemName: 'ALUFOIL REFIL BAGUS 45X7,62M (24PCS/CRT)', unit: 'Box' },
-      'RFID-KB-003': { skuCode: 'RFID-KB-006', itemName: 'Mika Daleman Kue Sekat 4 (Isi 100 Pcs)', unit: 'Box' },
+      'RFID-KB-003': { skuCode: 'AKK-KB-006', itemName: 'Mika Daleman Kue Sekat 4 (Isi 100 Pcs)', unit: 'Box' },
       'RFID-KB-004': { skuCode: '7AT00935', itemName: 'ALU TRAY OX-935 (100PCS/PAK)', unit: 'Pack' },
-      'RFID-KB-005': { skuCode: 'RFID-KB-008', itemName: 'Lakban Coklat Packing AKK 48mm x 90Y', unit: 'Box' }
+      'RFID-KB-005': { skuCode: 'AKK-KB-008', itemName: 'Lakban Coklat Packing AKK 48mm x 90Y', unit: 'Box' },
+      'RFID-KB-006': { skuCode: 'AKK-KB-006', itemName: 'Mika Daleman Kue Sekat 4 (Isi 100 Pcs)', unit: 'Box' },
+      'RFID-KB-007': { skuCode: 'AKK-KB-007', itemName: 'Karton Box Die-Cut Sepatu Ekspor', unit: 'Ikat' },
+      'RFID-KB-008': { skuCode: 'AKK-KB-008', itemName: 'Lakban Coklat Packing AKK 48mm x 90Y', unit: 'Box' }
     };
     let mutated = false;
     const cleaned = rawList.map(inv => ({
       ...inv,
       items: (inv.items || []).map(it => {
         const codeUpper = String(it.skuCode || '').trim().toUpperCase();
-        if (PURGED_RFID_CODES.has(codeUpper) && replacements[codeUpper]) {
+        if (replacements[codeUpper]) {
           mutated = true;
           const rep = replacements[codeUpper];
           return {
@@ -510,7 +518,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
   const showToast = (msg: string, type: 'success' | 'error' | 'info' = 'info') => {
     addNotification(
       type === 'error' ? 'sla_warning' : 'checker',
-      type === 'error' ? 'Peringatan Muat RFID' : 'Faktur & SO Muat',
+      type === 'error' ? 'Peringatan Muat Barang' : 'Faktur & SO Muat',
       msg,
       type === 'error'
     );
@@ -544,16 +552,18 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
 
   const [fakturViewMode, setFakturViewMode] = useState<'list' | 'dashboard'>('list');
   const [searchQuery, setSearchQuery] = useState('');
+  const [filterBranch, setFilterBranch] = useState('SEMUA CABANG');
   const [filterFleet, setFilterFleet] = useState('SEMUA ARMADA');
   const [filterStatus, setFilterStatus] = useState('SEMUA STATUS');
   const [filterDate, setFilterDate] = useState<string>('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null);
 
-  // Form states for Import File Faktur / Sales Order (Pilih Area -> Upload File -> Review File)
+  // Form states for Import File Faktur / Sales Order (Pilih Cabang & Area -> Upload File -> Review File)
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [soNumber, setSoNumber] = useState('');
   const [date, setDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [branchName, setBranchName] = useState<string>('Banyuwangi');
   const [customerName, setCustomerName] = useState('');
   const [areaName, setAreaName] = useState<string>('');
   const [fleetLabel, setFleetLabel] = useState(defaultFleet);
@@ -568,6 +578,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
   const [dbBarangList, setDbBarangList] = useState<DatabaseBarangRecord[]>(() =>
     databaseBarangService.getAll()
   );
+  const [branches, setBranches] = useState<BranchRecord[]>(() => branchStore.getBranches());
 
   useEffect(() => {
     void databaseBarangService.ensureHydrated().then(loaded => {
@@ -576,10 +587,17 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
     const syncDb = () => {
       setDbBarangList(databaseBarangService.getAll());
     };
+    const syncBranches = () => {
+      setBranches(branchStore.getBranches());
+    };
+    const unsubBranch = branchStore.subscribe(syncBranches);
     window.addEventListener('akk-database-barang-updated', syncDb);
+    window.addEventListener('akk-branch-updated', syncBranches);
     window.addEventListener('storage', syncDb);
     return () => {
+      unsubBranch();
       window.removeEventListener('akk-database-barang-updated', syncDb);
+      window.removeEventListener('akk-branch-updated', syncBranches);
       window.removeEventListener('storage', syncDb);
     };
   }, []);
@@ -611,6 +629,9 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
     setInvoiceNumber(defaultNoFaktur);
     setSoNumber('');
     setDate(new Date().toISOString().split('T')[0]);
+    const defaultMasterBranch =
+      branches.find(b => b.slug === 'banyuwangi')?.name || branches[0]?.name || 'Nusantara';
+    setBranchName(defaultMasterBranch);
     setCustomerName('');
     setAreaName(defaultArea);
     const initialFleet = fleetOptions[0] || defaultFleet;
@@ -655,6 +676,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
     setInvoiceNumber(inv.invoiceNumber);
     setSoNumber(inv.soNumber);
     setDate(inv.date);
+    setBranchName(inv.branchName || (inv.areaName.toLowerCase().includes('denpasar') || inv.areaName.toLowerCase().includes('bali') ? 'Bali' : 'Banyuwangi'));
     setCustomerName(inv.customerName);
     setAreaName(inv.areaName);
     const parsedFleets =
@@ -982,6 +1004,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
             invoiceNumber: firstRow.noFaktur.trim().toUpperCase(),
             soNumber: soNumber.trim().toUpperCase() || inv.soNumber,
             date,
+            branchName: branchName || 'Banyuwangi',
             customerName: firstRow.namaPelanggan.trim().toUpperCase(),
             areaName,
             fleetLabel: finalFleetLabel,
@@ -993,7 +1016,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
         })
       );
       showToast(
-        `Faktur ${firstRow.noFaktur} (Area ${areaName} • ${finalFleets.length} Armada) berhasil diperbarui & tersinkron ke Database Barang + Aplikasi RFID!`,
+        `Faktur ${firstRow.noFaktur} (Cabang ${branchName} • Area ${areaName} • ${finalFleets.length} Armada) berhasil diperbarui & tersinkron ke Database Barang + Aplikasi Scan Muat!`,
         'success'
       );
     } else {
@@ -1024,6 +1047,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
         invoiceNumber: grp.noFaktur,
         soNumber: `SO-${areaName.replace(/[^A-Z0-9]/gi, '').slice(0, 3).toUpperCase()}-${String(invoices.length + grpIdx + 1).padStart(4, '0')}`,
         date,
+        branchName: branchName || 'Banyuwangi',
         customerName: grp.namaPelanggan,
         areaName,
         fleetLabel: finalFleetLabel,
@@ -1049,7 +1073,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
 
       saveInvoices(prev => [...createdInvoices, ...prev]);
       showToast(
-        `${createdInvoices.length} Faktur (${validRows.length} item barang) untuk Area ${areaName} [${finalFleets.length} Armada] berhasil diimpor & terintegrasi dengan Database Barang + Aplikasi Scan RFID!`,
+        `${createdInvoices.length} Faktur (${validRows.length} item barang) untuk Cabang ${branchName} • Area ${areaName} [${finalFleets.length} Armada] berhasil diimpor & terintegrasi dengan Database Barang + Aplikasi Scan Muat!`,
         'success'
       );
     }
@@ -1066,13 +1090,38 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
     return accessibleInvoices.filter(inv => {
       const evalRes = evaluateInvoiceStatus(inv);
       const q = searchQuery.toLowerCase();
+      const invBranch =
+        inv.branchName ||
+        (inv.areaName.toLowerCase().includes('denpasar') || inv.areaName.toLowerCase().includes('bali')
+          ? 'Bali'
+          : 'Banyuwangi');
+
       const matchSearch =
         !q ||
         inv.invoiceNumber.toLowerCase().includes(q) ||
         inv.soNumber.toLowerCase().includes(q) ||
         inv.customerName.toLowerCase().includes(q) ||
         inv.areaName.toLowerCase().includes(q) ||
+        invBranch.toLowerCase().includes(q) ||
         inv.items.some(i => i.itemName.toLowerCase().includes(q) || i.skuCode.toLowerCase().includes(q));
+
+      const selectedMasterBranch = branches.find(
+        b =>
+          b.name.toLowerCase() === filterBranch.toLowerCase() ||
+          b.slug.toLowerCase() === filterBranch.toLowerCase()
+      );
+      const matchBranch =
+        filterBranch === 'SEMUA CABANG' ||
+        invBranch.toLowerCase() === filterBranch.toLowerCase() ||
+        inv.areaName.toLowerCase().includes(filterBranch.toLowerCase()) ||
+        Boolean(
+          selectedMasterBranch &&
+            (invBranch.toLowerCase() === selectedMasterBranch.name.toLowerCase() ||
+              invBranch.toLowerCase() === selectedMasterBranch.slug.toLowerCase() ||
+              invBranch.toLowerCase() === (selectedMasterBranch.city || '').toLowerCase() ||
+              inv.areaName.toLowerCase().includes(selectedMasterBranch.slug.toLowerCase()) ||
+              inv.areaName.toLowerCase().includes((selectedMasterBranch.city || '').toLowerCase()))
+        );
 
       const matchFleet =
         filterFleet === 'SEMUA ARMADA' ||
@@ -1088,9 +1137,9 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
 
       const matchDate = !filterDate || inv.date === filterDate;
 
-      return matchSearch && matchFleet && matchStatus && matchDate;
+      return matchSearch && matchBranch && matchFleet && matchStatus && matchDate;
     });
-  }, [accessibleInvoices, searchQuery, filterFleet, filterStatus, filterDate]);
+  }, [accessibleInvoices, searchQuery, filterBranch, filterFleet, filterStatus, filterDate]);
 
   const summaryStats = useMemo(() => {
     let total = accessibleInvoices.length;
@@ -1276,7 +1325,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
               Input Faktur / Sales Order (SO)
             </h1>
             <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1 max-w-3xl">
-              Input rincian Faktur / Sales Order muatan armada box yang terintegrasi dengan Aplikasi Scan &amp; Foto Muat RFID.
+              Input rincian Faktur / Sales Order muatan armada box yang terintegrasi dengan Aplikasi Scan &amp; Foto Muat Barang.
             </p>
           </div>
 
@@ -1326,7 +1375,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
               className="flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 dark:hover:bg-slate-700 text-white border border-slate-700 text-xs font-bold transition cursor-pointer"
             >
               <Camera className="w-4 h-4 text-sky-400" />
-              <span>Buka Aplikasi Scan RFID</span>
+              <span>Buka Aplikasi Scan Muat</span>
               <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
             </button>
           </div>
@@ -1432,10 +1481,10 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
               <div>
                 <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
                   <Activity className="w-4 h-4 text-indigo-500" />
-                  <span>Progres Realisasi Pemuatan Barang (Faktur vs Foto RFID)</span>
+                  <span>Progres Realisasi Pemuatan Barang (Faktur vs Foto Kamera)</span>
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Verifikasi visual otomatis melalui kamera RFID gudang saat barang dinaikkan ke armada box.
+                  Verifikasi visual otomatis melalui kamera gudang saat barang dinaikkan ke armada box.
                 </p>
               </div>
               <div className="text-right">
@@ -1652,7 +1701,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
                                 onClick={() => onOpenRfidScannerForInvoice(row.invoice.id)}
                                 className="px-2 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold cursor-pointer"
                               >
-                                Scan RFID
+                                Scan Muat
                               </button>
                             </td>
                           </tr>
@@ -1807,7 +1856,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
                             onClick={() => onOpenRfidScannerForInvoice(inv.id)}
                             className="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold shadow-2xs transition cursor-pointer"
                           >
-                            Scan RFID
+                            Scan Muat
                           </button>
                         </td>
                       </tr>
@@ -1828,10 +1877,25 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
             type="text"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Cari No. Faktur, No. SO, Nama Toko, Area, atau Nama Barang..."
+            placeholder="Cari No. Faktur, No. SO, Nama Toko, Cabang, Area, atau Nama Barang..."
             className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-indigo-500"
           />
         </div>
+
+        {/* Fitur Pilih Cabang Terintegrasi Master Cabang */}
+        <select
+          value={filterBranch}
+          onChange={e => setFilterBranch(e.target.value)}
+          aria-label="Pilih Cabang"
+          className="px-3 py-2 rounded-xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 text-xs font-bold text-indigo-700 dark:text-indigo-300 cursor-pointer"
+        >
+          <option value="SEMUA CABANG">Pilih Cabang: Semua Cabang ({branches.length} Cabang Master)</option>
+          {branches.map(b => (
+            <option key={b.id} value={b.name}>
+              Cabang {b.name} ({b.city || b.slug})
+            </option>
+          ))}
+        </select>
 
         <select
           value={filterFleet}
@@ -1914,7 +1978,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
                       onClick={() => onOpenRfidScannerForInvoice(inv.id)}
                       className="text-[11px] font-bold text-rose-600 dark:text-rose-400 hover:underline shrink-0 ml-2"
                     >
-                      Cek RFID →
+                      Cek Scan Muat →
                     </button>
                   </div>
                 )}
@@ -1927,6 +1991,9 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
                       </span>
                       <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[11px] font-mono font-semibold">
                         {inv.soNumber}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/70 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300 text-[11px] font-bold">
+                        Cabang: {inv.branchName || (inv.areaName.toLowerCase().includes('bali') || inv.areaName.toLowerCase().includes('denpasar') ? 'Bali' : 'Banyuwangi')}
                       </span>
                       <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${ev.badgeColor}`}>
                         {ev.statusLabel}
@@ -1981,7 +2048,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
                       className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-xs transition cursor-pointer"
                     >
                       <Camera className="w-3.5 h-3.5" />
-                      <span>Scan &amp; Foto Barang (RFID)</span>
+                      <span>Scan &amp; Foto Barang Muat</span>
                     </button>
                     <button
                       type="button"
@@ -2006,7 +2073,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
                 <div className="mt-4 space-y-3">
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-slate-500 dark:text-slate-400 font-medium">
-                      Realisasi Barang Termuat via Foto RFID:{' '}
+                      Realisasi Barang Termuat via Foto Kamera:{' '}
                       <strong className="text-slate-900 dark:text-white">
                         {ev.totalLoaded} dari {ev.totalOrdered} Kemasan
                       </strong>
@@ -2033,7 +2100,7 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
                           <th className="py-2 pr-3">Kode Tag / SKU</th>
                           <th className="py-2 pr-3">Nama Item Barang (Sesuai Faktur)</th>
                           <th className="py-2 pr-3 text-center">Qty Faktur</th>
-                          <th className="py-2 pr-3 text-center">Termuat (Foto RFID)</th>
+                          <th className="py-2 pr-3 text-center">Termuat (Foto Muat)</th>
                           <th className="py-2 pr-3 text-center">Selisih / Sisa</th>
                           <th className="py-2 pr-3">Bukti Foto</th>
                           <th className="py-2 text-right">Status Deteksi</th>
@@ -2143,9 +2210,27 @@ export const SalesInvoiceSoTab: React.FC<SalesInvoiceSoTabProps> = ({
             </div>
 
             <form onSubmit={handleSaveInvoice} className="space-y-3 mt-3">
-              {/* Baris 1: Area Kirim, Tanggal, Admin PIC & Tambah Armada Simple */}
+              {/* Baris 1: Pilih Cabang, Area Kirim, Tanggal, Admin PIC & Tambah Armada Simple */}
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950/70 border border-slate-200 dark:border-slate-800 space-y-2.5">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
+                      Pilih Cabang (Master Cabang) *
+                    </label>
+                    <select
+                      required
+                      value={branchName}
+                      onChange={e => setBranchName(e.target.value)}
+                      className="w-full px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-900 dark:text-white cursor-pointer focus:outline-none focus:border-indigo-500"
+                    >
+                      {branches.map(b => (
+                        <option key={b.id} value={b.name}>
+                          Cabang {b.name} ({b.city || b.slug})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
                   <div>
                     <label className="block text-[10px] font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
                       Area Kirim *
@@ -2569,7 +2654,7 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
   const showToast = (msg: string, type: 'success' | 'error' | 'info' = 'info') => {
     addNotification(
       type === 'error' ? 'sla_warning' : 'checker',
-      type === 'error' ? 'PERINGATAN RFID MUAT!' : 'Aplikasi Scan RFID Muat',
+      type === 'error' ? 'PERINGATAN MUAT BARANG!' : 'Aplikasi Scan Muat Barang',
       msg,
       type === 'error'
     );
@@ -3039,19 +3124,31 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
     let mounted = true;
     const initLocalYolo26Onnx = async () => {
       try {
+        // Point onnxruntime-web to dedicated /onnx-wasm/ route served with Content-Type: application/wasm
+        ort.env.wasm.wasmPaths = '/onnx-wasm/';
+        ort.env.wasm.numThreads = 1;
+        ort.env.logLevel = 'fatal';
+      } catch {
+        // Ignore env setup issues
+      }
+
+      try {
         const clsResp = await fetch('/models/classes.json', { cache: 'no-store' });
         if (clsResp.ok) {
-          const parsed = await clsResp.json();
-          if (mounted) {
-            if (Array.isArray(parsed)) {
-              yoloClassesRef.current = parsed.map((c: unknown) => String(c || '').trim().toUpperCase());
-            } else if (parsed && typeof parsed === 'object') {
-              const obj = parsed as Record<string, unknown>;
-              if (Array.isArray(obj.classes)) {
-                yoloClassesRef.current = obj.classes.map((c: unknown) => String(c || '').trim().toUpperCase());
-              } else {
-                const keys = Object.keys(obj).sort((a, b) => Number(a) - Number(b));
-                yoloClassesRef.current = keys.map(k => String(obj[k] || '').trim().toUpperCase());
+          const contentType = clsResp.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
+            const parsed = await clsResp.json();
+            if (mounted) {
+              if (Array.isArray(parsed)) {
+                yoloClassesRef.current = parsed.map((c: unknown) => String(c || '').trim().toUpperCase());
+              } else if (parsed && typeof parsed === 'object') {
+                const obj = parsed as Record<string, unknown>;
+                if (Array.isArray(obj.classes)) {
+                  yoloClassesRef.current = obj.classes.map((c: unknown) => String(c || '').trim().toUpperCase());
+                } else {
+                  const keys = Object.keys(obj).sort((a, b) => Number(a) - Number(b));
+                  yoloClassesRef.current = keys.map(k => String(obj[k] || '').trim().toUpperCase());
+                }
               }
             }
           }
@@ -3061,13 +3158,46 @@ export const SalesRfidScannerAppTab: React.FC<SalesRfidScannerAppTabProps> = ({
       }
 
       try {
+        const modelResp = await fetch('/models/best.onnx', { method: 'GET', cache: 'no-store' });
+        if (!modelResp.ok) {
+          if (mounted) {
+            ortSessionRef.current = null;
+            setYoloEngineMode('JALUR_B_SERVER');
+          }
+          return;
+        }
+
+        const contentType = (modelResp.headers.get('content-type') || '').toLowerCase();
+        if (contentType.includes('text/html') || contentType.includes('application/json')) {
+          if (mounted) {
+            ortSessionRef.current = null;
+            setYoloEngineMode('JALUR_B_SERVER');
+          }
+          return;
+        }
+
+        const modelBuffer = await modelResp.arrayBuffer();
+        const bytes = new Uint8Array(modelBuffer);
+        // Validate non-empty binary and ensure it is not <!DOCTYPE html> (0x3c 0x21 0x64 0x6f)
+        if (
+          bytes.byteLength < 128 ||
+          (bytes[0] === 0x3c && bytes[1] === 0x21) ||
+          (bytes[0] === 0x7b && bytes[1] === 0x22)
+        ) {
+          if (mounted) {
+            ortSessionRef.current = null;
+            setYoloEngineMode('JALUR_B_SERVER');
+          }
+          return;
+        }
+
         let session: ort.InferenceSession | null = null;
         try {
-          session = await ort.InferenceSession.create('/models/best.onnx', {
+          session = await ort.InferenceSession.create(bytes, {
             executionProviders: ['webgl', 'wasm']
           });
         } catch {
-          session = await ort.InferenceSession.create('/models/best.onnx', {
+          session = await ort.InferenceSession.create(bytes, {
             executionProviders: ['wasm']
           });
         }
