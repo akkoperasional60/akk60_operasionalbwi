@@ -5,8 +5,21 @@ import crypto from "crypto";
 import dotenv from "dotenv";
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import * as XLSX from "xlsx";
-import sharp from "sharp";
 import { query as mysqlQuery, testConnection as testMysqlConnection, isDatabaseConfigured } from "./server/db";
+
+let cachedSharpModule: any = undefined;
+async function getSharp(): Promise<any | null> {
+  if (cachedSharpModule !== undefined) return cachedSharpModule;
+  try {
+    const mod: any = await import("sharp");
+    cachedSharpModule = mod?.default || mod;
+    return cachedSharpModule;
+  } catch (err: any) {
+    console.warn("⚠️ [Sharp Dynamic Import] Modul sharp tidak dapat dimuat di environment ini:", err?.message || err);
+    cachedSharpModule = null;
+    return null;
+  }
+}
 
 dotenv.config();
 
@@ -286,12 +299,165 @@ async function startServer() {
   };
   const base64url = (value: string) => Buffer.from(value, 'utf8').toString('base64url');
   const signSession = (payload: string, secret: string) => crypto.createHmac('sha256', secret).update(payload).digest('base64url');
+  const hashSessionId = (sid: string): string => crypto.createHash('sha256').update(`akk-sid:${sid}`).digest('hex');
 
-  const createSessionToken = (userId: string): string => {
+  const getClientIp = (req: any): string => {
+    const xff = String(req?.headers?.['x-forwarded-for'] || '').split(',')[0].trim();
+    if (xff) return xff;
+    const xri = String(req?.headers?.['x-real-ip'] || '').trim();
+    if (xri) return xri;
+    return String(req?.socket?.remoteAddress || req?.ip || '127.0.0.1');
+  };
+
+  // Pelonggaran & proteksi Rate Limit Login:
+  // Menggunakan kombinasi Akun + IP (bukan akun saja) dengan batas 25 percobaan gagal & penundaan progresif,
+  // sehingga orang iseng dari IP berbeda tidak bisa mengunci akun Admin asli.
+  interface LoginRateState {
+    failures: number;
+    firstFailAt: number;
+    lockedUntil: number;
+  }
+  const loginRateByAccountIp = new Map<string, LoginRateState>();
+  const loginRateByIpOnly = new Map<string, LoginRateState>();
+  const RATE_WINDOW_MS = 15 * 60 * 1000; // 15 menit
+  const MAX_ACCOUNT_IP_ATTEMPTS = 25; // dilonggarkan ke 25 percobaan per kombinasi (akun + IP)
+  const MAX_IP_ONLY_ATTEMPTS = 60; // batas global per IP
+
+  const checkLoginRateLimit = (accountIdentifier: string, ip: string): { allowed: boolean; retryAfterSec: number; delayMs: number } => {
+    const now = Date.now();
+    const compositeKey = `${accountIdentifier.toLowerCase()}__${ip}`;
+    const ipKey = ip;
+
+    const cleanAndGet = (map: Map<string, LoginRateState>, key: string): LoginRateState | undefined => {
+      const st = map.get(key);
+      if (!st) return undefined;
+      if (st.lockedUntil > 0 && now >= st.lockedUntil) {
+        map.delete(key);
+        return undefined;
+      }
+      if (now - st.firstFailAt > RATE_WINDOW_MS && st.lockedUntil <= now) {
+        map.delete(key);
+        return undefined;
+      }
+      return st;
+    };
+
+    const compState = cleanAndGet(loginRateByAccountIp, compositeKey);
+    if (compState && compState.lockedUntil > now) {
+      return { allowed: false, retryAfterSec: Math.ceil((compState.lockedUntil - now) / 1000), delayMs: 0 };
+    }
+
+    const ipState = cleanAndGet(loginRateByIpOnly, ipKey);
+    if (ipState && ipState.lockedUntil > now) {
+      return { allowed: false, retryAfterSec: Math.ceil((ipState.lockedUntil - now) / 1000), delayMs: 0 };
+    }
+
+    // Penundaan progresif ringan setelah 5x gagal pada kombinasi Akun + IP yang sama
+    const failCount = compState?.failures || 0;
+    const delayMs = failCount >= 5 ? Math.min(2500, (failCount - 4) * 350) : 0;
+    return { allowed: true, retryAfterSec: 0, delayMs };
+  };
+
+  const recordLoginFailure = (accountIdentifier: string, ip: string): void => {
+    const now = Date.now();
+    const compositeKey = `${accountIdentifier.toLowerCase()}__${ip}`;
+    const ipKey = ip;
+
+    const prevComp = loginRateByAccountIp.get(compositeKey);
+    const nextCompFailures = (prevComp && now - prevComp.firstFailAt <= RATE_WINDOW_MS ? prevComp.failures : 0) + 1;
+    loginRateByAccountIp.set(compositeKey, {
+      failures: nextCompFailures,
+      firstFailAt: prevComp && now - prevComp.firstFailAt <= RATE_WINDOW_MS ? prevComp.firstFailAt : now,
+      lockedUntil: nextCompFailures >= MAX_ACCOUNT_IP_ATTEMPTS ? now + RATE_WINDOW_MS : 0
+    });
+
+    const prevIp = loginRateByIpOnly.get(ipKey);
+    const nextIpFailures = (prevIp && now - prevIp.firstFailAt <= RATE_WINDOW_MS ? prevIp.failures : 0) + 1;
+    loginRateByIpOnly.set(ipKey, {
+      failures: nextIpFailures,
+      firstFailAt: prevIp && now - prevIp.firstFailAt <= RATE_WINDOW_MS ? prevIp.firstFailAt : now,
+      lockedUntil: nextIpFailures >= MAX_IP_ONLY_ATTEMPTS ? now + RATE_WINDOW_MS : 0
+    });
+  };
+
+  const clearLoginFailure = (accountIdentifier: string, ip: string): void => {
+    const compositeKey = `${accountIdentifier.toLowerCase()}__${ip}`;
+    loginRateByAccountIp.delete(compositeKey);
+  };
+
+  // Fallback pencatatan pencabutan sesi di memori jika MySQL sedang tidak terhubung
+  const inMemoryRevokedSessionHashes = new Set<string>();
+  const inMemoryUserRevokedBeforeMs = new Map<string, number>();
+
+  const createSessionToken = (userId: string, existingSid?: string): { token: string; sid: string; sidHash: string; exp: number } => {
     const secret = getSessionSecret();
     if (!secret) throw new Error('SESSION_SECRET belum dikonfigurasi');
-    const payload = base64url(JSON.stringify({ uid: userId, exp: Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS }));
-    return `${payload}.${signSession(payload, secret)}`;
+    const sid = existingSid || crypto.randomBytes(18).toString('base64url');
+    const exp = Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS;
+    const iat = Math.floor(Date.now() / 1000);
+    const payload = base64url(JSON.stringify({ uid: userId, sid, iat, exp }));
+    const token = `${payload}.${signSession(payload, secret)}`;
+    return { token, sid, sidHash: hashSessionId(sid), exp };
+  };
+
+  const persistSessionToDb = async (userId: string, sidHash: string, expUnix: number, req?: any): Promise<void> => {
+    if (!isDatabaseConfigured()) return;
+    try {
+      const ip = req ? getClientIp(req).slice(0, 64) : null;
+      const ua = req ? String(req.headers?.['user-agent'] || '').slice(0, 500) : null;
+      const expDate = toMysqlDateTime(new Date(expUnix * 1000));
+      await mysqlQuery(
+        `INSERT INTO sessions (session_id_hash, user_id, ip_address, user_agent, expires_at, revoked_at, created_at, last_seen_at)
+         VALUES (?, ?, ?, ?, ?, NULL, NOW(), NOW())
+         ON DUPLICATE KEY UPDATE
+           expires_at = VALUES(expires_at),
+           ip_address = COALESCE(VALUES(ip_address), ip_address),
+           user_agent = COALESCE(VALUES(user_agent), user_agent),
+           last_seen_at = NOW()`,
+        [sidHash, userId, ip, ua, expDate]
+      );
+    } catch (err: any) {
+      // Jangan gagalkan login apabila tabel belum termigrasi atau koneksi sementara sibuk
+      console.warn('[Session DB Persist Warning]', err?.message || err);
+    }
+  };
+
+  const revokeSessionBySid = async (sid?: string): Promise<void> => {
+    if (!sid) return;
+    const sidHash = hashSessionId(sid);
+    inMemoryRevokedSessionHashes.add(sidHash);
+    if (!isDatabaseConfigured()) return;
+    try {
+      await mysqlQuery(`UPDATE sessions SET revoked_at = NOW() WHERE session_id_hash = ?`, [sidHash]);
+    } catch (err: any) {
+      console.warn('[Session Revoke Warning]', err?.message || err);
+    }
+  };
+
+  const revokeAllUserSessions = async (userId: string, exceptSid?: string): Promise<number> => {
+    const cleanUid = String(userId || '').trim();
+    if (!cleanUid) return 0;
+    inMemoryUserRevokedBeforeMs.set(cleanUid, Date.now());
+    if (!isDatabaseConfigured()) return 1;
+    try {
+      await ensureDatabaseSchema();
+      if (exceptSid) {
+        const result: any = await mysqlQuery(
+          `UPDATE sessions SET revoked_at = NOW() WHERE user_id = ? AND session_id_hash <> ? AND revoked_at IS NULL`,
+          [cleanUid, hashSessionId(exceptSid)]
+        );
+        return Number(result?.affectedRows || 0);
+      } else {
+        const result: any = await mysqlQuery(
+          `UPDATE sessions SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL`,
+          [cleanUid]
+        );
+        return Number(result?.affectedRows || 0);
+      }
+    } catch (err: any) {
+      console.warn('[Revoke All User Sessions Warning]', err?.message || err);
+      return 0;
+    }
   };
 
   const readCookie = (req: any, name: string): string => {
@@ -305,7 +471,7 @@ async function startServer() {
     return '';
   };
 
-  const verifySessionToken = (token: string): { uid: string } | null => {
+  const verifySessionToken = (token: string): { uid: string; sid?: string; iat?: number; exp: number } | null => {
     const secret = getSessionSecret();
     if (!secret || !token || !token.includes('.')) return null;
     const [payload, signature] = token.split('.', 2);
@@ -315,8 +481,19 @@ async function startServer() {
     if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
     try {
       const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-      if (!decoded?.uid || Number(decoded.exp || 0) <= Math.floor(Date.now() / 1000)) return null;
-      return { uid: String(decoded.uid) };
+      const exp = Number(decoded?.exp || 0);
+      if (!decoded?.uid || exp <= Math.floor(Date.now() / 1000)) return null;
+      const uid = String(decoded.uid);
+      const sid = decoded.sid ? String(decoded.sid) : undefined;
+      const iat = decoded.iat ? Number(decoded.iat) : undefined;
+      if (sid && inMemoryRevokedSessionHashes.has(hashSessionId(sid))) {
+        return null;
+      }
+      const userRevokedBefore = inMemoryUserRevokedBeforeMs.get(uid);
+      if (userRevokedBefore && (!iat || iat * 1000 < userRevokedBefore)) {
+        return null;
+      }
+      return { uid, sid, iat, exp };
     } catch {
       return null;
     }
@@ -372,6 +549,7 @@ async function startServer() {
   const getSessionUser = async (req: any): Promise<any | null> => {
     const parsed = verifySessionToken(extractSessionTokenFromReq(req));
     if (!parsed) return null;
+    req.sessionMeta = parsed;
     if (previewSessionUsers.has(parsed.uid)) {
       return previewSessionUsers.get(parsed.uid) || null;
     }
@@ -379,6 +557,29 @@ async function startServer() {
       return null;
     }
     try {
+      // Jika token memiliki sid (Session ID), verifikasi di tabel sessions apakah sudah dicabut (revoked) atau kedaluwarsa
+      if (parsed.sid) {
+        const sidHash = hashSessionId(parsed.sid);
+        try {
+          const sessRows = await mysqlQuery<any[]>(
+            `SELECT session_id_hash, revoked_at, expires_at FROM sessions WHERE session_id_hash = ? LIMIT 1`,
+            [sidHash]
+          );
+          if (Array.isArray(sessRows) && sessRows.length > 0) {
+            const sRow = sessRows[0];
+            if (sRow.revoked_at !== null && sRow.revoked_at !== undefined) {
+              inMemoryRevokedSessionHashes.add(sidHash);
+              return null;
+            }
+            if (sRow.expires_at && new Date(sRow.expires_at).getTime() <= Date.now()) {
+              return null;
+            }
+          }
+        } catch {
+          // Tabel sessions mungkin belum dibuat pada request awal; lanjut cek tabel users
+        }
+      }
+
       const rows = await mysqlQuery<any[]>(
         `SELECT id, email, full_name, role, department, phone, status, permissions_json, created_at, approved_at, approved_by, notes
          FROM users WHERE id = ? LIMIT 1`,
@@ -786,6 +987,18 @@ async function startServer() {
         updated_at VARCHAR(32) NULL,
         INDEX idx_wms_db_barang_order (order_index),
         INDEX idx_wms_db_barang_code (no_barang)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+      `CREATE TABLE IF NOT EXISTS sessions (
+        session_id_hash VARCHAR(64) NOT NULL PRIMARY KEY,
+        user_id VARCHAR(64) NOT NULL,
+        ip_address VARCHAR(64) NULL,
+        user_agent VARCHAR(500) NULL,
+        expires_at DATETIME NOT NULL,
+        revoked_at DATETIME NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        last_seen_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_sessions_user (user_id, revoked_at, expires_at),
+        INDEX idx_sessions_expires (expires_at)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
     ];
     for (const sql of statements) {
@@ -872,9 +1085,11 @@ async function startServer() {
     };
   };
 
-  const handlePreviewLogin = (loginIdentifier: string, cleanPass: string, res: any) => {
+  const handlePreviewLogin = (loginIdentifier: string, cleanPass: string, req: any, res: any) => {
     const cleanId = loginIdentifier.trim().toLowerCase();
+    const clientIp = getClientIp(req);
     if (!cleanId || cleanPass.length < 6) {
+      recordLoginFailure(cleanId || 'unknown', clientIp);
       return res.status(401).json({ success: false, error: 'Email/username atau password salah' });
     }
 
@@ -896,16 +1111,19 @@ async function startServer() {
     }
 
     if (!matchedUser) {
+      recordLoginFailure(cleanId, clientIp);
       return res.status(401).json({ success: false, error: 'Email/username atau password salah' });
     }
     if (String(matchedUser.status || 'approved') !== 'approved') {
       return res.status(403).json({ success: false, error: `Akun berstatus ${matchedUser.status || 'pending'} dan belum dapat login` });
     }
     if (!verifyPassword(cleanPass, String(matchedUser.password_hash || ''))) {
+      recordLoginFailure(cleanId, clientIp);
       return res.status(401).json({ success: false, error: 'Email/username atau password salah' });
     }
 
-    const token = createSessionToken(String(matchedUser.id));
+    clearLoginFailure(cleanId, clientIp);
+    const { token } = createSessionToken(String(matchedUser.id));
     setSessionCookie(res, token);
     return res.json({ success: true, source: 'preview_session', sessionToken: token, user: publicUser(matchedUser) });
   };
@@ -917,9 +1135,23 @@ async function startServer() {
       return res.status(400).json({ success: false, error: 'Email/username dan password wajib diisi' });
     }
     const cleanPass = String(password);
+    const clientIp = getClientIp(req);
+
+    // Cek Rate Limit berbasis Kombinasi (Akun + IP) serta Penundaan Progresif
+    const rateStatus = checkLoginRateLimit(loginIdentifier, clientIp);
+    if (!rateStatus.allowed) {
+      res.setHeader('Retry-After', String(rateStatus.retryAfterSec));
+      return res.status(429).json({
+        success: false,
+        error: `Terlalu banyak percobaan gagal dari perangkat/IP ini. Silakan coba lagi dalam ${Math.ceil(rateStatus.retryAfterSec / 60)} menit.`
+      });
+    }
+    if (rateStatus.delayMs > 0) {
+      await new Promise(resolve => setTimeout(resolve, rateStatus.delayMs));
+    }
 
     if (!isDatabaseConfigured()) {
-      return handlePreviewLogin(loginIdentifier, cleanPass, res);
+      return handlePreviewLogin(loginIdentifier, cleanPass, req, res);
     }
 
     try {
@@ -946,6 +1178,7 @@ async function startServer() {
             error: 'Database belum memiliki akun. Aktifkan BOOTSTRAP_ADMIN_* sementara di Hostinger untuk membuat Super Admin pertama.'
           });
         }
+        recordLoginFailure(loginIdentifier, clientIp);
         return res.status(401).json({ success: false, error: 'Email/username atau password salah' });
       }
       const u = mysqlUsers[0];
@@ -953,19 +1186,22 @@ async function startServer() {
         return res.status(403).json({ success: false, error: `Akun berstatus ${u.status || 'pending'} dan belum dapat login` });
       }
       if (!verifyPassword(cleanPass, String(u.password_hash || ''))) {
+        recordLoginFailure(loginIdentifier, clientIp);
         return res.status(401).json({ success: false, error: 'Email/username atau password salah' });
       }
+      clearLoginFailure(loginIdentifier, clientIp);
       if (!String(u.password_hash || '').startsWith('scrypt$')) {
         await mysqlQuery('UPDATE users SET password_hash = ? WHERE id = ?', [hashPassword(cleanPass), u.id]);
       }
-      const token = createSessionToken(String(u.id));
+      const { token, sidHash, exp } = createSessionToken(String(u.id));
+      await persistSessionToDb(String(u.id), sidHash, exp, req);
       setSessionCookie(res, token);
       return res.json({ success: true, source: 'hostinger_mysql', sessionToken: token, user: publicUser(u) });
     } catch (err: any) {
       const errMsg = String(err?.message || err || '');
       const isPreviewEnv = Boolean(process.env.K_SERVICE) || process.env.NODE_ENV !== 'production';
-      if (isPreviewEnv && (errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND') || errMsg.includes('ETIMEDOUT'))) {
-        return handlePreviewLogin(loginIdentifier, cleanPass, res);
+      if (isPreviewEnv && (errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND') || errMsg.includes('ETIMEDOUT') || errMsg.includes('circuit breaker'))) {
+        return handlePreviewLogin(loginIdentifier, cleanPass, req, res);
       }
       console.warn('[Auth MySQL Warning]', errMsg);
       return res.status(503).json({
@@ -1006,7 +1242,7 @@ async function startServer() {
     } catch (err: any) {
       const errMsg = String(err?.message || '');
       const isPreviewEnv = Boolean(process.env.K_SERVICE) || process.env.NODE_ENV !== 'production';
-      if (isPreviewEnv && (errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND') || errMsg.includes('ETIMEDOUT'))) {
+      if (isPreviewEnv && (errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND') || errMsg.includes('ETIMEDOUT') || errMsg.includes('circuit breaker'))) {
         const id = `usr-${crypto.randomBytes(6).toString('hex')}`;
         const previewUser = {
           id,
@@ -1028,11 +1264,13 @@ async function startServer() {
     }
   });
 
-  app.get('/api/auth/me', async (req, res) => {
+  app.get('/api/auth/me', async (req: any, res) => {
     try {
       const user = await getSessionUser(req);
       if (!user) return res.status(401).json({ success: false, error: 'Sesi tidak aktif' });
-      const refreshedToken = createSessionToken(String(user.id));
+      const existingSid = req.sessionMeta?.sid;
+      const { token: refreshedToken, sidHash, exp } = createSessionToken(String(user.id), existingSid);
+      await persistSessionToDb(String(user.id), sidHash, exp, req);
       setSessionCookie(res, refreshedToken);
       return res.json({ success: true, backend: 'hostinger_mysql', sessionToken: refreshedToken, user: publicUser(user) });
     } catch (err: any) {
@@ -1040,9 +1278,37 @@ async function startServer() {
     }
   });
 
-  app.post('/api/auth/logout', (_req, res) => {
+  app.post('/api/auth/logout', async (req: any, res) => {
+    const parsed = verifySessionToken(extractSessionTokenFromReq(req));
+    if (parsed?.sid) {
+      await revokeSessionBySid(parsed.sid);
+    }
     clearSessionCookie(res);
     res.json({ success: true, message: 'Logged out successfully' });
+  });
+
+  // Endpoint untuk mencabut seluruh sesi aktif ("Logout Semua Perangkat") milik user sendiri atau target user (oleh Super Admin)
+  app.post('/api/auth/logout-all', requireAuth, async (req: any, res) => {
+    try {
+      const requestedUserId = String(req.body?.userId || '').trim();
+      const isSuper = req.authUser?.role === 'super_admin';
+      const targetUserId = requestedUserId && isSuper ? requestedUserId : String(req.authUser.id);
+      const keepCurrent = Boolean(req.body?.keepCurrent) && targetUserId === String(req.authUser.id);
+      const currentSid = keepCurrent ? req.sessionMeta?.sid : undefined;
+
+      const revokedCount = await revokeAllUserSessions(targetUserId, currentSid);
+      if (!keepCurrent && targetUserId === String(req.authUser.id)) {
+        clearSessionCookie(res);
+      }
+      return res.json({
+        success: true,
+        userId: targetUserId,
+        revokedCount,
+        message: `Berhasil mencabut seluruh sesi perangkat untuk pengguna ${targetUserId}`
+      });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal mencabut sesi perangkat' });
+    }
   });
 
   // User Management is persisted in Hostinger MySQL; authenticated users can read sanitized user profiles for schedule/crew assignment.
@@ -1226,12 +1492,17 @@ async function startServer() {
         ).catch(() => {});
       }
 
+      // Jika status pengguna diubah menjadi non-aktif (inactive/rejected/pending), otomatis cabut seluruh sesi aktif di perangkatnya
+      if (resolvedStatus !== 'approved') {
+        await revokeAllUserSessions(targetUserId).catch(() => {});
+      }
+
       const rows = await mysqlQuery<any[]>('SELECT id, email, full_name, role, department, phone, status, permissions_json, created_at, approved_at, approved_by, notes FROM users WHERE id = ? LIMIT 1', [targetUserId]);
       return res.json({ success: true, source: 'hostinger_mysql', user: publicUser(rows[0]) });
     } catch (err: any) {
       const errMsg = String(err?.message || '');
       const isPreviewEnv = Boolean(process.env.K_SERVICE) || process.env.NODE_ENV !== 'production';
-      if (isPreviewEnv && (errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND') || errMsg.includes('ETIMEDOUT'))) {
+      if (isPreviewEnv && (errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND') || errMsg.includes('ETIMEDOUT') || errMsg.includes('circuit breaker'))) {
         const existingPreview = previewSessionUsers.get(id) || {};
         const updatedPreview = {
           ...existingPreview,
@@ -1252,21 +1523,40 @@ async function startServer() {
     }
   });
 
-  app.post('/api/users/:id/password', requireSuperAdmin, async (req, res) => {
+  app.post('/api/users/:id/password', requireSuperAdmin, async (req: any, res) => {
     const password = String(req.body?.password || '');
     if (password.length < 8) return res.status(400).json({ success: false, error: 'Password minimal 8 karakter' });
     try {
       const result: any = await mysqlQuery('UPDATE users SET password_hash=?, updated_at=NOW() WHERE id=?', [hashPassword(password), req.params.id]);
       if (!Number(result?.affectedRows || 0)) return res.status(404).json({ success: false, error: 'User tidak ditemukan' });
+      // Cabut seluruh sesi lama pengguna agar perangkat yang hilang tidak bisa lagi mengakses akun
+      const exceptSid = String(req.authUser?.id) === String(req.params.id) ? req.sessionMeta?.sid : undefined;
+      await revokeAllUserSessions(String(req.params.id), exceptSid).catch(() => {});
       return res.json({ success: true });
     } catch (err: any) {
       return res.status(503).json({ success: false, error: err?.message || 'Gagal reset password' });
     }
   });
 
+  app.post('/api/users/:id/revoke-sessions', requireSuperAdmin, async (req: any, res) => {
+    try {
+      const targetId = String(req.params.id || '').trim();
+      const revokedCount = await revokeAllUserSessions(targetId);
+      return res.json({
+        success: true,
+        userId: targetId,
+        revokedCount,
+        message: `Seluruh sesi aktif perangkat untuk pengguna berhasil dicabut.`
+      });
+    } catch (err: any) {
+      return res.status(503).json({ success: false, error: err?.message || 'Gagal mencabut sesi perangkat pengguna' });
+    }
+  });
+
   app.delete('/api/users/:id', requireSuperAdmin, async (req: any, res) => {
     if (String(req.authUser?.id) === String(req.params.id)) return res.status(400).json({ success: false, error: 'Super Admin tidak dapat menghapus akun yang sedang digunakan' });
     try {
+      await revokeAllUserSessions(String(req.params.id)).catch(() => {});
       const result: any = await mysqlQuery('DELETE FROM users WHERE id = ?', [req.params.id]);
       return res.json({ success: true, removed: Number(result?.affectedRows || 0) });
     } catch (err: any) {
@@ -5367,8 +5657,10 @@ Kembalikan HANYA JSON valid:
     inputBuf: Buffer
   ): Promise<{ chroma: Float32Array; lum: Float32Array; edgeRatio: number; meanR: number; meanG: number; meanB: number } | null> => {
     try {
+      const sharpFn = await getSharp();
+      if (!sharpFn) return null;
       const GRID = 16;
-      const { data } = await sharp(inputBuf)
+      const { data } = await sharpFn(inputBuf)
         .resize(GRID, GRID, { fit: 'cover' })
         .removeAlpha()
         .raw()
@@ -5439,6 +5731,14 @@ Kembalikan HANYA JSON valid:
   app.post('/api/yolo/detect-fallback', async (req: any, res: any) => {
     const tStart = Date.now();
     try {
+      const sharpFn = await getSharp();
+      if (!sharpFn) {
+        return res.status(503).json({
+          status: 'error',
+          success: false,
+          message: 'Modul pemrosesan gambar (sharp) tidak tersedia di server ini. Gunakan Jalur A (Browser ONNX Web).'
+        });
+      }
       const rawBase64 = String(req.body?.image || req.body?.image_base64 || '').trim();
       const targetSkuRaw = String(req.body?.target_item_code || req.body?.target_sku || '').trim().toUpperCase();
       const targetNameRaw = String(req.body?.target_item_name || '').trim();
@@ -5481,7 +5781,7 @@ Kembalikan HANYA JSON valid:
       }
 
       const INPUT_SIZE = 640;
-      const { data: rawRgbBytes, info } = await sharp(imgBuffer)
+      const { data: rawRgbBytes, info } = await sharpFn(imgBuffer)
         .resize(INPUT_SIZE, INPUT_SIZE, { fit: 'fill' })
         .removeAlpha()
         .raw()

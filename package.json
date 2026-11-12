@@ -45,7 +45,6 @@
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
     "mysql2": "^3.24.6",
-    "onnxruntime-node": "^1.31.1",
     "onnxruntime-web": "^1.31.1",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
@@ -53,13 +52,16 @@
     "react-to-print": "^3.3.0",
     "reactflow": "^11.11.4",
     "recharts": "^3.10.1",
-    "sharp": "^0.35.5",
     "tailwindcss": "^4.3.3",
     "three": "^0.186.1",
     "tsx": "^4.21.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.0",
     "xlsx": "^0.18.5"
+  },
+  "optionalDependencies": {
+    "onnxruntime-node": "^1.31.1",
+    "sharp": "^0.35.5"
   },
   "packageManager": "npm@10.9.2"
 }
