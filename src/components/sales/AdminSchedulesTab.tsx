@@ -16,8 +16,7 @@ import {
   AlertCircle,
   Pencil,
   Trash2,
-  Edit3,
-  Sparkles
+  Edit3
 } from 'lucide-react';
 import {
   SalesHeaderFilter,
@@ -432,13 +431,6 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
     }
   };
 
-  const handleLoadInitialTemplate = () => {
-    const template = createInitialSchedules(salesAdminNames);
-    setSchedules(template);
-    setSaveToast('Template penugasan contoh berhasil dimuat!');
-    setTimeout(() => setSaveToast(null), 3000);
-  };
-
   // Manual Schedule Modal State
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
   const [manualDate, setManualDate] = useState(selectedDateIso);
@@ -830,17 +822,6 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
           </div>
 
           <div className="flex items-center gap-2 self-start sm:self-auto">
-            {schedules.length === 0 && (
-              <button
-                type="button"
-                onClick={handleLoadInitialTemplate}
-                className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-bold transition cursor-pointer whitespace-nowrap"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                <span>Muat Template Contoh</span>
-              </button>
-            )}
-
             {schedules.length > 0 && (
               <button
                 type="button"

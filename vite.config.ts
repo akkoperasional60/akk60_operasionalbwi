@@ -71,6 +71,31 @@ export default defineConfig(() => {
         '@': path.resolve(import.meta.dirname || '.'),
       },
     },
+    optimizeDeps: {
+      entries: ['index.html', 'src/**/*.{ts,tsx}'],
+      include: [
+        'firebase/app',
+        'firebase/auth',
+        'html2canvas-pro',
+        'jspdf',
+        'leaflet',
+        'leaflet.markercluster',
+        'lucide-react',
+        'motion/react',
+        'onnxruntime-web',
+        'react',
+        'react-dom',
+        'react-dom/client',
+        'react/jsx-dev-runtime',
+        'react/jsx-runtime',
+        'react-to-print',
+        'reactflow',
+        'recharts',
+        'three',
+        'three/examples/jsm/controls/OrbitControls.js',
+        'xlsx',
+      ],
+    },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modify—file watching is disabled to prevent flickering during agent edits.

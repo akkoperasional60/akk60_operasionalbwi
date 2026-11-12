@@ -6168,6 +6168,7 @@ Kembalikan HANYA JSON valid:
         },
         appType: "spa",
       });
+      void vite.warmupRequest('/src/main.tsx').catch(() => {});
       return vite.middlewares;
     })();
 

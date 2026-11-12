@@ -17,8 +17,38 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   </head>
-  <body class="bg-slate-950 text-slate-100 antialiased font-sans">
+  <body class="bg-slate-950 text-slate-100 antialiased font-sans" style="background-color: #090e17; color: #f1f5f9; margin: 0;">
     <div id="root"></div>
+    <script>
+      (function () {
+        function triggerBootRecovery() {
+          try {
+            var root = document.getElementById('root');
+            if (root && root.children && root.children.length > 0) return;
+            var now = Date.now();
+            var last = Number(sessionStorage.getItem('akk_boot_reload_ts') || '0');
+            if (!last || now - last > 8000) {
+              sessionStorage.setItem('akk_boot_reload_ts', String(now));
+              window.location.reload();
+            }
+          } catch (e) {}
+        }
+        window.addEventListener(
+          'error',
+          function (ev) {
+            var t = ev && ev.target;
+            if (t && t.tagName === 'SCRIPT') {
+              setTimeout(triggerBootRecovery, 150);
+            }
+          },
+          true
+        );
+        window.addEventListener('unhandledrejection', function () {
+          setTimeout(triggerBootRecovery, 200);
+        });
+        setTimeout(triggerBootRecovery, 4000);
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
