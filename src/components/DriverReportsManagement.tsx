@@ -127,21 +127,10 @@ export const DriverReportsManagement: React.FC = () => {
     );
   }, [currentUser]);
 
-  // Role authorization: Hapus laporan HANYA untuk Super Admin
+  // Role authorization: Hapus laporan HANYA berlaku untuk role Super Admin
   const isSuperAdmin = useMemo(() => {
-    const r = (currentUser?.role || '').toLowerCase().trim().replace(/[\s_-]+/g, '');
-    const email = (currentUser?.email || '').toLowerCase().trim();
-    const name = (currentUser?.fullName || '').toLowerCase().trim();
-    const username = ((currentUser as any)?.username || '').toLowerCase().trim();
-    return (
-      r === 'superadmin' ||
-      r === 'admin' ||
-      r === 'manager' ||
-      email === 'akkoperasional60@gmail.com' ||
-      name.includes('super admin') ||
-      name === 'super' ||
-      username.includes('super')
-    );
+    const r = String(currentUser?.role || '').toLowerCase().trim().replace(/[\s_-]+/g, '');
+    return r === 'superadmin';
   }, [currentUser]);
 
   const fleets = useMemo(() => logisticsStore.getFleets(), []);
@@ -335,14 +324,7 @@ export const DriverReportsManagement: React.FC = () => {
       plateNumber?: string;
       timestamp: string;
     }>
-  >(() => {
-    try {
-      const raw = localStorage.getItem('akk_schedule_change_notifs_v1');
-      return raw ? JSON.parse(raw) : [];
-    } catch {
-      return [];
-    }
-  });
+  >([]);
 
   const loadReports = (incomingOrEvent?: any) => {
     const all = driverReportService.getReports();
@@ -362,17 +344,14 @@ export const DriverReportsManagement: React.FC = () => {
         }
       }
     }
-    try {
-      const raw = localStorage.getItem('akk_schedule_change_notifs_v1');
-      setScheduleChangeNotifs(raw ? JSON.parse(raw) : []);
-    } catch {}
   };
 
   useEffect(() => {
     loadReports();
     setFormKirimRecords([...formKirimStore.getAll()]);
-    void formKirimStore.hydrateFromServer(true);
-    driverReportService.syncWithServer().then(() => loadReports()).catch(() => {});
+    void formKirimStore.hydrateFromServer(true, true);
+    void driverShiftService.syncFromServer().then(() => loadReports());
+    driverReportService.syncWithServer(true).then(() => loadReports()).catch(() => {});
 
     const unsubFormKirim = formKirimStore.subscribe(() => {
       setFormKirimRecords([...formKirimStore.getAll()]);
@@ -383,25 +362,28 @@ export const DriverReportsManagement: React.FC = () => {
       loadReports(customEvt?.detail);
     };
 
-    const handleScheduleRealtime = () => {
-      try {
-        const raw = localStorage.getItem('akk_schedule_change_notifs_v1');
-        setScheduleChangeNotifs(raw ? JSON.parse(raw) : []);
-      } catch {}
+    const handleScheduleRealtime = (evt: Event) => {
+      const customEvt = evt as CustomEvent<any>;
+      if (customEvt?.detail && customEvt.detail.title) {
+        setScheduleChangeNotifs(prev => [customEvt.detail, ...prev].slice(0, 15));
+      }
     };
 
     const pollInterval = setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       driverReportService.syncWithServer().catch(() => {});
+      void driverShiftService.syncFromServer();
       void formKirimStore.hydrateFromServer(true);
-    }, 25000);
+    }, 20000);
 
     window.addEventListener('driver-report-updated', handleReportUpdate);
+    window.addEventListener('driver-shift-updated', handleReportUpdate);
     window.addEventListener('akk-driver-schedule-realtime', handleScheduleRealtime);
     return () => {
       clearInterval(pollInterval);
       unsubFormKirim();
       window.removeEventListener('driver-report-updated', handleReportUpdate);
+      window.removeEventListener('driver-shift-updated', handleReportUpdate);
       window.removeEventListener('akk-driver-schedule-realtime', handleScheduleRealtime);
     };
   }, []);
@@ -1085,7 +1067,7 @@ export const DriverReportsManagement: React.FC = () => {
   }, [reports]);
 
   return (
-    <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-200">
+    <div className="w-full max-w-full px-3 sm:px-5 py-4 space-y-5 animate-in fade-in duration-200">
       
       {/* 🌟 SUB-MENU SELECTOR: Laporan & Kendala Lapangan | Laporan Absen Tim Kiriman | Laporan Check-In & Check-Out | Laporan Pengisian BBM (Solar) | Laporan Checklist Armada | Laporan Peringatan Mode Offline */}
       <div className="flex flex-wrap items-center justify-between gap-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-2 rounded-2xl shadow-xs">
@@ -1857,8 +1839,8 @@ export const DriverReportsManagement: React.FC = () => {
             </div>
           </div>
 
-          {/* Tabel & Rincian Riwayat GPS Awal, GPS Kedua, GPS Ketiga */}
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
+          {/* Tabel & Rincian Riwayat GPS Awal, GPS Kedua, GPS Ketiga — Desain Full Halaman Tanpa Scroll Geser */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs w-full">
             {filteredGpsFormKirimReports.length === 0 ? (
               <div className="p-10 text-center space-y-3">
                 <div className="w-12 h-12 rounded-2xl bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 flex items-center justify-center text-blue-600 dark:text-blue-400 mx-auto">
@@ -1872,17 +1854,17 @@ export const DriverReportsManagement: React.FC = () => {
                 </p>
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse text-xs">
+              <div className="w-full">
+                <table className="w-full table-fixed text-left border-collapse text-xs">
                   <thead>
-                    <tr className="bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                      <th className="py-3 px-3.5 w-10 text-center">#</th>
-                      <th className="py-3 px-3.5">Kru, Armada &amp; Area</th>
-                      <th className="py-3 px-3.5">Pelanggan &amp; Faktur</th>
-                      <th className="py-3 px-3.5">History 1: GPS Awal (Simpan Ke-1)</th>
-                      <th className="py-3 px-3.5">History 2: GPS Kedua (Ubah Ke-2)</th>
-                      <th className="py-3 px-3.5">History 3: GPS Ketiga (Ubah Ke-3)</th>
-                      {isSuperAdmin && <th className="py-3 px-3.5 text-center">Aksi</th>}
+                    <tr className="bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      <th className="py-3 px-2 w-8 text-center">#</th>
+                      <th className="py-3 px-2.5 w-[15%]">Kru, Armada &amp; Area</th>
+                      <th className="py-3 px-2.5 w-[17%]">Pelanggan &amp; Faktur</th>
+                      <th className="py-3 px-2.5">History 1: GPS Awal (Simpan Ke-1)</th>
+                      <th className="py-3 px-2.5">History 2: GPS Kedua (Ubah Ke-2)</th>
+                      <th className="py-3 px-2.5">History 3: GPS Ketiga (Ubah Ke-3)</th>
+                      {isSuperAdmin && <th className="py-3 px-2 w-[78px] text-center">Aksi</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
@@ -1896,7 +1878,7 @@ export const DriverReportsManagement: React.FC = () => {
                           stepNumber === 1 ? 'GPS Awal' : stepNumber === 2 ? 'GPS Kedua' : 'GPS Ketiga';
                         if (!entry) {
                           return (
-                            <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-dashed border-slate-200 dark:border-slate-800 text-[11px] text-slate-400 italic">
+                            <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-dashed border-slate-200 dark:border-slate-800 text-[11px] text-slate-400 italic h-full">
                               Belum ada perubahan simpan ke-{stepNumber} ({stepTitle})
                             </div>
                           );
@@ -1913,27 +1895,27 @@ export const DriverReportsManagement: React.FC = () => {
                             : 'bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/30';
 
                         return (
-                          <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-1.5 min-w-[215px]">
-                            <div className="flex items-center justify-between gap-1.5">
+                          <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-1.5 w-full min-w-0">
+                            <div className="flex items-center justify-between gap-1">
                               <span
-                                className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase border ${badgeColors}`}
+                                className={`px-1.5 py-0.5 rounded-md text-[10px] font-black uppercase border shrink-0 ${badgeColors}`}
                               >
                                 🔒 {stepTitle}
                               </span>
-                              <span className="font-mono text-[10px] font-bold text-slate-500 dark:text-slate-400">
+                              <span className="font-mono text-[10px] font-bold text-slate-500 dark:text-slate-400 shrink-0">
                                 {entry.savedTimeWib}
                               </span>
                             </div>
 
-                            <div className="flex items-center justify-between gap-1.5">
-                              <span className="font-mono font-black text-[11px] text-slate-900 dark:text-white">
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="font-mono font-black text-[11px] text-slate-900 dark:text-white truncate">
                                 {entry.lat.toFixed(5)}, {entry.lng.toFixed(5)}
                               </span>
                               <a
                                 href={`https://www.google.com/maps?q=${entry.lat},${entry.lng}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 text-[10px] font-bold transition"
+                                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 text-[10px] font-bold transition shrink-0"
                               >
                                 <MapPin className="w-2.5 h-2.5" />
                                 <span>Maps</span>
@@ -1941,7 +1923,7 @@ export const DriverReportsManagement: React.FC = () => {
                               </a>
                             </div>
 
-                            <div className="text-[10px] text-slate-600 dark:text-slate-300 font-semibold truncate">
+                            <div className="text-[10px] text-slate-600 dark:text-slate-300 font-semibold truncate" title={entry.summary}>
                               {entry.summary}
                             </div>
 
@@ -1964,23 +1946,23 @@ export const DriverReportsManagement: React.FC = () => {
                           key={row.rowId}
                           className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition align-top"
                         >
-                          <td className="py-3.5 px-3.5 text-center font-mono font-bold text-slate-500">
+                          <td className="py-3 px-2 text-center font-mono font-bold text-slate-500">
                             {idx + 1}
                           </td>
-                          <td className="py-3.5 px-3.5 min-w-[180px]">
-                            <div className="font-black text-slate-900 dark:text-white">
+                          <td className="py-3 px-2.5 min-w-0">
+                            <div className="font-black text-slate-900 dark:text-white truncate">
                               {row.driverName}
                             </div>
                             {row.helperName && (
-                              <div className="text-[11px] text-slate-500">
+                              <div className="text-[11px] text-slate-500 truncate">
                                 Helper: <strong className="text-slate-700 dark:text-slate-300">{row.helperName}</strong>
                               </div>
                             )}
                             <div className="mt-1 flex flex-wrap items-center gap-1">
-                              <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 font-mono font-bold text-[10px] text-slate-800 dark:text-amber-300">
+                              <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 font-mono font-bold text-[10px] text-slate-800 dark:text-amber-300 truncate max-w-full">
                                 {formatPlateWithInitial(row.plateNumber)}
                               </span>
-                              <span className="px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 text-[10px] font-black uppercase">
+                              <span className="px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 text-[10px] font-black uppercase truncate max-w-full">
                                 {row.areaKirim}
                               </span>
                             </div>
@@ -1989,7 +1971,7 @@ export const DriverReportsManagement: React.FC = () => {
                             </div>
                           </td>
 
-                          <td className="py-3.5 px-3.5 min-w-[200px]">
+                          <td className="py-3 px-2.5 min-w-0">
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <span
                                 className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
@@ -2010,16 +1992,16 @@ export const DriverReportsManagement: React.FC = () => {
                                 Simpan {row.editCount}/3
                               </span>
                             </div>
-                            <div className="font-black text-slate-900 dark:text-white mt-1">
+                            <div className="font-black text-slate-900 dark:text-white mt-1 truncate" title={row.customerName}>
                               {row.customerName}
                             </div>
-                            <div className="text-[11px] text-slate-500 truncate max-w-[220px]">
+                            <div className="text-[11px] text-slate-500 truncate" title={row.customerAddress}>
                               {row.customerAddress}
                             </div>
-                            <div className="text-[10px] font-mono text-slate-600 dark:text-slate-400 mt-1">
+                            <div className="text-[10px] font-mono text-slate-600 dark:text-slate-400 mt-1 truncate" title={row.invoiceNumbers.join(', ')}>
                               {row.invoiceNumbers.join(', ')}
                             </div>
-                            <div className="mt-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                            <div className="mt-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 truncate">
                               {row.savedMethod}
                               {row.nominalDiterima > 0
                                 ? `: Rp ${row.nominalDiterima.toLocaleString('id-ID')}`
@@ -2027,20 +2009,20 @@ export const DriverReportsManagement: React.FC = () => {
                             </div>
                           </td>
 
-                          <td className="py-3.5 px-3.5">
+                          <td className="py-3 px-2 min-w-0">
                             {renderGpsCell(row.gpsAwal, 1, null)}
                           </td>
 
-                          <td className="py-3.5 px-3.5">
+                          <td className="py-3 px-2 min-w-0">
                             {renderGpsCell(row.gpsKedua, 2, row.gpsAwal)}
                           </td>
 
-                          <td className="py-3.5 px-3.5">
+                          <td className="py-3 px-2 min-w-0">
                             {renderGpsCell(row.gpsKetiga, 3, row.gpsKedua || row.gpsAwal)}
                           </td>
 
                           {isSuperAdmin && (
-                            <td className="py-3.5 px-3.5 text-center align-middle">
+                            <td className="py-3 px-2 text-center align-middle">
                               <button
                                 type="button"
                                 onClick={() =>
@@ -2057,10 +2039,10 @@ export const DriverReportsManagement: React.FC = () => {
                                     }
                                   })
                                 }
-                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-600 text-rose-600 dark:text-rose-400 hover:text-white border border-rose-500/35 hover:border-rose-500 text-[11px] font-bold transition active:scale-95 cursor-pointer"
-                                title="Hapus Riwayat GPS Pelanggan Ini (Khusus Super Admin)"
+                                className="inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-600 text-rose-600 dark:text-rose-400 hover:text-white border border-rose-500/35 hover:border-rose-500 text-[10px] font-bold transition active:scale-95 cursor-pointer"
+                                title="Hapus Riwayat GPS Pelanggan Ini (Khusus Role Super Admin)"
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                <Trash2 className="w-3.5 h-3.5 shrink-0" />
                                 <span>Hapus</span>
                               </button>
                             </td>

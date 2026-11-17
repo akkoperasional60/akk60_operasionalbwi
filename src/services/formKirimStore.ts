@@ -559,18 +559,30 @@ function preserveProgressWhenAdminUpdates(
   });
 }
 
+export interface FormKirimWorkspaceState {
+  selectedAreaKirim: string;
+  tanggalKirim: string;
+  activeSavedRecordId: string | null;
+  viewMode: 'edit' | 'saved_preview';
+  invoiceItems: FormKirimInvoiceItem[];
+  updatedAt?: string;
+}
+
 class FormKirimStore {
   private records: FormKirimRecord[] = INITIAL_FORM_KIRIM;
+  private workspace: FormKirimWorkspaceState | null = null;
   private listeners: Set<() => void> = new Set();
   private hydratedFromServer = false;
   private isHydrating = false;
   private lastHydrateAt = 0;
   private rateLimitedUntil = 0;
+  private workspaceSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     if (typeof window !== 'undefined') {
       try {
         localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem('akk_form_kirim_workspace_v1');
       } catch {
         // ignore
       }
@@ -586,7 +598,7 @@ class FormKirimStore {
     if (this.isHydrating) return;
     const now = Date.now();
     if (!bypassCooldown && now < this.rateLimitedUntil) return;
-    if (!bypassCooldown && this.lastHydrateAt > 0 && now - this.lastHydrateAt < 10000) return;
+    if (!bypassCooldown && this.lastHydrateAt > 0 && now - this.lastHydrateAt < 3000) return;
     this.isHydrating = true;
     this.lastHydrateAt = now;
     this.hydratedFromServer = true;
@@ -598,16 +610,30 @@ class FormKirimStore {
       }
       if (!res.ok) return;
       const data = await res.json();
-      if (data && data.success && Array.isArray(data.records)) {
-        const cleaned = data.records.filter(
-          (r: FormKirimRecord) => r && !LEGACY_DUMMY_FORM_KIRIM_IDS.has(r.id)
-        );
-        if (cleaned.length > 0) {
-          this.records = cleaned;
+      if (data && data.success) {
+        let shouldNotify = false;
+        if (
+          data.workspace &&
+          typeof data.workspace === 'object' &&
+          Array.isArray(data.workspace.invoiceItems)
+        ) {
+          this.workspace = data.workspace;
+          shouldNotify = true;
+        }
+        if (Array.isArray(data.records)) {
+          const cleaned = data.records.filter(
+            (r: FormKirimRecord) => r && !LEGACY_DUMMY_FORM_KIRIM_IDS.has(r.id)
+          );
+          if (cleaned.length > 0) {
+            this.records = cleaned;
+            shouldNotify = true;
+          } else if (this.records.length > 0) {
+            // Seed initial Form Kirim to MySQL server if server has no records yet
+            this.saveAll(this.records);
+          }
+        }
+        if (shouldNotify) {
           this.listeners.forEach(cb => cb());
-        } else if (this.records.length > 0) {
-          // Seed initial Form Kirim to server if server has no records yet
-          this.saveAll(this.records);
         }
       }
     } catch {
@@ -621,6 +647,54 @@ class FormKirimStore {
     return this.records;
   }
 
+  public getWorkspace(): FormKirimWorkspaceState | null {
+    return this.workspace;
+  }
+
+  public saveWorkspace(nextWorkspace: FormKirimWorkspaceState, immediate = false): void {
+    const stamped: FormKirimWorkspaceState = {
+      selectedAreaKirim: String(nextWorkspace.selectedAreaKirim || '').trim().toUpperCase(),
+      tanggalKirim: String(nextWorkspace.tanggalKirim || '').trim(),
+      activeSavedRecordId: nextWorkspace.activeSavedRecordId || null,
+      viewMode: nextWorkspace.viewMode === 'saved_preview' ? 'saved_preview' : 'edit',
+      invoiceItems: Array.isArray(nextWorkspace.invoiceItems) ? nextWorkspace.invoiceItems : [],
+      updatedAt: new Date().toISOString()
+    };
+    this.workspace = stamped;
+
+    if (typeof window === 'undefined') return;
+
+    const pushToMySql = () => {
+      fetch('/api/form-kirim/workspace', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspace: stamped })
+      })
+        .then(async res => {
+          if (!res.ok) return;
+          const data = await res.json().catch(() => null);
+          if (data?.success && Array.isArray(data.records)) {
+            const cleaned = data.records.filter(
+              (r: FormKirimRecord) => r && !LEGACY_DUMMY_FORM_KIRIM_IDS.has(r.id)
+            );
+            this.records = cleaned;
+          }
+        })
+        .catch(() => {});
+    };
+
+    if (this.workspaceSaveTimer) {
+      clearTimeout(this.workspaceSaveTimer);
+      this.workspaceSaveTimer = null;
+    }
+
+    if (immediate) {
+      pushToMySql();
+    } else {
+      this.workspaceSaveTimer = setTimeout(pushToMySql, 350);
+    }
+  }
+
   private persistLocal(records: FormKirimRecord[]): void {
     this.records = records.filter(
       (r: FormKirimRecord) => r && !LEGACY_DUMMY_FORM_KIRIM_IDS.has(r.id)
@@ -631,13 +705,22 @@ class FormKirimStore {
     this.listeners.forEach(cb => cb());
   }
 
-  private saveAll(records: FormKirimRecord[]): void {
+  private saveAll(records: FormKirimRecord[], workspaceOverride?: FormKirimWorkspaceState): void {
     this.persistLocal(records);
+    if (workspaceOverride) {
+      this.workspace = {
+        ...workspaceOverride,
+        updatedAt: new Date().toISOString()
+      };
+    }
     if (typeof window !== 'undefined') {
       fetch('/api/form-kirim', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ records: this.records })
+        body: JSON.stringify({
+          records: this.records,
+          ...(this.workspace ? { workspace: this.workspace } : {})
+        })
       })
         .then(async res => {
           if (!res.ok) return;
@@ -756,24 +839,50 @@ class FormKirimStore {
       driverStatus: input.driverStatus || 'ready_for_driver'
     };
 
-    this.saveAll([record, ...existing]);
+    const nextWorkspace: FormKirimWorkspaceState = {
+      selectedAreaKirim: String(record.areaKirim || '').trim().toUpperCase(),
+      tanggalKirim: String(record.tanggalKirim || '').trim(),
+      activeSavedRecordId: record.id,
+      viewMode: 'saved_preview',
+      invoiceItems: Array.isArray(record.invoiceItems) ? record.invoiceItems : [],
+      updatedAt: new Date().toISOString()
+    };
+
+    this.saveAll([record, ...existing], nextWorkspace);
     return record;
   }
 
   public updateFormKirim(id: string, patch: Partial<FormKirimRecord>): void {
     const existing = this.getAll();
+    let updatedTarget: FormKirimRecord | null = null;
     const updated = existing.map(item => {
       if (item.id !== id) return item;
       const mergedItems = patch.invoiceItems
         ? preserveProgressWhenAdminUpdates(patch.invoiceItems, item.invoiceItems)
         : item.invoiceItems;
-      return {
+      const nextRec = {
         ...item,
         ...patch,
         invoiceItems: mergedItems
       };
+      updatedTarget = nextRec;
+      return nextRec;
     });
-    this.saveAll(updated);
+
+    const nextWorkspace: FormKirimWorkspaceState | undefined = updatedTarget
+      ? {
+          selectedAreaKirim: String((updatedTarget as FormKirimRecord).areaKirim || '').trim().toUpperCase(),
+          tanggalKirim: String((updatedTarget as FormKirimRecord).tanggalKirim || '').trim(),
+          activeSavedRecordId: id,
+          viewMode: 'saved_preview',
+          invoiceItems: Array.isArray((updatedTarget as FormKirimRecord).invoiceItems)
+            ? (updatedTarget as FormKirimRecord).invoiceItems!
+            : [],
+          updatedAt: new Date().toISOString()
+        }
+      : undefined;
+
+    this.saveAll(updated, nextWorkspace);
   }
 
   public validateByFinance(
@@ -1191,13 +1300,16 @@ class FormKirimStore {
 
   public clearCustomerGpsHistory(formKirimId: string, itemIds: string[]): void {
     const idSet = new Set(itemIds);
+    const nowIso = new Date().toISOString();
     const existing = this.getAll();
+    let patchedItems: FormKirimInvoiceItem[] | undefined;
     const updated = existing.map(record => {
       if (record.id !== formKirimId || !record.invoiceItems) return record;
       const nextItems = record.invoiceItems.map(it => {
         if (!idSet.has(it.id)) return it;
         return {
           ...it,
+          driverUpdatedAt: nowIso,
           gpsLockHistory: [],
           lockedGpsLat: undefined,
           lockedGpsLng: undefined,
@@ -1206,12 +1318,23 @@ class FormKirimStore {
           lockedGpsAt: undefined
         };
       });
+      patchedItems = nextItems;
       return {
         ...record,
+        driverUpdatedAt: nowIso,
         invoiceItems: nextItems
       };
     });
-    this.saveAll(updated);
+    this.persistLocal(updated);
+    if (patchedItems) {
+      this.syncDriverPatch(
+        formKirimId,
+        { invoiceItems: patchedItems, driverUpdatedAt: nowIso },
+        updated
+      );
+    } else {
+      this.saveAll(updated);
+    }
   }
 }
 
