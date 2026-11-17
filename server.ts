@@ -4687,31 +4687,90 @@ Kembalikan HANYA JSON valid:
     }
   });
 
-  // 📋 Validasi Faktur Pengiriman Esok — Tim Marketing Offline (Tersimpan langsung di MySQL app_state & Disk)
-  let inMemoryMarketingValidations: any[] = (() => {
-    const disk = readPersistentAppState('marketing_invoice_validations_v1');
-    return Array.isArray(disk) ? disk : [];
-  })();
-  let inMemoryMarketingValidationsLoaded = inMemoryMarketingValidations.length > 0;
+  // 📋 Validasi Faktur & Rincian Barang Pengiriman + Mapping Nama Sales — Tersimpan murni di MySQL app_state
+  const LEGACY_DUMMY_MIV_IDS = new Set([
+    'MIV-1384',
+    'MIV-0625',
+    'MIV-0187',
+    'MIV-1312',
+    'MIV-1313',
+    'MIV-1340',
+    'MIV-1321',
+    'MIV-1289',
+    'MIV-1332',
+    'MIV-1299',
+    'MIV-1298',
+    'MIV-1301',
+    'MIV-1054'
+  ]);
+
+  const sanitizeMarketingValidations = (list: any[]): any[] => {
+    if (!Array.isArray(list)) return [];
+    return list
+      .filter((r: any) => r && !LEGACY_DUMMY_MIV_IDS.has(String(r.id || '')))
+      .map((r: any) => {
+        const rawLines = Array.isArray(r.lineItems) ? r.lineItems : [];
+        const validLines = rawLines.filter((li: any) => {
+          const total = Number(li?.totalHarga) || 0;
+          const harga = Number(li?.hargaSatuan) || 0;
+          return total > 0 || harga > 0;
+        });
+        const status =
+          r.validationStatus === 'Revisi / Tunda Kirim' || r.validationStatus === 'Revisi'
+            ? 'Revisi'
+            : r.validationStatus === 'Tervalidasi Siap Kirim'
+            ? 'Tervalidasi Siap Kirim'
+            : 'Menunggu Validasi';
+        const computedTotal =
+          validLines.length > 0
+            ? validLines.reduce((acc: number, l: any) => acc + (Number(l.totalHarga) || 0), 0)
+            : Number(r.nominalTagihan) || 0;
+        return {
+          ...r,
+          validationStatus: status,
+          nominalTagihan: computedTotal,
+          lineItems: validLines
+        };
+      })
+      .filter((r: any) => (Number(r.nominalTagihan) || 0) > 0);
+  };
+
+  let inMemoryMarketingValidations: any[] = [];
+  let inMemoryMarketingSalesMappings: any[] = [];
+  let inMemoryMarketingValidationsLoaded = false;
   let lastMarketingValidationsSyncAt = 0;
 
   const refreshMarketingValidationsFromDb = async (): Promise<any[] | null> => {
     if (!isDatabaseConfigured()) return null;
     try {
       const rows = await mysqlQuery<any[]>(
-        "SELECT state_json FROM app_state WHERE state_key = 'marketing_invoice_validations_v1' LIMIT 1"
+        "SELECT state_key, state_json FROM app_state WHERE state_key IN ('marketing_invoice_validations_v2', 'marketing_sales_mappings_v1')"
       );
-      if (Array.isArray(rows) && rows.length > 0 && rows[0]?.state_json) {
-        const parsed =
-          typeof rows[0].state_json === 'string'
-            ? JSON.parse(rows[0].state_json)
-            : rows[0].state_json;
-        if (Array.isArray(parsed)) {
-          inMemoryMarketingValidations = parsed;
-          inMemoryMarketingValidationsLoaded = true;
-          lastMarketingValidationsSyncAt = Date.now();
-          writePersistentAppState('marketing_invoice_validations_v1', parsed);
-          return parsed;
+      let hadLegacyDummy = false;
+      if (Array.isArray(rows)) {
+        for (const row of rows) {
+          if (!row?.state_json) continue;
+          const parsed = typeof row.state_json === 'string' ? JSON.parse(row.state_json) : row.state_json;
+          if (row.state_key === 'marketing_invoice_validations_v2' && Array.isArray(parsed)) {
+            const sanitized = sanitizeMarketingValidations(parsed);
+            if (sanitized.length !== parsed.length) {
+              hadLegacyDummy = true;
+            }
+            inMemoryMarketingValidations = sanitized;
+          } else if (row.state_key === 'marketing_sales_mappings_v1' && Array.isArray(parsed)) {
+            inMemoryMarketingSalesMappings = parsed;
+          }
+        }
+      }
+      if (hadLegacyDummy) {
+        try {
+          await mysqlQuery(
+            `INSERT INTO app_state (state_key, state_json, updated_at) VALUES ('marketing_invoice_validations_v2', ?, NOW())
+             ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+            [JSON.stringify(inMemoryMarketingValidations)]
+          );
+        } catch {
+          // ignore cleanup write error
         }
       }
       inMemoryMarketingValidationsLoaded = true;
@@ -4725,53 +4784,71 @@ Kembalikan HANYA JSON valid:
   app.get('/api/marketing-invoice-validations', async (_req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     try {
-      if (isDatabaseConfigured() && (!inMemoryMarketingValidationsLoaded || Date.now() - lastMarketingValidationsSyncAt > 5000)) {
+      if (isDatabaseConfigured() && (!inMemoryMarketingValidationsLoaded || Date.now() - lastMarketingValidationsSyncAt > 3000)) {
         await Promise.race([
           refreshMarketingValidationsFromDb(),
-          new Promise<null>(resolve => setTimeout(() => resolve(null), 900))
+          new Promise<null>(resolve => setTimeout(() => resolve(null), 1200))
         ]);
       }
       return res.json({
         success: true,
         records: inMemoryMarketingValidations,
+        salesMappings: inMemoryMarketingSalesMappings,
         count: inMemoryMarketingValidations.length,
-        source: isDatabaseConfigured() ? 'hostinger_mysql' : 'disk_database'
+        source: 'mysql'
       });
     } catch (err: any) {
       return res.json({
         success: true,
         records: inMemoryMarketingValidations,
+        salesMappings: inMemoryMarketingSalesMappings,
         count: inMemoryMarketingValidations.length,
-        source: 'memory_fallback'
+        source: 'mysql'
       });
     }
   });
 
   app.post('/api/marketing-invoice-validations', express.json({ limit: '20mb' }), async (req, res) => {
     try {
-      const incoming = Array.isArray(req.body?.records) ? req.body.records : [];
-      inMemoryMarketingValidations = incoming;
-      inMemoryMarketingValidationsLoaded = true;
-      lastMarketingValidationsSyncAt = Date.now();
-      writePersistentAppState('marketing_invoice_validations_v1', incoming);
-
-      if (isDatabaseConfigured()) {
-        try {
-          await mysqlQuery(
-            `INSERT INTO app_state (state_key, state_json, updated_at) VALUES ('marketing_invoice_validations_v1', ?, NOW())
-             ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
-            [JSON.stringify(incoming)]
-          );
-        } catch (dbErr: any) {
-          console.warn('[Hostinger MySQL Sync Warning for Marketing Invoice Validations]', dbErr?.message);
+      if (Array.isArray(req.body?.records)) {
+        inMemoryMarketingValidations = sanitizeMarketingValidations(req.body.records);
+        if (isDatabaseConfigured()) {
+          try {
+            await mysqlQuery(
+              `INSERT INTO app_state (state_key, state_json, updated_at) VALUES ('marketing_invoice_validations_v2', ?, NOW())
+               ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+              [JSON.stringify(inMemoryMarketingValidations)]
+            );
+          } catch (dbErr: any) {
+            console.warn('[Hostinger MySQL Sync Warning for Marketing Invoice Validations]', dbErr?.message);
+          }
         }
       }
+
+      if (Array.isArray(req.body?.salesMappings)) {
+        inMemoryMarketingSalesMappings = req.body.salesMappings;
+        if (isDatabaseConfigured()) {
+          try {
+            await mysqlQuery(
+              `INSERT INTO app_state (state_key, state_json, updated_at) VALUES ('marketing_sales_mappings_v1', ?, NOW())
+               ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+              [JSON.stringify(inMemoryMarketingSalesMappings)]
+            );
+          } catch (dbErr: any) {
+            console.warn('[Hostinger MySQL Sync Warning for Marketing Sales Mappings]', dbErr?.message);
+          }
+        }
+      }
+
+      inMemoryMarketingValidationsLoaded = true;
+      lastMarketingValidationsSyncAt = Date.now();
 
       return res.json({
         success: true,
         records: inMemoryMarketingValidations,
+        salesMappings: inMemoryMarketingSalesMappings,
         count: inMemoryMarketingValidations.length,
-        source: isDatabaseConfigured() ? 'hostinger_mysql' : 'disk_database'
+        source: 'mysql'
       });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err?.message });
@@ -4901,7 +4978,15 @@ Kembalikan HANYA JSON valid:
             ttdSignerName: existingItem.ttdSignerName,
             ttdSignedAt: existingItem.ttdSignedAt,
             driverUpdatedBy: existingItem.driverUpdatedBy,
-            driverUpdatedAt: existingItem.driverUpdatedAt
+            driverUpdatedAt: existingItem.driverUpdatedAt,
+            driverEditCount: existingItem.driverEditCount,
+            customerNote: existingItem.customerNote,
+            gpsLockHistory: existingItem.gpsLockHistory,
+            lockedGpsLat: existingItem.lockedGpsLat,
+            lockedGpsLng: existingItem.lockedGpsLng,
+            lockedGpsAccuracy: existingItem.lockedGpsAccuracy,
+            lockedGpsLocation: existingItem.lockedGpsLocation,
+            lockedGpsAt: existingItem.lockedGpsAt
           }
         : {}),
       ...pickLatestFlag('financeTfValidated', 'financeTfValidatedAt', 'financeTfValidatedBy'),
@@ -5024,7 +5109,15 @@ Kembalikan HANYA JSON valid:
             ttdSignerName: incIt.ttdSignerName,
             ttdSignedAt: incIt.ttdSignedAt,
             driverUpdatedBy: incIt.driverUpdatedBy,
-            driverUpdatedAt: incIt.driverUpdatedAt || patch.driverUpdatedAt || new Date().toISOString()
+            driverUpdatedAt: incIt.driverUpdatedAt || patch.driverUpdatedAt || new Date().toISOString(),
+            driverEditCount: incIt.driverEditCount !== undefined ? incIt.driverEditCount : exIt.driverEditCount,
+            customerNote: incIt.customerNote !== undefined ? incIt.customerNote : exIt.customerNote,
+            gpsLockHistory: Array.isArray(incIt.gpsLockHistory) ? incIt.gpsLockHistory : exIt.gpsLockHistory,
+            lockedGpsLat: incIt.lockedGpsLat !== undefined ? incIt.lockedGpsLat : exIt.lockedGpsLat,
+            lockedGpsLng: incIt.lockedGpsLng !== undefined ? incIt.lockedGpsLng : exIt.lockedGpsLng,
+            lockedGpsAccuracy: incIt.lockedGpsAccuracy !== undefined ? incIt.lockedGpsAccuracy : exIt.lockedGpsAccuracy,
+            lockedGpsLocation: incIt.lockedGpsLocation !== undefined ? incIt.lockedGpsLocation : exIt.lockedGpsLocation,
+            lockedGpsAt: incIt.lockedGpsAt !== undefined ? incIt.lockedGpsAt : exIt.lockedGpsAt
           };
         });
       }

@@ -4,6 +4,22 @@ export type FormKirimFinanceStatus = 'pending_finance' | 'approved_finance' | 'r
 export type FormKirimDriverStatus = 'waiting_finance' | 'ready_for_driver' | 'in_transit' | 'delivered';
 export type FormKirimPaymentMethod = 'Kredit / Tempo' | 'COD (Bayar di Tempat)' | 'Lunas Transfer' | 'COD & Tempo (Gabungan)';
 
+export interface FormKirimGpsLockEntry {
+  attemptNumber: number; // 1 = GPS Awal, 2 = GPS Kedua, 3 = GPS Ketiga
+  label: string; // 'GPS Awal' | 'GPS Kedua' | 'GPS Ketiga'
+  lat: number;
+  lng: number;
+  accuracy: number;
+  locationName?: string;
+  savedAt: string;
+  savedTimeWib: string;
+  savedBy: string;
+  savedRole?: string;
+  paymentMethod: string;
+  nominalDiterima?: number;
+  summary: string;
+}
+
 export interface FormKirimInvoiceItem {
   id: string;
   noFaktur: string;
@@ -49,6 +65,12 @@ export interface FormKirimInvoiceItem {
   financeItemNote?: string;
   driverEditCount?: number;
   customerNote?: string;
+  gpsLockHistory?: FormKirimGpsLockEntry[];
+  lockedGpsLat?: number;
+  lockedGpsLng?: number;
+  lockedGpsAccuracy?: number;
+  lockedGpsLocation?: string;
+  lockedGpsAt?: string;
 }
 
 export interface FormKirimRecord {
@@ -113,12 +135,68 @@ export const SAMPLE_NUSANTARA_ARGO_INVOICE_ITEMS: FormKirimInvoiceItem[] = [
     namaPelanggan: 'BU FERA',
     nilaiFaktur: 3543689,
     coly: 0,
-    bayar: '',
+    bayar: 'Rp 3.543.689',
     alamatPelanggan: 'JL S.PARMAN',
-    keterangan: '',
+    keterangan: 'Setoran Tunai Lunas',
     netDays: 0,
     paymentCategory: 'COD',
-    isManualSbu: false
+    isManualSbu: false,
+    metodeBayarAktual: 'Tunai',
+    nominalDiterima: 3543689,
+    driverEditCount: 3,
+    customerNote: 'Awalnya titip DP, lalu direvisi pelunasan penuh oleh toko',
+    lockedGpsLat: -8.174820,
+    lockedGpsLng: 113.702410,
+    lockedGpsAccuracy: 9,
+    lockedGpsLocation: 'JL S.PARMAN, JEMBER',
+    lockedGpsAt: '2026-11-16T09:42:18.000Z',
+    gpsLockHistory: [
+      {
+        attemptNumber: 1,
+        label: 'GPS Awal',
+        lat: -8.174510,
+        lng: 113.702150,
+        accuracy: 12,
+        locationName: 'JL S.PARMAN, JEMBER',
+        savedAt: '2026-11-16T09:15:10.000Z',
+        savedTimeWib: '16.15 WIB',
+        savedBy: 'Budi Santoso',
+        savedRole: 'Driver',
+        paymentMethod: 'TUNAI',
+        nominalDiterima: 2000000,
+        summary: 'Simpan Tunai • Rp 2.000.000'
+      },
+      {
+        attemptNumber: 2,
+        label: 'GPS Kedua',
+        lat: -8.174690,
+        lng: 113.702290,
+        accuracy: 10,
+        locationName: 'JL S.PARMAN, JEMBER',
+        savedAt: '2026-11-16T09:28:45.000Z',
+        savedTimeWib: '16.28 WIB',
+        savedBy: 'Budi Santoso',
+        savedRole: 'Driver',
+        paymentMethod: 'TUNAI',
+        nominalDiterima: 3000000,
+        summary: 'Ubah Simpan Tunai Ke-2 • Rp 3.000.000'
+      },
+      {
+        attemptNumber: 3,
+        label: 'GPS Ketiga',
+        lat: -8.174820,
+        lng: 113.702410,
+        accuracy: 9,
+        locationName: 'JL S.PARMAN, JEMBER',
+        savedAt: '2026-11-16T09:42:18.000Z',
+        savedTimeWib: '16.42 WIB',
+        savedBy: 'Budi Santoso',
+        savedRole: 'Driver',
+        paymentMethod: 'TUNAI',
+        nominalDiterima: 3543689,
+        summary: 'Ubah Simpan Tunai Ke-3 (Lunas) • Rp 3.543.689'
+      }
+    ]
   },
   {
     id: 'fki-2',
@@ -127,12 +205,37 @@ export const SAMPLE_NUSANTARA_ARGO_INVOICE_ITEMS: FormKirimInvoiceItem[] = [
     namaPelanggan: 'TK AULIANA PLASTIK',
     nilaiFaktur: 852870,
     coly: 0,
-    bayar: '',
+    bayar: 'Rp 852.870',
     alamatPelanggan: 'JEMBER',
-    keterangan: '',
+    keterangan: 'Lunas Tunai',
     netDays: 0,
     paymentCategory: 'COD',
-    isManualSbu: false
+    isManualSbu: false,
+    metodeBayarAktual: 'Tunai',
+    nominalDiterima: 852870,
+    driverEditCount: 1,
+    lockedGpsLat: -8.168920,
+    lockedGpsLng: 113.701180,
+    lockedGpsAccuracy: 11,
+    lockedGpsLocation: 'JEMBER KOTA',
+    lockedGpsAt: '2026-11-16T10:05:30.000Z',
+    gpsLockHistory: [
+      {
+        attemptNumber: 1,
+        label: 'GPS Awal',
+        lat: -8.168920,
+        lng: 113.701180,
+        accuracy: 11,
+        locationName: 'JEMBER KOTA',
+        savedAt: '2026-11-16T10:05:30.000Z',
+        savedTimeWib: '17.05 WIB',
+        savedBy: 'Rizky Pratama',
+        savedRole: 'Helper',
+        paymentMethod: 'TUNAI',
+        nominalDiterima: 852870,
+        summary: 'Simpan Tunai • Rp 852.870'
+      }
+    ]
   },
   {
     id: 'fki-3',
@@ -440,7 +543,18 @@ function preserveProgressWhenAdminUpdates(
       financeSettlementChecked: inc.financeSettlementChecked !== undefined ? inc.financeSettlementChecked : prev.financeSettlementChecked,
       financeSettlementCheckedAt: inc.financeSettlementCheckedAt || prev.financeSettlementCheckedAt,
       financeSettlementCheckedBy: inc.financeSettlementCheckedBy || prev.financeSettlementCheckedBy,
-      financeItemNote: inc.financeItemNote || prev.financeItemNote
+      financeItemNote: inc.financeItemNote || prev.financeItemNote,
+      driverEditCount: inc.driverEditCount !== undefined ? inc.driverEditCount : prev.driverEditCount,
+      customerNote: inc.customerNote !== undefined ? inc.customerNote : prev.customerNote,
+      gpsLockHistory:
+        Array.isArray(inc.gpsLockHistory) && inc.gpsLockHistory.length > 0
+          ? inc.gpsLockHistory
+          : prev.gpsLockHistory,
+      lockedGpsLat: inc.lockedGpsLat !== undefined ? inc.lockedGpsLat : prev.lockedGpsLat,
+      lockedGpsLng: inc.lockedGpsLng !== undefined ? inc.lockedGpsLng : prev.lockedGpsLng,
+      lockedGpsAccuracy: inc.lockedGpsAccuracy !== undefined ? inc.lockedGpsAccuracy : prev.lockedGpsAccuracy,
+      lockedGpsLocation: inc.lockedGpsLocation || prev.lockedGpsLocation,
+      lockedGpsAt: inc.lockedGpsAt || prev.lockedGpsAt
     };
   });
 }
@@ -488,9 +602,12 @@ class FormKirimStore {
         const cleaned = data.records.filter(
           (r: FormKirimRecord) => r && !LEGACY_DUMMY_FORM_KIRIM_IDS.has(r.id)
         );
-        if (Array.isArray(cleaned)) {
+        if (cleaned.length > 0) {
           this.records = cleaned;
           this.listeners.forEach(cb => cb());
+        } else if (this.records.length > 0) {
+          // Seed initial Form Kirim to server if server has no records yet
+          this.saveAll(this.records);
         }
       }
     } catch {
@@ -1069,6 +1186,31 @@ class FormKirimStore {
         };
       })
       .filter((r): r is FormKirimRecord => r !== null);
+    this.saveAll(updated);
+  }
+
+  public clearCustomerGpsHistory(formKirimId: string, itemIds: string[]): void {
+    const idSet = new Set(itemIds);
+    const existing = this.getAll();
+    const updated = existing.map(record => {
+      if (record.id !== formKirimId || !record.invoiceItems) return record;
+      const nextItems = record.invoiceItems.map(it => {
+        if (!idSet.has(it.id)) return it;
+        return {
+          ...it,
+          gpsLockHistory: [],
+          lockedGpsLat: undefined,
+          lockedGpsLng: undefined,
+          lockedGpsAccuracy: undefined,
+          lockedGpsLocation: undefined,
+          lockedGpsAt: undefined
+        };
+      });
+      return {
+        ...record,
+        invoiceItems: nextItems
+      };
+    });
     this.saveAll(updated);
   }
 }
