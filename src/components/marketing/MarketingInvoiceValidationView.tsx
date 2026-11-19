@@ -27,8 +27,47 @@ import {
   Sparkles
 } from 'lucide-react';
 import { logisticsStore } from '../../services/store';
+import { branchStore } from '../../services/branchStore';
 import { canAccess, getUserRoleDisplayTitle } from '../../utils/rbac';
 import { UserProfile } from '../../types';
+
+function getEligibleMarketingSalesUsers(
+  allUsers: UserProfile[],
+  activeBranchId: string
+): UserProfile[] {
+  return allUsers.filter(u => {
+    if (u.status !== 'approved') return false;
+    // Kecualikan Admin Penjualan & Super Admin dari daftar Sales Marketing
+    if (
+      u.role === 'sales_admin' ||
+      u.role === 'spv_sales_admin' ||
+      u.role === 'super_admin'
+    ) {
+      return false;
+    }
+    const branchPerms = branchStore.getUserBranchPermissions(
+      u.id,
+      u.role,
+      u.permissions?.modules,
+      u.permissions?.branchPermissions
+    );
+    const activePerm = branchPerms[activeBranchId];
+    if (!activePerm || !activePerm.enabled) return false;
+    const mktMod = activePerm.modules?.marketing;
+    if (!mktMod || !mktMod.enabled) return false;
+    const subs = mktMod.subMenus || {};
+    return (
+      subs.marketing_invoice_validation === 'full_access' ||
+      subs.marketing_invoice_validation === 'read_only' ||
+      subs.marketing_offline === 'full_access' ||
+      subs.marketing_offline === 'read_only' ||
+      subs.marketing_online === 'full_access' ||
+      subs.marketing_online === 'read_only' ||
+      subs.marketing_sales_mapping === 'full_access' ||
+      subs.marketing_sales_mapping === 'read_only'
+    );
+  });
+}
 
 export type MarketingValidationStatus =
   | 'Menunggu Validasi'
@@ -807,28 +846,32 @@ export const MarketingSalesMappingView: React.FC<{
   onNavigateTab?: (tab: string) => void;
 }> = ({ onNavigateTab }) => {
   const [allUsers, setAllUsers] = useState<UserProfile[]>(() => logisticsStore.getUsers());
+  const [activeBranchId, setActiveBranchId] = useState<string>(() => branchStore.getSelectedOriginBranchId());
   useEffect(() => {
     const syncUsers = () => setAllUsers([...logisticsStore.getUsers()]);
-    const unsub = logisticsStore.subscribe(syncUsers);
-    return () => unsub();
+    const unsubUsers = logisticsStore.subscribe(syncUsers);
+    const unsubBranch = branchStore.subscribe(() => setActiveBranchId(branchStore.getSelectedOriginBranchId()));
+    return () => {
+      unsubUsers();
+      unsubBranch();
+    };
   }, []);
 
-  const validationUsers = useMemo(() => {
-    const approved = allUsers.filter(u => u.status === 'approved');
-    const withAccess = approved.filter(
-      u =>
-        canAccess(u, 'marketing', 'marketing_invoice_validation') ||
-        canAccess(u, 'marketing', 'marketing_offline') ||
-        u.role === 'marketing_offline' ||
-        u.role === 'marketing_online' ||
-        u.role === 'sales_admin'
-    );
-    return withAccess.length > 0 ? withAccess : approved;
-  }, [allUsers]);
+  const validationUsers = useMemo(
+    () => getEligibleMarketingSalesUsers(allUsers, activeBranchId),
+    [allUsers, activeBranchId]
+  );
 
   const [salesMappings, setSalesMappings] = useState<SalesNameMappingRecord[]>(DEFAULT_SALES_MAPPINGS);
   const [editingMappingId, setEditingMappingId] = useState<string | null>(null);
   const [mapUserId, setMapUserId] = useState<string>(() => validationUsers[0]?.id || '');
+  useEffect(() => {
+    if (validationUsers.length === 0) {
+      setMapUserId('');
+    } else if (!validationUsers.some(u => u.id === mapUserId)) {
+      setMapUserId(validationUsers[0].id);
+    }
+  }, [validationUsers, mapUserId]);
   const [mapMasterName1, setMapMasterName1] = useState<string>('');
   const [mapMasterName2, setMapMasterName2] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -909,7 +952,7 @@ export const MarketingSalesMappingView: React.FC<{
     setMapMasterName1('');
     setMapMasterName2('');
     showToast(
-      `Mapping Nama Sales untuk ${entry.userFullName} tersimpan ke MySQL & terintegrasi ke Validasi Faktur dan Aplikasi Penagihan.`
+      `Mapping Nama Sales untuk ${entry.userFullName} tersimpan ke database & terintegrasi ke Validasi Faktur dan Aplikasi Penagihan.`
     );
   };
 
@@ -924,7 +967,7 @@ export const MarketingSalesMappingView: React.FC<{
     const nextMappings = salesMappings.filter(m => m.id !== id);
     setSalesMappings(nextMappings);
     void persistMappingsToMysql(nextMappings);
-    showToast('Data Mapping Nama Sales berhasil dihapus dari MySQL.');
+    showToast('Data Mapping Nama Sales berhasil dihapus dari database.');
   };
 
   const filteredMappings = useMemo(() => {
@@ -962,7 +1005,7 @@ export const MarketingSalesMappingView: React.FC<{
                 </h1>
                 {isSavingMysql && (
                   <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">
-                    &middot; Menyimpan ke MySQL...
+                    &middot; Menyimpan ke database...
                   </span>
                 )}
               </div>
@@ -1228,31 +1271,35 @@ export const MarketingInvoiceValidationView: React.FC<{
   const [uploadPreviewInvoices, setUploadPreviewInvoices] = useState<MarketingInvoiceValidationItem[]>([]);
   const [uploadSkippedEmptyRows, setUploadSkippedEmptyRows] = useState<number>(0);
 
-  // Subscribe to User Management users
+  // Subscribe to User Management users & active branch
   const [allUsers, setAllUsers] = useState<UserProfile[]>(() => logisticsStore.getUsers());
+  const [activeBranchId, setActiveBranchId] = useState<string>(() => branchStore.getSelectedOriginBranchId());
   useEffect(() => {
     const syncUsers = () => {
       setAllUsers([...logisticsStore.getUsers()]);
     };
-    const unsub = logisticsStore.subscribe(syncUsers);
-    return () => unsub();
+    const unsubUsers = logisticsStore.subscribe(syncUsers);
+    const unsubBranch = branchStore.subscribe(() => {
+      setActiveBranchId(branchStore.getSelectedOriginBranchId());
+    });
+    return () => {
+      unsubUsers();
+      unsubBranch();
+    };
   }, []);
 
-  // Filter User Management users who have validation access
-  const validationUsers = useMemo(() => {
-    const approved = allUsers.filter(u => u.status === 'approved');
-    const withAccess = approved.filter(
-      u =>
-        canAccess(u, 'marketing', 'marketing_invoice_validation') ||
-        canAccess(u, 'marketing', 'marketing_offline') ||
-        u.role === 'marketing_offline' ||
-        u.role === 'marketing_online' ||
-        u.role === 'sales_admin'
-    );
-    return withAccess.length > 0 ? withAccess : approved;
-  }, [allUsers]);
+  const activeBranchName = useMemo(
+    () => branchStore.getBranchById(activeBranchId)?.name || 'Cabang Aktif',
+    [activeBranchId]
+  );
 
-  // Murni dari Database MySQL (/api/marketing-invoice-validations), tanpa data lokal / dummy
+  // Hanya tampilkan user yang disetujui, BUKAN Adm. Penjualan, aktif di cabang terpilih, dan punya akses modul Marketing
+  const validationUsers = useMemo(
+    () => getEligibleMarketingSalesUsers(allUsers, activeBranchId),
+    [allUsers, activeBranchId]
+  );
+
+  // Murni dari Server Database (/api/marketing-invoice-validations)
   const [records, setRecords] = useState<MarketingInvoiceValidationItem[]>([]);
   const [salesMappings, setSalesMappings] = useState<SalesNameMappingRecord[]>(DEFAULT_SALES_MAPPINGS);
   const [isLoadingMysql, setIsLoadingMysql] = useState<boolean>(true);
@@ -1265,6 +1312,15 @@ export const MarketingInvoiceValidationView: React.FC<{
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
+  useEffect(() => {
+    if (
+      selectedSalesUserFilter !== 'ALL' &&
+      !validationUsers.some(u => u.id === selectedSalesUserFilter)
+    ) {
+      setSelectedSalesUserFilter('ALL');
+    }
+  }, [activeBranchId, validationUsers, selectedSalesUserFilter]);
+
   // Modal Tambah Faktur
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -1274,7 +1330,14 @@ export const MarketingInvoiceValidationView: React.FC<{
   const [formAreaName, setFormAreaName] = useState('BANYUWANGI');
   const [formPaymentCategory, setFormPaymentCategory] = useState<'COD' | 'TEMPO'>('TEMPO');
   const [formMasterSalesName, setFormMasterSalesName] = useState('17. ZAINAL LKT BALI');
-  const [formSalesUserId, setFormSalesUserId] = useState('usr-marketing-offline');
+  const [formSalesUserId, setFormSalesUserId] = useState(() => validationUsers[0]?.id || '');
+  useEffect(() => {
+    if (validationUsers.length === 0) {
+      if (formSalesUserId) setFormSalesUserId('');
+    } else if (!validationUsers.some(u => u.id === formSalesUserId)) {
+      setFormSalesUserId(validationUsers[0].id);
+    }
+  }, [validationUsers, formSalesUserId]);
   const [formStatus, setFormStatus] = useState<MarketingValidationStatus>('Menunggu Validasi');
   const [formNotes, setFormNotes] = useState('');
   const [formLineItems, setFormLineItems] = useState<InvoiceLineItem[]>([
@@ -1293,6 +1356,7 @@ export const MarketingInvoiceValidationView: React.FC<{
   // Modal Integrasi WhatsApp Sales
   const [waModalData, setWaModalData] = useState<{
     title: string;
+    salesUserId?: string;
     salesName: string;
     masterSalesNames: string;
     salesWhatsapp: string;
@@ -1543,7 +1607,7 @@ export const MarketingInvoiceValidationView: React.FC<{
     ];
     setRecords(merged);
     await persistToMysql(merged, undefined);
-    showToast(`${syncedWithDate.length} faktur berhasil disimpan ke database MySQL.`);
+    showToast(`${syncedWithDate.length} faktur berhasil disimpan ke database.`);
     setUploadPreviewInvoices([]);
     setUploadFileName('');
     setViewMode('table');
@@ -1831,7 +1895,7 @@ export const MarketingInvoiceValidationView: React.FC<{
     setRecords(next);
     void persistToMysql(next, undefined);
     setIsFormModalOpen(false);
-    showToast(`Faktur ${payload.noInvoice} berhasil disimpan ke database MySQL.`);
+    showToast(`Faktur ${payload.noInvoice} berhasil disimpan ke database.`);
   };
 
   // Build WhatsApp message for single invoice
@@ -1870,44 +1934,60 @@ export const MarketingInvoiceValidationView: React.FC<{
     });
   };
 
-  // Build Batch WhatsApp message for a Sales person
+  // Build Batch WhatsApp message for an eligible Marketing Sales user in the active branch
   const openBatchWaModalForSales = (targetUserFilter?: string) => {
     const firstResolved = filteredRecords[0] ? resolveSalesInfo(filteredRecords[0]) : null;
-    const chosenUserId =
+    const requestedId =
       targetUserFilter && targetUserFilter !== 'ALL'
         ? targetUserFilter
-        : firstResolved?.userId || validationUsers[0]?.id || '';
+        : firstResolved?.userId;
+
+    const chosenUser =
+      (requestedId ? validationUsers.find(u => u.id === requestedId) : undefined) ||
+      validationUsers[0];
+
+    if (!chosenUser) {
+      showToast(
+        `Belum ada akun Sales Marketing yang memiliki akses di cabang ${activeBranchName}. Atur hak akses cabang & modul Marketing di Manajemen User.`
+      );
+      return;
+    }
 
     const salesItems = filteredRecords.filter(r => {
       const res = resolveSalesInfo(r);
-      return res.userId === chosenUserId || res.userFullName === chosenUserId;
+      return res.userId === chosenUser.id || res.userFullName === chosenUser.fullName;
     });
 
-    const targetList = salesItems.length > 0 ? salesItems : filteredRecords;
+    const targetList = salesItems;
     const sampleResolved = targetList[0] ? resolveSalesInfo(targetList[0]) : null;
-    const liveUser = allUsers.find(u => u.id === chosenUserId);
+    const mapEntry = salesMappings.find(m => m.userId === chosenUser.id);
+    const pairedMasters =
+      sampleResolved?.pairedMasterNames.join(' & ') ||
+      [mapEntry?.masterSalesName1, mapEntry?.masterSalesName2].filter(Boolean).join(' & ') ||
+      chosenUser.fullName;
 
-    const salesFullName = liveUser?.fullName || sampleResolved?.userFullName || 'Sales Marketing';
-    const salesPhone = liveUser?.phone || sampleResolved?.userPhone || '0813-4455-6677';
-    const pairedMasters = sampleResolved?.pairedMasterNames.join(' & ') || salesFullName;
+    const salesFullName = chosenUser.fullName;
+    const salesPhone = chosenUser.phone || mapEntry?.userPhone || '';
     const readableDate = formatReadableDate(selectedDeliveryDate || tomorrowIso);
 
     const lines = targetList.map((it, idx) => {
       const itemCount = Array.isArray(it.lineItems) ? it.lineItems.length : 1;
-      return `${idx + 1}. *${it.customerName}* [${it.masterSalesName}] — Faktur: *${it.noInvoice}* (${itemCount} item) | Total: *Rp ${formatRupiahNumber(it.nominalTagihan)}* | *${normalizeValidationStatus(it.validationStatus)}*`;
+      return `${idx + 1}. *${it.customerName}* [${it.masterSalesName}] — Faktur: *${it.noInvoice}* (${itemCount} item) | Total: *Rp ${formatRupiahNumber(it.nominalTagihan) || '0'}* | *${normalizeValidationStatus(it.validationStatus)}*`;
     });
 
     const grandTotal = targetList.reduce((acc, it) => acc + (Number(it.nominalTagihan) || 0), 0);
+    const grandTotalText = grandTotal > 0 ? formatRupiahNumber(grandTotal) : '0';
 
     const msg =
       `Halo *${salesFullName}* (Master Sales: *${pairedMasters}*),\n` +
       `Berikut *Rekap Validasi Faktur Pengiriman (${readableDate})*:\n\n` +
       (lines.length > 0 ? lines.join('\n') : 'Belum ada daftar faktur.') +
-      `\n\nTotal Rekap: *${targetList.length} Faktur* (*Rp ${formatRupiahNumber(grandTotal)}*).\n` +
+      `\n\nTotal Rekap: *${targetList.length} Faktur* (*Rp ${grandTotalText}*).\n` +
       `Mohon koordinasi dengan toko terkait jadwal pengiriman. Terima kasih.`;
 
     setWaModalData({
       title: `Rekap WA Sales — ${salesFullName}`,
+      salesUserId: chosenUser.id,
       salesName: salesFullName,
       masterSalesNames: pairedMasters,
       salesWhatsapp: salesPhone,
@@ -2056,7 +2136,7 @@ export const MarketingInvoiceValidationView: React.FC<{
                 Halaman Upload Excel — Validasi Faktur &amp; Rincian Barang
               </h1>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Unggah file Excel daftar faktur pengiriman beserta rincian barang untuk langsung disimpan ke Database MySQL
+                Unggah file Excel daftar faktur pengiriman beserta rincian barang untuk langsung disimpan ke Server Database
               </p>
             </div>
           </div>
@@ -2155,7 +2235,7 @@ export const MarketingInvoiceValidationView: React.FC<{
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60">
                 <div className="space-y-0.5">
                   <div className="text-xs font-extrabold text-emerald-900 dark:text-emerald-200">
-                    Hasil Pembacaan File Excel Siap Disimpan ke MySQL
+                    Hasil Pembacaan File Excel Siap Disimpan ke Database
                   </div>
                   <div className="text-[11px] text-emerald-700 dark:text-emerald-300 font-medium">
                     Terbaca <strong>{uploadPreviewInvoices.length} Faktur</strong> ({totalPreviewLines} Baris Barang) dengan Total Nilai{' '}
@@ -2171,7 +2251,7 @@ export const MarketingInvoiceValidationView: React.FC<{
                   className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold flex items-center gap-2 shadow-sm cursor-pointer shrink-0"
                 >
                   <CheckCircle2 className="w-4 h-4" />
-                  <span>Simpan ke Database MySQL ({uploadPreviewInvoices.length} Faktur)</span>
+                  <span>Simpan ke Database ({uploadPreviewInvoices.length} Faktur)</span>
                 </button>
               </div>
 
@@ -2242,7 +2322,7 @@ export const MarketingInvoiceValidationView: React.FC<{
                 </h1>
                 {isSyncingMysql && (
                   <span className="text-[11px] font-semibold text-blue-600 dark:text-blue-400">
-                    &middot; Menyimpan ke MySQL...
+                    &middot; Menyimpan ke database...
                   </span>
                 )}
               </div>
@@ -2357,7 +2437,7 @@ export const MarketingInvoiceValidationView: React.FC<{
               {
                 value: 'ALL',
                 label: 'Semua Sales (User Akses Validasi)',
-                subLabel: 'Tampilkan seluruh faktur sales marketing',
+                subLabel: `Tampilkan faktur sales marketing cabang ${activeBranchName}`,
                 badge: `${validationUsers.length} User`,
                 badgeTone: 'indigo'
               },
@@ -2461,7 +2541,7 @@ export const MarketingInvoiceValidationView: React.FC<{
             {isLoadingMysql ? (
               <tr className="h-24">
                 <td colSpan={11} className="px-4 text-center text-slate-400 text-xs">
-                  Memuat data Validasi Faktur dari Database MySQL...
+                  Memuat data Validasi Faktur dari Server Database...
                 </td>
               </tr>
             ) : flattenedExcelRows.length === 0 ? (
@@ -2469,10 +2549,10 @@ export const MarketingInvoiceValidationView: React.FC<{
                 <td colSpan={11} className="px-4 text-center">
                   <div className="max-w-md mx-auto space-y-2 py-4">
                     <div className="text-xs font-extrabold text-slate-700 dark:text-slate-200">
-                      Belum Ada Data Validasi Faktur di Database MySQL
+                      Belum Ada Data Validasi Faktur di Database
                     </div>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Silakan unggah file Excel melalui tombol <strong>Upload Excel</strong> atau klik <strong>Tambah Faktur</strong> untuk menambahkan data ke MySQL.
+                      Silakan unggah file Excel melalui tombol <strong>Upload Excel</strong> atau klik <strong>Tambah Faktur</strong> untuk menambahkan data ke database.
                     </p>
                     <div className="flex items-center justify-center gap-2 pt-1">
                       <button
@@ -2658,7 +2738,7 @@ export const MarketingInvoiceValidationView: React.FC<{
                   Tambah Faktur &amp; Rincian Barang
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Tersimpan langsung ke Database MySQL serta terintegrasi dengan Mapping Nama Sales
+                  Tersimpan langsung ke Server Database serta terintegrasi dengan Mapping Nama Sales
                 </p>
               </div>
               <button
@@ -2898,7 +2978,7 @@ export const MarketingInvoiceValidationView: React.FC<{
                   type="submit"
                   className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold cursor-pointer"
                 >
-                  Simpan Faktur ke MySQL
+                  Simpan Faktur
                 </button>
               </div>
             </form>
@@ -2934,6 +3014,25 @@ export const MarketingInvoiceValidationView: React.FC<{
             </div>
 
             <div className="space-y-3 text-xs">
+              {validationUsers.length > 0 && waModalData.salesUserId !== undefined && (
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Pilih Penerima Sales Marketing (Cabang {activeBranchName})
+                  </label>
+                  <select
+                    value={waModalData.salesUserId}
+                    onChange={e => openBatchWaModalForSales(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 font-bold text-slate-900 dark:text-white cursor-pointer"
+                  >
+                    {validationUsers.map(u => (
+                      <option key={u.id} value={u.id}>
+                        {u.fullName} ({getUserRoleDisplayTitle(u.role)})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div>
                 <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                   Nomor WhatsApp Sales (Otomatis dari User Management)
@@ -2944,6 +3043,7 @@ export const MarketingInvoiceValidationView: React.FC<{
                   onChange={e =>
                     setWaModalData(prev => (prev ? { ...prev, salesWhatsapp: e.target.value } : null))
                   }
+                  placeholder="Contoh: 0812-3456-7890"
                   className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 font-mono font-bold text-slate-900 dark:text-white"
                 />
               </div>

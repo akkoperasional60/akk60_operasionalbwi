@@ -1,12 +1,15 @@
 import React, { useState, useEffect, useRef, useCallback, Suspense } from 'react';
 import { Sidebar, NavTab } from './components/Sidebar';
 import type { WmsSubTab } from './components/WarehouseManagementSystem';
-import { AuthModal } from './components/AuthModal';
 import { LoginPage } from './components/LoginPage';
 import { ThemeSwitcher } from './components/ThemeSwitcher';
 import { NetworkStatusBanner } from './components/NetworkStatusBanner';
 import { RealtimeShipmentListener } from './components/RealtimeShipmentListener';
 import { AkkLogo } from './components/AkkLogo';
+
+const AuthModal = React.lazy(() =>
+  import('./components/AuthModal').then(m => ({ default: m.AuthModal }))
+);
 import { RetailStore } from './types';
 import { logisticsStore } from './services/store';
 import { branchStore, BranchRecord } from './services/branchStore';
@@ -503,10 +506,10 @@ export default function App() {
   useEffect(() => {
     let active = true;
     const authTimeout = setTimeout(() => {
-      if (active && isAuthChecking) {
+      if (active) {
         setIsAuthChecking(false);
       }
-    }, 3000);
+    }, 1800);
 
     void logisticsStore.restoreServerSession().catch(() => {}).finally(() => {
       if (active) {
@@ -524,6 +527,7 @@ export default function App() {
     });
     return () => {
       active = false;
+      clearTimeout(authTimeout);
       unsubscribe();
     };
   }, []);
@@ -714,7 +718,9 @@ export default function App() {
 
       const targetPath = getTabPath(currentTab);
       if (currentPath !== targetPath) {
-        if (currentPath === '/' || currentPath === '/login') {
+        const resolvedCurrent = resolveTabFromUrl(window.location);
+        const isSameTabAlias = resolvedCurrent.tab === currentTab;
+        if (currentPath === '/' || currentPath === '/login' || isSameTabAlias) {
           window.history.replaceState({ tab: currentTab }, '', targetPath);
         } else {
           window.history.pushState({ tab: currentTab }, '', targetPath);
@@ -1473,12 +1479,16 @@ export default function App() {
         </div>
       )}
 
-      {/* Authentication Modal (Login & Register) */}
-      <AuthModal
-        isOpen={isAuthOpen}
-        onClose={() => setIsAuthOpen(false)}
-        defaultTab={authDefaultTab}
-      />
+      {/* Authentication Modal (lazy-loaded only when opened) */}
+      {isAuthOpen && (
+        <Suspense fallback={null}>
+          <AuthModal
+            isOpen={isAuthOpen}
+            onClose={() => setIsAuthOpen(false)}
+            defaultTab={authDefaultTab}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

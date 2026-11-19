@@ -232,8 +232,8 @@ export const getDefaultPermissionsForRole = (role: UserRole | string): UserPermi
       subMenus: {
         marketing_online: isAll || isMktOnline ? 'full_access' : isSpvMktOffline ? 'read_only' : 'none',
         marketing_offline: isAll || isMktOffline ? 'full_access' : 'none',
-        marketing_invoice_validation: isAll || isMktOffline || isMktOnline || isSales ? 'full_access' : 'none',
-        marketing_sales_mapping: isAll || isMktOffline || isMktOnline || isSales || isFinance ? 'full_access' : 'none',
+        marketing_invoice_validation: isAll || isMktOffline || isMktOnline ? 'full_access' : 'none',
+        marketing_sales_mapping: isAll || isMktOffline || isMktOnline || isFinance ? 'full_access' : 'none',
         marketing_to_vo_ro: isAll || isMktOnline || isMktOffline ? 'full_access' : 'none',
         customer_map: isAll || isMktOnline || isMktOffline ? 'full_access' : 'none',
         marketing_billing_app: isAll || isMktOffline || isMktOnline || isFinance ? 'full_access' : 'none',
@@ -537,7 +537,7 @@ export const CANONICAL_SIDEBAR_MODULES: CanonicalModuleDef[] = [
   {
     id: 'warehouse',
     name: 'Gudang (WMS)',
-    description: 'Database barang, denah rak, inbound/outbound, dan opname gudang integrasi pembelian.',
+    description: 'Database barang, denah rak, inbound/outbound, dan opname gudang.',
     borderClass: 'border-emerald-500/30',
     iconBgClass: 'bg-emerald-500/15 text-emerald-400',
     subMenus: [
@@ -545,7 +545,7 @@ export const CANONICAL_SIDEBAR_MODULES: CanonicalModuleDef[] = [
       { id: 'warehouse_slotting', name: 'Denah Rak & Slotting' },
       { id: 'warehouse_inbound', name: 'Inbound (Barang Masuk)' },
       { id: 'warehouse_outbound', name: 'Outbound (Picking & Muat)' },
-      { id: 'warehouse_opname', name: 'Opname Gudang (Integrasi Pembelian)' }
+      { id: 'warehouse_opname', name: 'Opname Gudang' }
     ]
   },
   {
@@ -917,9 +917,9 @@ export const getAccessLevel = (
 
   // If branchPermissions are configured on the user profile, evaluate branch-level permissions accurately
   if (hasBranchPerms && branchPerms) {
-    if (branchId && branchPerms[branchId]) {
+    if (branchId) {
       const bEntry = branchPerms[branchId];
-      if (!bEntry.enabled) return 'none';
+      if (!bEntry || !bEntry.enabled) return 'none';
       const bMod = bEntry.modules?.[resolvedModuleId];
       return resolveSubMenuLevelFromMod(bMod, defaultMod, resolvedModuleId, resolvedSubMenuId);
     }
