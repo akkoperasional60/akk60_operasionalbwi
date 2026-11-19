@@ -105,6 +105,7 @@ export type NavTab =
   | 'ga_aset'
   | 'training_videos'
   | 'training_karyawan'
+  | 'finance_overview'
   | 'finance_dashboard'
   | 'finance_customer_mapping'
   | 'finance_validasi_form_kirim'
@@ -811,9 +812,15 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       groups: [
         {
           groupId: 'finance-master',
-          groupTitle: 'Tagihan & Master Pelanggan',
-          groupIcon: <FileText className="w-4 h-4 text-emerald-500" />,
+          groupTitle: 'Ringkasan, Tagihan & Master Pelanggan',
+          groupIcon: <LayoutDashboard className="w-4 h-4 text-cyan-500" />,
           items: [
+            {
+              tab: 'finance_overview',
+              label: 'Dashboard',
+              icon: <LayoutDashboard className="w-4 h-4 text-cyan-500" />,
+              description: 'Ringkasan piutang, jatuh tempo, limit kredit & validasi form kirim'
+            },
             {
               tab: 'finance_dashboard',
               label: 'Finance & Tagihan Pelanggan',
@@ -875,14 +882,14 @@ const SidebarComponent: React.FC<SidebarProps> = ({
       groups: [
         {
           groupId: 'hr-personalia',
-          groupTitle: 'Personalia & Kehadiran',
+          groupTitle: 'Data, Rolling & History Karyawan',
           groupIcon: <Users className="w-4 h-4 text-indigo-500" />,
           items: [
             {
               tab: 'hr_dashboard',
               label: 'HR',
               icon: <Users className="w-4 h-4 text-indigo-500" />,
-              description: 'Data karyawan, presensi kru & rekap kehadiran'
+              description: 'Data karyawan, rolling posisi & history departemen'
             }
           ]
         },

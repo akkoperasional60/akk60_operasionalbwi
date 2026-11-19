@@ -173,6 +173,24 @@ export async function fetchSalesNameMappingsFromMysql(): Promise<SalesNameMappin
   return cachedSalesMappings;
 }
 
+function stripNumericSalesPrefix(raw: string): string {
+  return String(raw || '')
+    .trim()
+    .toUpperCase()
+    .replace(/^\d+[\s.\-_:]*/, '')
+    .trim();
+}
+
+function escapeRegexLiteral(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function containsWholeWord(haystackUpper: string, wordUpper: string): boolean {
+  if (!haystackUpper || !wordUpper || wordUpper.length < 3) return false;
+  const rx = new RegExp(`(?:^|[^A-Z0-9])${escapeRegexLiteral(wordUpper)}(?:$|[^A-Z0-9])`, 'i');
+  return rx.test(haystackUpper);
+}
+
 export function resolveSalesFromMappings(
   rawSalesInput: string,
   mappings: SalesNameMappingRecord[],
@@ -187,18 +205,41 @@ export function resolveSalesFromMappings(
 } {
   const rawMaster = String(rawSalesInput || '').trim();
   const normMaster = rawMaster.toUpperCase();
+  const strippedMaster = stripNumericSalesPrefix(rawMaster);
 
-  const matchedMapping = mappings.find(m => {
-    const m1 = String(m.masterSalesName1 || '').trim().toUpperCase();
-    const m2 = String(m.masterSalesName2 || '').trim().toUpperCase();
-    const uName = String(m.userFullName || '').trim().toUpperCase();
-    return (
-      (explicitUserId && m.userId === explicitUserId) ||
-      (m1 && normMaster && (normMaster === m1 || normMaster.includes(m1) || m1.includes(normMaster))) ||
-      (m2 && normMaster && (normMaster === m2 || normMaster.includes(m2) || m2.includes(normMaster))) ||
-      (uName && normMaster && (normMaster === uName || normMaster.includes(uName)))
-    );
-  });
+  const matchMasterToTarget = (candidateRaw: string): boolean => {
+    const c = String(candidateRaw || '').trim().toUpperCase();
+    if (!c || !normMaster) return false;
+    if (normMaster === c) return true;
+    const strippedC = stripNumericSalesPrefix(c);
+    if (strippedC && strippedMaster && strippedMaster === strippedC) return true;
+    if (c.length >= 4 && normMaster.length >= 4 && (normMaster.includes(c) || c.includes(normMaster))) {
+      return true;
+    }
+    if (strippedC.length >= 4 && strippedMaster.length >= 4 && (strippedMaster.includes(strippedC) || strippedC.includes(strippedMaster))) {
+      return true;
+    }
+    return false;
+  };
+
+  // Priority 1: Explicit userId or exact mapping match
+  const matchedMapping =
+    mappings.find(m => explicitUserId && m.userId === explicitUserId) ||
+    mappings.find(m => {
+      const m1 = String(m.masterSalesName1 || '').trim().toUpperCase();
+      const m2 = String(m.masterSalesName2 || '').trim().toUpperCase();
+      return (m1 && normMaster === m1) || (m2 && normMaster === m2);
+    }) ||
+    mappings.find(m => {
+      const m1 = String(m.masterSalesName1 || '').trim().toUpperCase();
+      const m2 = String(m.masterSalesName2 || '').trim().toUpperCase();
+      const uName = String(m.userFullName || '').trim().toUpperCase();
+      return (
+        matchMasterToTarget(m1) ||
+        matchMasterToTarget(m2) ||
+        (uName && normMaster && (normMaster === uName || normMaster.includes(uName) || containsWholeWord(normMaster, uName.split(' ')[0])))
+      );
+    });
 
   if (matchedMapping) {
     const liveUser = allUsers.find(u => u.id === matchedMapping.userId);
@@ -214,12 +255,31 @@ export function resolveSalesFromMappings(
     };
   }
 
-  const directUser = allUsers.find(
-    u =>
-      (explicitUserId && u.id === explicitUserId) ||
-      u.fullName.toLowerCase() === rawMaster.toLowerCase() ||
-      (rawMaster && rawMaster.toLowerCase().includes(u.fullName.split(' ')[0].toLowerCase()))
-  );
+  // Prioritize marketing/sales-eligible users before checking general staff
+  const prioritizedUsers = [
+    ...allUsers.filter(
+      u => u.role === 'marketing_offline' || u.role === 'marketing_online' || u.role === 'spv_marketing_offline'
+    ),
+    ...allUsers.filter(
+      u => u.role !== 'marketing_offline' && u.role !== 'marketing_online' && u.role !== 'spv_marketing_offline' && u.role !== 'sales_admin' && u.role !== 'spv_sales_admin' && u.role !== 'super_admin'
+    )
+  ];
+
+  const directUser =
+    (explicitUserId ? allUsers.find(u => u.id === explicitUserId) : undefined) ||
+    prioritizedUsers.find(u => {
+      const uFull = String(u.fullName || '').trim().toUpperCase();
+      if (!uFull || !normMaster) return false;
+      return uFull === normMaster || uFull === strippedMaster || normMaster.includes(uFull);
+    }) ||
+    prioritizedUsers.find(u => {
+      const tokens = String(u.fullName || '')
+        .trim()
+        .toUpperCase()
+        .split(/\s+/)
+        .filter(t => t.length >= 4);
+      return tokens.some(t => containsWholeWord(strippedMaster || normMaster, t));
+    });
 
   if (directUser) {
     return {
@@ -238,6 +298,67 @@ export function resolveSalesFromMappings(
     masterSalesName: rawMaster || 'SALES MARKETING',
     pairedMasterNames: [rawMaster || 'SALES MARKETING']
   };
+}
+
+export function doesInvoiceBelongToUser(
+  item: MarketingInvoiceValidationItem,
+  targetUser: UserProfile | null | undefined,
+  mappings: SalesNameMappingRecord[],
+  allUsers: UserProfile[] = []
+): boolean {
+  if (!targetUser || !targetUser.id) return false;
+  const resolved = resolveSalesFromMappings(
+    item.masterSalesName || item.salesName,
+    mappings,
+    allUsers,
+    item.salesUserId
+  );
+
+  if (item.salesUserId && item.salesUserId === targetUser.id) return true;
+  if (resolved.userId && resolved.userId === targetUser.id) return true;
+
+  const targetFullLower = String(targetUser.fullName || '').trim().toLowerCase();
+  if (targetFullLower) {
+    if (resolved.userFullName.trim().toLowerCase() === targetFullLower) return true;
+    if (String(item.salesName || '').trim().toLowerCase() === targetFullLower) return true;
+  }
+
+  // Check if any mapping entry belongs to targetUser by ID or exact name
+  const userMappings = mappings.filter(
+    m =>
+      m.userId === targetUser.id ||
+      (targetFullLower && String(m.userFullName || '').trim().toLowerCase() === targetFullLower)
+  );
+  const rawMasterUpper = String(item.masterSalesName || item.salesName || '').trim().toUpperCase();
+  const strippedItemMaster = stripNumericSalesPrefix(rawMasterUpper);
+
+  for (const m of userMappings) {
+    for (const candidate of [m.masterSalesName1, m.masterSalesName2]) {
+      const cUpper = String(candidate || '').trim().toUpperCase();
+      if (!cUpper) continue;
+      const strippedC = stripNumericSalesPrefix(cUpper);
+      if (
+        rawMasterUpper === cUpper ||
+        (strippedItemMaster && strippedC && strippedItemMaster === strippedC) ||
+        (cUpper.length >= 4 && rawMasterUpper.includes(cUpper)) ||
+        (strippedC.length >= 4 && strippedItemMaster.includes(strippedC))
+      ) {
+        return true;
+      }
+    }
+  }
+
+  // If already assigned to a different specific userId, do not guess by partial name
+  if (resolved.userId && resolved.userId !== targetUser.id) {
+    return false;
+  }
+
+  const tokens = String(targetUser.fullName || '')
+    .trim()
+    .toUpperCase()
+    .split(/\s+/)
+    .filter(t => t.length >= 4);
+  return tokens.some(t => containsWholeWord(strippedItemMaster || rawMasterUpper, t));
 }
 
 function getTomorrowIso(): string {
@@ -1271,12 +1392,14 @@ export const MarketingInvoiceValidationView: React.FC<{
   const [uploadPreviewInvoices, setUploadPreviewInvoices] = useState<MarketingInvoiceValidationItem[]>([]);
   const [uploadSkippedEmptyRows, setUploadSkippedEmptyRows] = useState<number>(0);
 
-  // Subscribe to User Management users & active branch
+  // Subscribe to User Management users, current logged-in user & active branch
   const [allUsers, setAllUsers] = useState<UserProfile[]>(() => logisticsStore.getUsers());
+  const [currentUser, setCurrentUser] = useState<UserProfile>(() => logisticsStore.getCurrentUser());
   const [activeBranchId, setActiveBranchId] = useState<string>(() => branchStore.getSelectedOriginBranchId());
   useEffect(() => {
     const syncUsers = () => {
       setAllUsers([...logisticsStore.getUsers()]);
+      setCurrentUser(logisticsStore.getCurrentUser());
     };
     const unsubUsers = logisticsStore.subscribe(syncUsers);
     const unsubBranch = branchStore.subscribe(() => {
@@ -1287,6 +1410,18 @@ export const MarketingInvoiceValidationView: React.FC<{
       unsubBranch();
     };
   }, []);
+
+  const canViewAllSalesAccounts = useMemo(() => {
+    const r = String(currentUser?.role || '').toLowerCase();
+    return (
+      r === 'super_admin' ||
+      r === 'spv_marketing_offline' ||
+      r === 'spv_sales_admin' ||
+      r === 'sales_admin' ||
+      r === 'operasional'
+    );
+  }, [currentUser]);
+  const isPersonalSalesMode = !canViewAllSalesAccounts;
 
   const activeBranchName = useMemo(
     () => branchStore.getBranchById(activeBranchId)?.name || 'Cabang Aktif',
@@ -1313,13 +1448,17 @@ export const MarketingInvoiceValidationView: React.FC<{
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   useEffect(() => {
+    if (isPersonalSalesMode && currentUser?.id) {
+      setSelectedSalesUserFilter(currentUser.id);
+      return;
+    }
     if (
       selectedSalesUserFilter !== 'ALL' &&
       !validationUsers.some(u => u.id === selectedSalesUserFilter)
     ) {
       setSelectedSalesUserFilter('ALL');
     }
-  }, [activeBranchId, validationUsers, selectedSalesUserFilter]);
+  }, [isPersonalSalesMode, currentUser?.id, activeBranchId, validationUsers, selectedSalesUserFilter]);
 
   // Modal Tambah Faktur
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
@@ -1332,12 +1471,16 @@ export const MarketingInvoiceValidationView: React.FC<{
   const [formMasterSalesName, setFormMasterSalesName] = useState('17. ZAINAL LKT BALI');
   const [formSalesUserId, setFormSalesUserId] = useState(() => validationUsers[0]?.id || '');
   useEffect(() => {
+    if (isPersonalSalesMode && currentUser?.id) {
+      setFormSalesUserId(currentUser.id);
+      return;
+    }
     if (validationUsers.length === 0) {
       if (formSalesUserId) setFormSalesUserId('');
     } else if (!validationUsers.some(u => u.id === formSalesUserId)) {
       setFormSalesUserId(validationUsers[0].id);
     }
-  }, [validationUsers, formSalesUserId]);
+  }, [isPersonalSalesMode, currentUser?.id, validationUsers, formSalesUserId]);
   const [formStatus, setFormStatus] = useState<MarketingValidationStatus>('Menunggu Validasi');
   const [formNotes, setFormNotes] = useState('');
   const [formLineItems, setFormLineItems] = useState<InvoiceLineItem[]>([
@@ -1465,7 +1608,7 @@ export const MarketingInvoiceValidationView: React.FC<{
         const ws = wb.Sheets[wsName];
         const rows: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
 
-        let currentSales = salesMappings[0]?.masterSalesName1 || '17. ZAINAL LKT BALI';
+        let currentSales = '';
         let currentCustomer = '';
         let currentInvoiceNo = '';
         let skippedZeroNominal = 0;
@@ -1601,22 +1744,87 @@ export const MarketingInvoiceValidationView: React.FC<{
       deliveryTomorrowDate: uploadTargetDate || inv.deliveryTomorrowDate || tomorrowIso
     }));
     const importedNoSet = new Set(syncedWithDate.map(i => i.noInvoice.toUpperCase()));
+
+    // Tarik snapshot server terbaru sebelum menggabungkan agar data sales lain tidak tertimpa
+    let latestServerRecords = records;
+    try {
+      const latestRes = await fetch('/api/marketing-invoice-validations', { cache: 'no-store' }).then(r => r.json());
+      if (latestRes?.success && Array.isArray(latestRes.records)) {
+        latestServerRecords = latestRes.records;
+      }
+    } catch {}
+
     const merged = [
       ...syncedWithDate,
-      ...records.filter(r => !importedNoSet.has(r.noInvoice.toUpperCase()))
+      ...latestServerRecords.filter(r => !importedNoSet.has(r.noInvoice.toUpperCase()))
     ];
     setRecords(merged);
     await persistToMysql(merged, undefined);
-    showToast(`${syncedWithDate.length} faktur berhasil disimpan ke database.`);
+
+    if (isPersonalSalesMode) {
+      const ownCount = syncedWithDate.filter(inv =>
+        doesInvoiceBelongToUser(inv, currentUser, salesMappings, allUsers)
+      ).length;
+      showToast(
+        `${syncedWithDate.length} faktur tersimpan ke database (${ownCount} faktur milik akun ${currentUser.fullName} ditampilkan).`
+      );
+    } else {
+      showToast(`${syncedWithDate.length} faktur berhasil disimpan ke database.`);
+    }
     setUploadPreviewInvoices([]);
     setUploadFileName('');
     setViewMode('table');
   };
 
+  // Scoping per akun: Akun Sales hanya melihat faktur miliknya; Admin/SPV melihat semua & bisa filter per akun
+  const accountScopedRecords = useMemo(() => {
+    const validPositive = records.filter(item => (Number(item.nominalTagihan) || 0) > 0);
+    if (!isPersonalSalesMode) {
+      return validPositive;
+    }
+    return validPositive.filter(item =>
+      doesInvoiceBelongToUser(item, currentUser, salesMappings, allUsers)
+    );
+  }, [records, isPersonalSalesMode, currentUser, salesMappings, allUsers]);
+
+  // Ringkasan distribusi faktur per Akun Sales (untuk dropdown & quick-filter Admin/SPV)
+  const salesAccountSummary = useMemo(() => {
+    const countMap = new Map<string, { label: string; count: number; total: number }>();
+    accountScopedRecords.forEach(item => {
+      if (selectedDeliveryDate && item.deliveryTomorrowDate !== selectedDeliveryDate) return;
+      const res = resolveSalesInfo(item);
+      const key = res.userId || res.userFullName;
+      const prev = countMap.get(key);
+      if (prev) {
+        prev.count += 1;
+        prev.total += Number(item.nominalTagihan) || 0;
+      } else {
+        countMap.set(key, {
+          label: res.userFullName,
+          count: 1,
+          total: Number(item.nominalTagihan) || 0
+        });
+      }
+    });
+    return countMap;
+  }, [accountScopedRecords, selectedDeliveryDate, salesMappings, allUsers]);
+
+  const currentUserMasterLabel = useMemo(() => {
+    const userFullLower = String(currentUser?.fullName || '').trim().toLowerCase();
+    const mapped = salesMappings.filter(
+      m =>
+        m.userId === currentUser?.id ||
+        (userFullLower && String(m.userFullName || '').trim().toLowerCase() === userFullLower)
+    );
+    const names = mapped
+      .flatMap(m => [m.masterSalesName1, m.masterSalesName2])
+      .filter(Boolean);
+    return names.length > 0 ? names.join(' / ') : currentUser?.fullName || '';
+  }, [currentUser, salesMappings]);
+
   const filteredRecords = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return records.filter(item => {
-      if ((Number(item.nominalTagihan) || 0) <= 0) return false;
+    const list = accountScopedRecords.filter(item => {
       const resolved = resolveSalesInfo(item);
       const itemStatus = normalizeValidationStatus(item.validationStatus);
 
@@ -1624,11 +1832,13 @@ export const MarketingInvoiceValidationView: React.FC<{
         return false;
       }
 
-      if (selectedSalesUserFilter !== 'ALL') {
-        const matchesUser =
-          resolved.userId === selectedSalesUserFilter ||
-          resolved.userFullName.toLowerCase() === selectedSalesUserFilter.toLowerCase() ||
-          resolved.masterSalesName.toLowerCase() === selectedSalesUserFilter.toLowerCase();
+      if (!isPersonalSalesMode && selectedSalesUserFilter !== 'ALL') {
+        const targetUser = allUsers.find(u => u.id === selectedSalesUserFilter);
+        const matchesUser = targetUser
+          ? doesInvoiceBelongToUser(item, targetUser, salesMappings, allUsers)
+          : resolved.userId === selectedSalesUserFilter ||
+            resolved.userFullName.toLowerCase() === selectedSalesUserFilter.toLowerCase() ||
+            resolved.masterSalesName.toLowerCase() === selectedSalesUserFilter.toLowerCase();
         if (!matchesUser) return false;
       }
 
@@ -1650,7 +1860,29 @@ export const MarketingInvoiceValidationView: React.FC<{
       }
       return true;
     });
-  }, [records, salesMappings, allUsers, selectedDeliveryDate, selectedSalesUserFilter, selectedStatusFilter, searchQuery]);
+
+    // Kelompokkan per Akun Sales agar faktur dari Excel campuran rapi per masing-masing Sales
+    return [...list].sort((a, b) => {
+      const ra = resolveSalesInfo(a);
+      const rb = resolveSalesInfo(b);
+      const ka = (ra.userFullName || ra.masterSalesName || '').toUpperCase();
+      const kb = (rb.userFullName || rb.masterSalesName || '').toUpperCase();
+      if (ka !== kb) return ka.localeCompare(kb);
+      const ma = (ra.masterSalesName || '').toUpperCase();
+      const mb = (rb.masterSalesName || '').toUpperCase();
+      if (ma !== mb) return ma.localeCompare(mb);
+      return a.customerName.localeCompare(b.customerName);
+    });
+  }, [
+    accountScopedRecords,
+    isPersonalSalesMode,
+    salesMappings,
+    allUsers,
+    selectedDeliveryDate,
+    selectedSalesUserFilter,
+    selectedStatusFilter,
+    searchQuery
+  ]);
 
   // Flatten invoices into rows — filtering out any line items with empty/zero nominal!
   const flattenedExcelRows = useMemo(() => {
@@ -1738,8 +1970,7 @@ export const MarketingInvoiceValidationView: React.FC<{
     return { totalInvoices, totalItems, totalNominal, validated, pending, revision };
   }, [filteredRecords, flattenedExcelRows]);
 
-  const handleQuickStatusUpdate = (id: string, nextStatus: MarketingValidationStatus) => {
-    const currentUser = logisticsStore.getCurrentUser();
+  const handleQuickStatusUpdate = async (id: string, nextStatus: MarketingValidationStatus) => {
     const validatorName = currentUser?.fullName || 'Tim Marketing Offline';
     const nowIso = new Date().toISOString();
 
@@ -1754,22 +1985,42 @@ export const MarketingInvoiceValidationView: React.FC<{
         : item
     );
     setRecords(next);
-    void persistToMysql(next, undefined);
+    setIsSyncingMysql(true);
+    try {
+      await fetch('/api/marketing-invoice-validations/status', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id,
+          validationStatus: nextStatus,
+          validatedBy: validatorName,
+          validatedAt: nowIso
+        })
+      });
+    } catch {
+      void persistToMysql(next, undefined);
+    } finally {
+      setIsSyncingMysql(false);
+    }
     showToast(`Status faktur diperbarui menjadi "${nextStatus}".`);
   };
 
   const openAddModal = () => {
     setEditingId(null);
     const nextNum = String(records.length + 1390).padStart(4, '0');
-    const firstUser = validationUsers[0];
-    const firstMap = salesMappings[0];
+    const lockedUser = isPersonalSalesMode ? currentUser : validationUsers[0];
+    const firstMap =
+      salesMappings.find(m => m.userId === lockedUser?.id) ||
+      (isPersonalSalesMode ? undefined : salesMappings[0]);
     setFormNoInvoice(`FJ02-1126-${nextNum}`);
     setFormDeliveryDate(selectedDeliveryDate || tomorrowIso);
     setFormCustomerName('');
     setFormAreaName('BANYUWANGI');
     setFormPaymentCategory('TEMPO');
-    setFormSalesUserId(firstMap?.userId || firstUser?.id || '');
-    setFormMasterSalesName(firstMap?.masterSalesName1 || firstUser?.fullName?.toUpperCase() || '17. ZAINAL LKT BALI');
+    setFormSalesUserId(firstMap?.userId || lockedUser?.id || '');
+    setFormMasterSalesName(
+      firstMap?.masterSalesName1 || lockedUser?.fullName?.toUpperCase() || 'SALES MARKETING'
+    );
     setFormStatus('Menunggu Validasi');
     setFormNotes('');
     setFormLineItems([
@@ -1828,11 +2079,11 @@ export const MarketingInvoiceValidationView: React.FC<{
     setFormLineItems(prev => (prev.length > 1 ? prev.filter((_, i) => i !== index) : prev));
   };
 
-  const handleSaveForm = (e: React.FormEvent) => {
+  const handleSaveForm = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formNoInvoice.trim() || !formCustomerName.trim()) return;
 
-    // Request 4: Nominal kosongan tidak dimasukkan ke dalam data tabel
+    // Nominal kosongan tidak dimasukkan ke dalam data tabel
     const validLines = formLineItems
       .filter(
         li =>
@@ -1863,8 +2114,9 @@ export const MarketingInvoiceValidationView: React.FC<{
     const totalTagihan = validLines.reduce((acc, l) => acc + (Number(l.totalHarga) || 0), 0);
     const summaryText = validLines.map(l => l.keteranganBarang).join(', ');
 
-    const selectedUser = allUsers.find(u => u.id === formSalesUserId);
-    const currentUser = logisticsStore.getCurrentUser();
+    const selectedUser = isPersonalSalesMode
+      ? currentUser
+      : allUsers.find(u => u.id === formSalesUserId);
     const validatorName = currentUser?.fullName || 'Tim Marketing Offline';
 
     const payload: MarketingInvoiceValidationItem = {
@@ -1888,12 +2140,21 @@ export const MarketingInvoiceValidationView: React.FC<{
       lineItems: validLines
     };
 
+    // Tarik snapshot terbaru dari server agar faktur milik akun Sales lain tidak tertimpa
+    let baseRecords = records;
+    try {
+      const latestRes = await fetch('/api/marketing-invoice-validations', { cache: 'no-store' }).then(r => r.json());
+      if (latestRes?.success && Array.isArray(latestRes.records)) {
+        baseRecords = latestRes.records;
+      }
+    } catch {}
+
     const next = editingId
-      ? records.map(r => (r.id === editingId ? { ...r, ...payload } : r))
-      : [payload, ...records];
+      ? baseRecords.map(r => (r.id === editingId ? { ...r, ...payload } : r))
+      : [payload, ...baseRecords];
 
     setRecords(next);
-    void persistToMysql(next, undefined);
+    await persistToMysql(next, undefined);
     setIsFormModalOpen(false);
     showToast(`Faktur ${payload.noInvoice} berhasil disimpan ke database.`);
   };
@@ -1937,14 +2198,16 @@ export const MarketingInvoiceValidationView: React.FC<{
   // Build Batch WhatsApp message for an eligible Marketing Sales user in the active branch
   const openBatchWaModalForSales = (targetUserFilter?: string) => {
     const firstResolved = filteredRecords[0] ? resolveSalesInfo(filteredRecords[0]) : null;
-    const requestedId =
-      targetUserFilter && targetUserFilter !== 'ALL'
-        ? targetUserFilter
-        : firstResolved?.userId;
+    const requestedId = isPersonalSalesMode
+      ? currentUser.id
+      : targetUserFilter && targetUserFilter !== 'ALL'
+      ? targetUserFilter
+      : firstResolved?.userId;
 
-    const chosenUser =
-      (requestedId ? validationUsers.find(u => u.id === requestedId) : undefined) ||
-      validationUsers[0];
+    const chosenUser = isPersonalSalesMode
+      ? currentUser
+      : (requestedId ? validationUsers.find(u => u.id === requestedId) : undefined) ||
+        validationUsers[0];
 
     if (!chosenUser) {
       showToast(
@@ -1953,10 +2216,9 @@ export const MarketingInvoiceValidationView: React.FC<{
       return;
     }
 
-    const salesItems = filteredRecords.filter(r => {
-      const res = resolveSalesInfo(r);
-      return res.userId === chosenUser.id || res.userFullName === chosenUser.fullName;
-    });
+    const salesItems = filteredRecords.filter(r =>
+      doesInvoiceBelongToUser(r, chosenUser, salesMappings, allUsers)
+    );
 
     const targetList = salesItems;
     const sampleResolved = targetList[0] ? resolveSalesInfo(targetList[0]) : null;
@@ -1996,7 +2258,7 @@ export const MarketingInvoiceValidationView: React.FC<{
     });
   };
 
-  const handleConfirmSendWa = () => {
+  const handleConfirmSendWa = async () => {
     if (!waModalData) return;
     const cleanPhone = normalizeWaPhone(waModalData.salesWhatsapp);
     const encoded = encodeURIComponent(waModalData.messageText);
@@ -2014,7 +2276,25 @@ export const MarketingInvoiceValidationView: React.FC<{
         : r
     );
     setRecords(next);
-    void persistToMysql(next, undefined);
+
+    if (waModalData.targetIds.length > 0) {
+      setIsSyncingMysql(true);
+      try {
+        await fetch('/api/marketing-invoice-validations/status', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ids: waModalData.targetIds,
+            salesWhatsapp: waModalData.salesWhatsapp,
+            waNotifiedAt: nowIso
+          })
+        });
+      } catch {
+        void persistToMysql(next, undefined);
+      } finally {
+        setIsSyncingMysql(false);
+      }
+    }
 
     const a = document.createElement('a');
     a.href = waUrl;
@@ -2108,6 +2388,45 @@ export const MarketingInvoiceValidationView: React.FC<{
       0
     );
 
+    const previewPerSales = (() => {
+      const grouped = new Map<
+        string,
+        {
+          key: string;
+          userFullName: string;
+          masterNames: Set<string>;
+          invoiceCount: number;
+          lineCount: number;
+          totalNominal: number;
+          isCurrentUser: boolean;
+        }
+      >();
+      uploadPreviewInvoices.forEach(inv => {
+        const res = resolveSalesInfo(inv);
+        const key = res.userId || res.userFullName;
+        const isCurrent = doesInvoiceBelongToUser(inv, currentUser, salesMappings, allUsers);
+        const existing = grouped.get(key);
+        if (existing) {
+          existing.invoiceCount += 1;
+          existing.lineCount += inv.lineItems?.length || 0;
+          existing.totalNominal += Number(inv.nominalTagihan) || 0;
+          existing.masterNames.add(res.masterSalesName);
+          if (isCurrent) existing.isCurrentUser = true;
+        } else {
+          grouped.set(key, {
+            key,
+            userFullName: res.userFullName,
+            masterNames: new Set([res.masterSalesName]),
+            invoiceCount: 1,
+            lineCount: inv.lineItems?.length || 0,
+            totalNominal: Number(inv.nominalTagihan) || 0,
+            isCurrentUser: isCurrent
+          });
+        }
+      });
+      return Array.from(grouped.values()).sort((a, b) => a.userFullName.localeCompare(b.userFullName));
+    })();
+
     return (
       <div className="space-y-5 w-full max-w-full">
         {toastMessage && (
@@ -2136,7 +2455,7 @@ export const MarketingInvoiceValidationView: React.FC<{
                 Halaman Upload Excel — Validasi Faktur &amp; Rincian Barang
               </h1>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Unggah file Excel daftar faktur pengiriman beserta rincian barang untuk langsung disimpan ke Server Database
+                Unggah satu file Excel gabungan dari seluruh Sales (Sales A, B, C, dst) — sistem otomatis memisahkan tampilan faktur sesuai akun masing-masing Sales saat login.
               </p>
             </div>
           </div>
@@ -2159,7 +2478,7 @@ export const MarketingInvoiceValidationView: React.FC<{
                 Struktur Kolom &amp; Data yang Dapat Terbaca Otomatis dari File Excel
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Sistem membaca urutan 10 kolom standar faktur di bawah ini dan otomatis mengabaikan baris yang memiliki nominal kosong / Rp 0
+                Sistem membaca urutan 10 kolom standar faktur di bawah ini dan otomatis mendistribusikan faktur per Akun Sales
               </p>
             </div>
             {onNavigateTab && (
@@ -2204,7 +2523,7 @@ export const MarketingInvoiceValidationView: React.FC<{
                 Pilih Tanggal Kirim &amp; File Excel (.xlsx / .xls / .csv)
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Baris tanpa nominal atau bernilai 0 tidak akan dimasukkan ke dalam tabel Validasi Faktur
+                Data faktur dari berbagai Sales dapat diunggah sekaligus dalam satu file Excel; baris tanpa nominal otomatis dilewati
               </p>
             </div>
             <ModernCalendarPopover
@@ -2235,7 +2554,7 @@ export const MarketingInvoiceValidationView: React.FC<{
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60">
                 <div className="space-y-0.5">
                   <div className="text-xs font-extrabold text-emerald-900 dark:text-emerald-200">
-                    Hasil Pembacaan File Excel Siap Disimpan ke Database
+                    Hasil Pembacaan File Excel Siap Disimpan ke Database ({previewPerSales.length} Akun Sales)
                   </div>
                   <div className="text-[11px] text-emerald-700 dark:text-emerald-300 font-medium">
                     Terbaca <strong>{uploadPreviewInvoices.length} Faktur</strong> ({totalPreviewLines} Baris Barang) dengan Total Nilai{' '}
@@ -2244,6 +2563,11 @@ export const MarketingInvoiceValidationView: React.FC<{
                       <span> &middot; {uploadSkippedEmptyRows} baris nominal kosong dilewati otomatis</span>
                     )}
                   </div>
+                  {isPersonalSalesMode && (
+                    <div className="text-[11px] text-blue-700 dark:text-blue-300 font-semibold pt-0.5">
+                      Saat Anda klik Simpan, seluruh faktur tersimpan ke database dan akun <strong>{currentUser.fullName}</strong> hanya menampilkan faktur milik Anda sendiri.
+                    </div>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -2254,6 +2578,43 @@ export const MarketingInvoiceValidationView: React.FC<{
                   <span>Simpan ke Database ({uploadPreviewInvoices.length} Faktur)</span>
                 </button>
               </div>
+
+              {/* Distribusi Per Akun Sales dari Excel Campuran */}
+              {previewPerSales.length > 0 && (
+                <div className="space-y-2">
+                  <div className="text-[11px] font-extrabold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                    Distribusi Otomatis Per Akun Sales ({previewPerSales.length} Akun Terdeteksi)
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                    {previewPerSales.map(group => (
+                      <div
+                        key={group.key}
+                        className={`p-3 rounded-xl border ${
+                          group.isCurrentUser
+                            ? 'bg-blue-50/70 dark:bg-blue-950/30 border-blue-300 dark:border-blue-800'
+                            : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-extrabold text-slate-900 dark:text-white truncate">
+                            {group.userFullName}
+                          </span>
+                          <span className="px-2 py-0.5 rounded-lg bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 text-[10px] font-extrabold font-mono shrink-0">
+                            {group.invoiceCount} Faktur
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-slate-500 dark:text-slate-400 truncate mt-1">
+                          Master: {Array.from(group.masterNames).join(' / ')}
+                        </div>
+                        <div className="text-[11px] font-mono font-bold text-slate-800 dark:text-slate-200 mt-1">
+                          Rp {formatRupiahNumber(group.totalNominal)}{' '}
+                          <span className="font-normal text-slate-400">&middot; {group.lineCount} item</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden max-h-80 overflow-y-auto">
                 <table className="w-full text-xs text-left border-collapse">
@@ -2327,7 +2688,9 @@ export const MarketingInvoiceValidationView: React.FC<{
                 )}
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Rekapitulasi validasi faktur penjualan per Sales &amp; Pelanggan terintegrasi User Management, Mapping Nama Sales, dan WhatsApp Sales
+                {isPersonalSalesMode
+                  ? `Menampilkan khusus faktur milik akun ${currentUser.fullName} (Master: ${currentUserMasterLabel}) yang tersinkronisasi dari file Excel pengiriman.`
+                  : 'Rekapitulasi validasi faktur penjualan per Akun Sales — upload Excel gabungan otomatis terfilter sesuai masing-masing akun saat Sales login.'}
               </p>
             </div>
           </div>
@@ -2402,99 +2765,168 @@ export const MarketingInvoiceValidationView: React.FC<{
         </div>
       </div>
 
-      {/* Filter Bar dengan Custom Kalender & Custom Dropdown UI/UX */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-2xs flex flex-col xl:flex-row xl:items-center justify-between gap-3">
-        <div className="relative flex-1 min-w-0">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Cari Nama Sales, Nama Pelanggan, No Faktur, atau Keterangan Barang..."
-            className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-medium text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
-          />
+      {/* Filter Bar dengan Custom Kalender & Custom Dropdown UI/UX + Akun Sales Scoping */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3.5 shadow-2xs space-y-3">
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+          <div className="relative flex-1 min-w-0">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Cari Nama Sales, Nama Pelanggan, No Faktur, atau Keterangan Barang..."
+              className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-medium text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            {/* Custom Kalender Kirim Popover */}
+            <ModernCalendarPopover
+              value={selectedDeliveryDate}
+              onChange={iso => setSelectedDeliveryDate(iso)}
+              labelPrefix="Kalender Kirim:"
+              allowEmpty
+              emptyLabel="Semua Tanggal"
+            />
+
+            {isPersonalSalesMode ? (
+              <div
+                className="flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800/80 text-xs"
+                title={`Akun aktif terfilter otomatis ke faktur milik ${currentUser.fullName} (Master: ${currentUserMasterLabel})`}
+              >
+                <Users className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+                <span className="font-bold text-slate-600 dark:text-slate-300">Akun Aktif:</span>
+                <span className="font-extrabold text-blue-700 dark:text-blue-300">
+                  {currentUser.fullName}
+                </span>
+                <span className="px-1.5 py-0.5 rounded-md bg-blue-100 dark:bg-blue-900/70 text-[10px] font-bold text-blue-800 dark:text-blue-200">
+                  Faktur Pribadi
+                </span>
+              </div>
+            ) : (
+              /* Custom Dropdown Sales (Terintegrasi User Management & Mapping Nama Sales) */
+              <ModernValidationDropdown
+                value={selectedSalesUserFilter}
+                onChange={val => setSelectedSalesUserFilter(val)}
+                icon={<Users className="w-3.5 h-3.5" />}
+                searchable
+                searchPlaceholder="Cari nama sales atau master sales..."
+                minWidthClass="min-w-[240px]"
+                options={[
+                  {
+                    value: 'ALL',
+                    label: 'Semua Sales (User Akses Validasi)',
+                    subLabel: `Tampilkan faktur sales marketing cabang ${activeBranchName}`,
+                    badge: `${validationUsers.length} User`,
+                    badgeTone: 'indigo'
+                  },
+                  ...validationUsers.map(u => {
+                    const mapInfo = salesMappings.find(m => m.userId === u.id);
+                    const pairedMasters = mapInfo
+                      ? [mapInfo.masterSalesName1, mapInfo.masterSalesName2].filter(Boolean).join(' & ')
+                      : u.fullName.toUpperCase();
+                    const summary = salesAccountSummary.get(u.id) || salesAccountSummary.get(u.fullName);
+                    return {
+                      value: u.id,
+                      label: u.fullName,
+                      subLabel: `Master: ${pairedMasters} • WA: ${u.phone || '-'}`,
+                      badge: summary ? `${summary.count} Faktur` : u.phone || '0 Faktur',
+                      badgeTone: summary ? ('blue' as const) : ('slate' as const)
+                    };
+                  })
+                ]}
+              />
+            )}
+
+            {/* Custom Dropdown Status Validasi */}
+            <ModernValidationDropdown
+              value={selectedStatusFilter}
+              onChange={val => setSelectedStatusFilter(val)}
+              align="right"
+              minWidthClass="min-w-[195px]"
+              options={[
+                {
+                  value: 'ALL',
+                  label: 'Semua Status Validasi',
+                  subLabel: 'Seluruh status faktur pengiriman',
+                  badge: 'SEMUA',
+                  badgeTone: 'slate'
+                },
+                {
+                  value: 'Menunggu Validasi',
+                  label: 'Menunggu Validasi',
+                  subLabel: 'Faktur belum divalidasi marketing',
+                  badge: `${stats.pending}`,
+                  badgeTone: 'amber'
+                },
+                {
+                  value: 'Tervalidasi Siap Kirim',
+                  label: 'Tervalidasi Siap Kirim',
+                  subLabel: 'Faktur siap dimuat & dikirim',
+                  badge: `${stats.validated}`,
+                  badgeTone: 'emerald'
+                },
+                {
+                  value: 'Revisi',
+                  label: 'Revisi',
+                  subLabel: 'Faktur memerlukan revisi sales',
+                  badge: `${stats.revision}`,
+                  badgeTone: 'rose'
+                }
+              ]}
+            />
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 shrink-0">
-          {/* Custom Kalender Kirim Popover */}
-          <ModernCalendarPopover
-            value={selectedDeliveryDate}
-            onChange={iso => setSelectedDeliveryDate(iso)}
-            labelPrefix="Kalender Kirim:"
-            allowEmpty
-            emptyLabel="Semua Tanggal"
-          />
-
-          {/* Custom Dropdown Sales (Terintegrasi User Management & Mapping Nama Sales) */}
-          <ModernValidationDropdown
-            value={selectedSalesUserFilter}
-            onChange={val => setSelectedSalesUserFilter(val)}
-            icon={<Users className="w-3.5 h-3.5" />}
-            searchable
-            searchPlaceholder="Cari nama sales atau master sales..."
-            minWidthClass="min-w-[240px]"
-            options={[
-              {
-                value: 'ALL',
-                label: 'Semua Sales (User Akses Validasi)',
-                subLabel: `Tampilkan faktur sales marketing cabang ${activeBranchName}`,
-                badge: `${validationUsers.length} User`,
-                badgeTone: 'indigo'
-              },
-              ...validationUsers.map(u => {
-                const mapInfo = salesMappings.find(m => m.userId === u.id);
-                const pairedMasters = mapInfo
-                  ? [mapInfo.masterSalesName1, mapInfo.masterSalesName2].filter(Boolean).join(' & ')
-                  : u.fullName.toUpperCase();
-                return {
-                  value: u.id,
-                  label: u.fullName,
-                  subLabel: `Master: ${pairedMasters}`,
-                  badge: u.phone || 'No WA',
-                  badgeTone: 'emerald' as const
-                };
-              })
-            ]}
-          />
-
-          {/* Custom Dropdown Status Validasi ("Revisi / Tunda Kirim" diganti "Revisi") */}
-          <ModernValidationDropdown
-            value={selectedStatusFilter}
-            onChange={val => setSelectedStatusFilter(val)}
-            align="right"
-            minWidthClass="min-w-[195px]"
-            options={[
-              {
-                value: 'ALL',
-                label: 'Semua Status Validasi',
-                subLabel: 'Seluruh status faktur pengiriman',
-                badge: 'SEMUA',
-                badgeTone: 'slate'
-              },
-              {
-                value: 'Menunggu Validasi',
-                label: 'Menunggu Validasi',
-                subLabel: 'Faktur belum divalidasi marketing',
-                badge: `${stats.pending}`,
-                badgeTone: 'amber'
-              },
-              {
-                value: 'Tervalidasi Siap Kirim',
-                label: 'Tervalidasi Siap Kirim',
-                subLabel: 'Faktur siap dimuat & dikirim',
-                badge: `${stats.validated}`,
-                badgeTone: 'emerald'
-              },
-              {
-                value: 'Revisi',
-                label: 'Revisi',
-                subLabel: 'Faktur memerlukan revisi sales',
-                badge: `${stats.revision}`,
-                badgeTone: 'rose'
-              }
-            ]}
-          />
-        </div>
+        {/* Quick Switcher Per Akun Sales untuk Admin/SPV ketika tersedia data beberapa Sales */}
+        {!isPersonalSalesMode && salesAccountSummary.size > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 pt-2.5 border-t border-slate-100 dark:border-slate-800">
+            <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 mr-1">
+              Tampilan Per Akun:
+            </span>
+            <button
+              type="button"
+              onClick={() => setSelectedSalesUserFilter('ALL')}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer ${
+                selectedSalesUserFilter === 'ALL'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+              }`}
+            >
+              Semua Akun ({accountScopedRecords.filter(r => !selectedDeliveryDate || r.deliveryTomorrowDate === selectedDeliveryDate).length})
+            </button>
+            {Array.from(salesAccountSummary.entries()).map(([key, info]) => {
+              const matchedUser = validationUsers.find(
+                u => u.id === key || u.fullName.toLowerCase() === info.label.toLowerCase()
+              );
+              const filterVal = matchedUser?.id || key;
+              const isSelected = selectedSalesUserFilter === filterVal;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setSelectedSalesUserFilter(filterVal)}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                    isSelected
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700'
+                  }`}
+                >
+                  <span>{info.label}</span>
+                  <span
+                    className={`px-1.5 py-0.2 rounded text-[10px] font-mono font-extrabold ${
+                      isSelected
+                        ? 'bg-blue-500 text-white'
+                        : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300'
+                    }`}
+                  >
+                    {info.count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Tabel Spreadsheet Validasi Faktur dengan Ukuran Baris Seragam (h-10) & Tanpa Ikon Pensil/Sampah */}
@@ -2549,10 +2981,14 @@ export const MarketingInvoiceValidationView: React.FC<{
                 <td colSpan={11} className="px-4 text-center">
                   <div className="max-w-md mx-auto space-y-2 py-4">
                     <div className="text-xs font-extrabold text-slate-700 dark:text-slate-200">
-                      Belum Ada Data Validasi Faktur di Database
+                      {isPersonalSalesMode && records.length > 0 && accountScopedRecords.length === 0
+                        ? `Belum Ada Faktur untuk Akun ${currentUser.fullName}`
+                        : 'Belum Ada Data Validasi Faktur di Database'}
                     </div>
                     <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Silakan unggah file Excel melalui tombol <strong>Upload Excel</strong> atau klik <strong>Tambah Faktur</strong> untuk menambahkan data ke database.
+                      {isPersonalSalesMode && records.length > 0 && accountScopedRecords.length === 0
+                        ? `Saat ini tersedia ${records.length} faktur milik akun Sales lain. Akun Anda (${currentUser.fullName}) hanya menampilkan faktur yang terdaftar atas nama Sales Anda.`
+                        : 'Silakan unggah file Excel melalui tombol Upload Excel atau klik Tambah Faktur untuk menambahkan data ke database.'}
                     </p>
                     <div className="flex items-center justify-center gap-2 pt-1">
                       <button
@@ -2756,29 +3192,38 @@ export const MarketingInvoiceValidationView: React.FC<{
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                     Akun Sales (User Management) *
                   </label>
-                  <ModernValidationDropdown
-                    value={formSalesUserId}
-                    onChange={uid => {
-                      setFormSalesUserId(uid);
-                      const foundMap = salesMappings.find(m => m.userId === uid);
-                      if (foundMap?.masterSalesName1) {
-                        setFormMasterSalesName(foundMap.masterSalesName1);
-                      } else {
-                        const u = allUsers.find(x => x.id === uid);
-                        if (u) setFormMasterSalesName(u.fullName.toUpperCase());
-                      }
-                    }}
-                    searchable
-                    searchPlaceholder="Cari akun sales..."
-                    minWidthClass="w-full"
-                    options={validationUsers.map(u => ({
-                      value: u.id,
-                      label: u.fullName,
-                      subLabel: `WA: ${u.phone || '-'}`,
-                      badge: u.phone || 'No WA',
-                      badgeTone: 'emerald'
-                    }))}
-                  />
+                  {isPersonalSalesMode ? (
+                    <div className="w-full px-3 py-2 rounded-xl bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 font-bold text-blue-800 dark:text-blue-200 flex items-center justify-between gap-2">
+                      <span className="truncate">{currentUser.fullName}</span>
+                      <span className="text-[10px] font-mono text-blue-600 dark:text-blue-300 shrink-0">
+                        {currentUser.phone || 'Akun Pribadi'}
+                      </span>
+                    </div>
+                  ) : (
+                    <ModernValidationDropdown
+                      value={formSalesUserId}
+                      onChange={uid => {
+                        setFormSalesUserId(uid);
+                        const foundMap = salesMappings.find(m => m.userId === uid);
+                        if (foundMap?.masterSalesName1) {
+                          setFormMasterSalesName(foundMap.masterSalesName1);
+                        } else {
+                          const u = allUsers.find(x => x.id === uid);
+                          if (u) setFormMasterSalesName(u.fullName.toUpperCase());
+                        }
+                      }}
+                      searchable
+                      searchPlaceholder="Cari akun sales..."
+                      minWidthClass="w-full"
+                      options={validationUsers.map(u => ({
+                        value: u.id,
+                        label: u.fullName,
+                        subLabel: `WA: ${u.phone || '-'}`,
+                        badge: u.phone || 'No WA',
+                        badgeTone: 'emerald'
+                      }))}
+                    />
+                  )}
                 </div>
 
                 <div>
@@ -3014,7 +3459,7 @@ export const MarketingInvoiceValidationView: React.FC<{
             </div>
 
             <div className="space-y-3 text-xs">
-              {validationUsers.length > 0 && waModalData.salesUserId !== undefined && (
+              {!isPersonalSalesMode && validationUsers.length > 0 && waModalData.salesUserId !== undefined && (
                 <div>
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                     Pilih Penerima Sales Marketing (Cabang {activeBranchName})

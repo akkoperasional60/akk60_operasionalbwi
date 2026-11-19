@@ -659,14 +659,17 @@ export default function App() {
       case 'sales_kpi_fines': return 'Data Akumulasi Denda Checker';
       case 'sales_kpi_nusantara': return 'Persentase Kiriman Nusantara';
       case 'sales_kpi_omset': return 'Omset Admin Penjualan';
-      case 'hr_dashboard': return 'Dashboard Departemen HR (Presensi & Master Staff)';
+      case 'hr_dashboard': return 'HR: Data Karyawan, Rolling & History Departemen';
       case 'ga_security': return 'General Affair (GA): Security & Pos Keamanan Pabrik';
       case 'ga_hk': return 'General Affair (GA): Housekeeping (HK) & Kebersihan 5R';
       case 'ga_aset': return 'General Affair (GA): Manajemen Aset & Fasilitas Pabrik';
       case 'training_videos': return 'Training & Development: Video Pembelajaran & SOP';
       case 'training_karyawan': return 'Training & Development: Pelatihan & Sertifikasi Kru';
+      case 'finance_overview': return 'Finance & Tax: Dashboard Ringkasan Piutang & Penagihan';
       case 'finance_dashboard': return 'Finance & Tax: Tagihan Pelanggan Belum Terlunasi';
+      case 'finance_customer_mapping': return 'Finance & Tax: Mapping Master Pelanggan';
       case 'finance_validasi_form_kirim': return 'Finance & Tax: Validasi Form Kirim';
+      case 'finance_billing_app': return 'Finance & Tax: Aplikasi Penagihan Pelanggan';
       case 'warehouse_dashboard': return 'WMS: Ringkasan & Control Tower Gudang';
       case 'warehouse_inventory': return 'WMS: Master SKU & Stok Bin Gudang';
       case 'warehouse_inbound': return 'WMS: Inbound (Receiving & Putaway)';
@@ -1132,6 +1135,13 @@ export default function App() {
                 currentTab === 'training_videos' ? 'training_videos' :
                 currentTab === 'training_karyawan' ? 'training_karyawan' : 'hr_core'
               } 
+            />
+          )}
+          {currentTab === 'finance_overview' && (
+            <DepartmentDashboard
+              dashboardType="finance"
+              initialFinanceMode="overview"
+              onNavigateTab={(tab) => setCurrentTab(tab as NavTab)}
             />
           )}
           {currentTab === 'finance_dashboard' && (

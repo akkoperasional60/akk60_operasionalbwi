@@ -1274,8 +1274,9 @@ export const ExcelTrackingEvaluator: React.FC = () => {
   // Unified Tabs:
   // 1. 'map' -> Peta Rute GPS & Rincian Harian Armada
   // 2. 'unified_stops_customer' -> Armada Bergerak, Berhenti & Analisa Kirim ke Pelanggan (Jaringan Toko & Mitra)
-  // 3. 'speed_summary' -> Profil Kecepatan & Rekapitulasi Harian
-  const [activeTab, setActiveTab] = useState<'map' | 'unified_stops_customer' | 'speed_summary'>('map');
+  // 3. 'non_form_kirim_stops' -> Laporan Terpisah Berhenti di Toko Selain Pelanggan Form Kirim (Dilengkapi GPS)
+  // 4. 'speed_summary' -> Profil Kecepatan & Rekapitulasi Harian
+  const [activeTab, setActiveTab] = useState<'map' | 'unified_stops_customer' | 'non_form_kirim_stops' | 'speed_summary'>('map');
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -3645,36 +3646,55 @@ export const ExcelTrackingEvaluator: React.FC = () => {
         );
       })()}
 
-      {/* Tabs Navigation (Modern Sleek High Contrast - Crisp White Text) */}
-      <div className="bg-slate-950 border border-slate-800 p-1.5 rounded-2xl">
+      {/* Tabs Navigation (Clean High Contrast Light & Dark) */}
+      <div className="bg-slate-100 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-1.5 rounded-2xl">
         <div className="flex items-center gap-2 overflow-x-auto">
           <button
             type="button"
             onClick={() => setActiveTab('map')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'map'
-                ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white shadow-md shadow-indigo-600/30 border border-indigo-400/50'
-                : 'text-white bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700 shadow-xs'
+                ? 'bg-indigo-600 text-white shadow-sm border border-indigo-600'
+                : 'text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800'
             }`}
           >
-            <MapPin className="w-3.5 h-3.5 text-indigo-400" />
+            <MapPin className={`w-3.5 h-3.5 ${activeTab === 'map' ? 'text-white' : 'text-indigo-600 dark:text-indigo-400'}`} />
             <span>Peta Rute GPS &amp; Rincian Harian Armada</span>
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('unified_stops_customer')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'unified_stops_customer'
-                ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white shadow-md shadow-indigo-600/30 border border-indigo-400/50'
-                : 'text-white bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700 shadow-xs'
+                ? 'bg-indigo-600 text-white shadow-sm border border-indigo-600'
+                : 'text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800'
             }`}
           >
-            <Store className="w-3.5 h-3.5 text-indigo-400" />
+            <Store className={`w-3.5 h-3.5 ${activeTab === 'unified_stops_customer' ? 'text-white' : 'text-indigo-600 dark:text-indigo-400'}`} />
             <span>Armada Bergerak, Berhenti &amp; Analisa Kirim Pelanggan</span>
-            {unifiedStats.longNonCustomerCount > 0 && (
-              <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-bold shadow-xs">
-                {unifiedStats.longNonCustomerCount} Non-Mitra
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('non_form_kirim_stops')}
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer whitespace-nowrap shrink-0 ${
+              activeTab === 'non_form_kirim_stops'
+                ? 'bg-amber-600 text-white shadow-sm border border-amber-600'
+                : 'text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 hover:bg-amber-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800'
+            }`}
+          >
+            <AlertTriangle className={`w-3.5 h-3.5 ${activeTab === 'non_form_kirim_stops' ? 'text-white' : 'text-amber-600 dark:text-amber-400'}`} />
+            <span>Laporan Stop Di Luar Form Kirim</span>
+            {(unifiedStats.pelangganLuarFormKirimCount + unifiedStats.longNonCustomerCount) > 0 && (
+              <span
+                className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-black ${
+                  activeTab === 'non_form_kirim_stops'
+                    ? 'bg-white text-amber-700'
+                    : 'bg-amber-100 dark:bg-amber-900/50 text-amber-900 dark:text-amber-200'
+                }`}
+              >
+                {unifiedStats.pelangganLuarFormKirimCount + unifiedStats.longNonCustomerCount}
               </span>
             )}
           </button>
@@ -3682,13 +3702,13 @@ export const ExcelTrackingEvaluator: React.FC = () => {
           <button
             type="button"
             onClick={() => setActiveTab('speed_summary')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer whitespace-nowrap shrink-0 ${
               activeTab === 'speed_summary'
-                ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white shadow-md shadow-indigo-600/30 border border-indigo-400/50'
-                : 'text-white bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700 shadow-xs'
+                ? 'bg-indigo-600 text-white shadow-sm border border-indigo-600'
+                : 'text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800'
             }`}
           >
-            <Gauge className="w-3.5 h-3.5 text-indigo-400" />
+            <Gauge className={`w-3.5 h-3.5 ${activeTab === 'speed_summary' ? 'text-white' : 'text-indigo-600 dark:text-indigo-400'}`} />
             <span>Profil Kecepatan &amp; Rekapitulasi Per Hari</span>
           </button>
         </div>
@@ -3755,7 +3775,7 @@ export const ExcelTrackingEvaluator: React.FC = () => {
                     (ev.dateSubtotals || [])
                       .filter(ds => selectedDateGroup === 'all' || ds.dateGroup === selectedDateGroup)
                       .map(ds => (
-                        <tr key={`${ev.plateNumber}-${ds.dateGroup}`} className={`hover:bg-slate-800/40 ${selectedDateGroup === ds.dateGroup ? 'bg-indigo-950/20' : ''}`}>
+                        <tr key={`${ev.plateNumber}-${ds.dateGroup}`} className={`hover:bg-slate-800/40 ${selectedDateGroup === ds.dateGroup ? 'bg-indigo-50/70 dark:bg-indigo-950/30' : ''}`}>
                           <td className="py-3 px-4 font-bold text-white">
                             {ev.plateNumber}{' '}
                             {ev.initialCode && (
@@ -3792,37 +3812,37 @@ export const ExcelTrackingEvaluator: React.FC = () => {
       )}
 
       {/* ======================================================================
-          TAB 2: UNIFIED ARMADA BERGERAK, BERHENTI & ANALISA KIRIM KE PELANGGAN
+          TAB 2: ARMADA BERGERAK, BERHENTI & ANALISA KIRIM KE PELANGGAN
          ====================================================================== */}
       {activeTab === 'unified_stops_customer' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
-          {/* Header & Summary Badges */}
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-3 border-b border-slate-800">
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4 shadow-xs">
+          {/* Header & Search Filter */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-3 border-b border-slate-200 dark:border-slate-800">
             <div>
-              <h3 className="text-base font-bold text-white">
-                Analisa Terpadu: Armada Bergerak, Berhenti &amp; Kirim ke Pelanggan (Integrasi Form Kirim &amp; Mitra)
+              <h3 className="text-base font-black text-slate-900 dark:text-white">
+                Analisa Armada Bergerak, Berhenti &amp; Kirim ke Pelanggan (Integrasi Form Kirim &amp; Mitra)
               </h3>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Mencocokkan titik berhenti GPS armada dan lama berhenti (menit) terhadap Form Kirim aktif dan database Jaringan Toko &amp; Mitra Pelanggan.
+              <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+                Mencocokkan titik berhenti GPS armada dan durasi berhenti (menit) terhadap Form Kirim aktif serta database Toko &amp; Mitra Pelanggan.
               </p>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <div className="relative w-60">
-                <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+              <div className="relative w-64">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   placeholder="Cari toko, no form kirim, lokasi..."
                   value={searchFilter}
                   onChange={e => setSearchFilter(e.target.value)}
-                  className="w-full pl-8 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+                  className="w-full pl-8 pr-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-indigo-500"
                 />
               </div>
 
               <select
                 value={selectedDateGroup}
                 onChange={e => setSelectedDateGroup(e.target.value)}
-                className="bg-slate-950 border border-slate-800 text-xs text-slate-300 font-semibold px-3 py-2 rounded-xl focus:outline-none"
+                className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-800 dark:text-slate-200 font-bold px-3 py-2 rounded-xl focus:outline-none focus:border-indigo-500 cursor-pointer"
               >
                 <option value="all">Semua Tanggal ({subtotals.length} Hari)</option>
                 {subtotals.map(ds => (
@@ -3836,125 +3856,137 @@ export const ExcelTrackingEvaluator: React.FC = () => {
 
           {/* Filter Cards: Form Kirim Compliance vs Pelanggan Di Luar Form Kirim vs Non-Mitra >= 15 Menit */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <div
+            <button
+              type="button"
               onClick={() => setActivityFilter('all')}
-              className={`p-3 rounded-xl border cursor-pointer transition flex items-center justify-between ${
+              className={`p-3.5 rounded-xl border cursor-pointer transition flex items-center justify-between text-left ${
                 activityFilter === 'all'
-                  ? 'bg-indigo-600/15 border-indigo-500 text-white'
-                  : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                  ? 'bg-indigo-50 dark:bg-indigo-950/40 border-indigo-500 ring-1 ring-indigo-500/30'
+                  : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
               }`}
             >
               <div>
-                <div className="text-xs font-bold text-white">Semua Aktivitas</div>
-                <div className="text-[10px] text-slate-400">
-                  Total berhenti: <span className="font-mono text-indigo-300 font-bold">{unifiedStats.totalStopMinutes} Menit</span>
+                <div className="text-xs font-black text-slate-900 dark:text-white">Semua Aktivitas</div>
+                <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
+                  Total berhenti:{' '}
+                  <span className="font-mono tabular-nums text-indigo-700 dark:text-indigo-300 font-bold">
+                    {unifiedStats.totalStopMinutes} Menit
+                  </span>
                 </div>
               </div>
-              <span className="text-lg font-black text-indigo-400 font-mono tabular-nums">{unifiedStats.totalLegs}</span>
-            </div>
+              <span className="text-xl font-black text-indigo-700 dark:text-indigo-400 font-mono tabular-nums">
+                {unifiedStats.totalLegs}
+              </span>
+            </button>
 
-            <div
+            <button
+              type="button"
               onClick={() => setActivityFilter('sesuai_form_kirim')}
-              className={`p-3 rounded-xl border cursor-pointer transition flex items-center justify-between ${
+              className={`p-3.5 rounded-xl border cursor-pointer transition flex items-center justify-between text-left ${
                 activityFilter === 'sesuai_form_kirim'
-                  ? 'bg-emerald-600/15 border-emerald-500 text-white'
-                  : 'bg-slate-950 border-emerald-500/25 text-slate-300 hover:border-emerald-500'
+                  ? 'bg-emerald-100/80 dark:bg-emerald-950/50 border-emerald-500 ring-1 ring-emerald-500/30'
+                  : 'bg-emerald-50/70 dark:bg-emerald-950/25 border-emerald-200 dark:border-emerald-800 hover:border-emerald-400'
               }`}
             >
               <div>
-                <div className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
-                  <FileCheck2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <div className="text-xs font-black text-emerald-900 dark:text-emerald-200 flex items-center gap-1.5">
+                  <FileCheck2 className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400 shrink-0" />
                   <span>Sesuai Form Kirim</span>
                 </div>
-                <div className="text-[10px] text-slate-400">
-                  Di toko mitra &amp; Form Kirim • <span className="font-mono text-emerald-300 font-bold">{unifiedStats.sesuaiStopMinutes} Mnt</span>
+                <div className="text-[11px] text-emerald-800/80 dark:text-emerald-300/80 mt-0.5">
+                  Di toko mitra &amp; Form Kirim ·{' '}
+                  <span className="font-mono tabular-nums font-bold">{unifiedStats.sesuaiStopMinutes} Mnt</span>
                 </div>
               </div>
-              <span className="text-lg font-black text-emerald-400 font-mono tabular-nums">
+              <span className="text-xl font-black text-emerald-700 dark:text-emerald-400 font-mono tabular-nums">
                 {unifiedStats.sesuaiFormKirimCount}
               </span>
-            </div>
+            </button>
 
-            <div
+            <button
+              type="button"
               onClick={() => setActivityFilter('pelanggan_luar_form_kirim')}
-              className={`p-3 rounded-xl border cursor-pointer transition flex items-center justify-between ${
+              className={`p-3.5 rounded-xl border cursor-pointer transition flex items-center justify-between text-left ${
                 activityFilter === 'pelanggan_luar_form_kirim'
-                  ? 'bg-amber-500/20 border-amber-400 text-white'
-                  : 'bg-slate-950 border-amber-500/30 text-slate-300 hover:border-amber-400'
+                  ? 'bg-amber-100/90 dark:bg-amber-950/50 border-amber-500 ring-1 ring-amber-500/30'
+                  : 'bg-amber-50/80 dark:bg-amber-950/25 border-amber-200 dark:border-amber-800 hover:border-amber-400'
               }`}
             >
               <div>
-                <div className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
-                  <Store className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <span>Pelanggan Tidak Sesuai Form Kirim</span>
+                <div className="text-xs font-black text-amber-950 dark:text-amber-200 flex items-center gap-1.5">
+                  <Store className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400 shrink-0" />
+                  <span>Pelanggan Di Luar Form Kirim</span>
                 </div>
-                <div className="text-[10px] text-amber-200/80">
-                  Toko mitra di luar Form Kirim • <span className="font-mono text-amber-300 font-bold">{unifiedStats.luarFkStopMinutes} Mnt</span>
+                <div className="text-[11px] text-amber-900/80 dark:text-amber-300/80 mt-0.5">
+                  Toko mitra di luar Form Kirim ·{' '}
+                  <span className="font-mono tabular-nums font-bold">{unifiedStats.luarFkStopMinutes} Mnt</span>
                 </div>
               </div>
-              <span className="text-lg font-black text-amber-400 font-mono tabular-nums">
+              <span className="text-xl font-black text-amber-700 dark:text-amber-400 font-mono tabular-nums">
                 {unifiedStats.pelangganLuarFormKirimCount}
               </span>
-            </div>
+            </button>
 
-            <div
+            <button
+              type="button"
               onClick={() => setActivityFilter('long_non_customer')}
-              className={`p-3 rounded-xl border cursor-pointer transition flex items-center justify-between ${
+              className={`p-3.5 rounded-xl border cursor-pointer transition flex items-center justify-between text-left ${
                 activityFilter === 'long_non_customer'
-                  ? 'bg-rose-600/20 border-rose-500 text-white'
-                  : 'bg-slate-950 border-rose-500/30 text-slate-300 hover:border-rose-500'
+                  ? 'bg-rose-100/90 dark:bg-rose-950/50 border-rose-500 ring-1 ring-rose-500/30'
+                  : 'bg-rose-50/80 dark:bg-rose-950/25 border-rose-200 dark:border-rose-800 hover:border-rose-400'
               }`}
             >
               <div>
-                <div className="text-xs font-bold text-rose-300 flex items-center gap-1.5">
-                  <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                <div className="text-xs font-black text-rose-950 dark:text-rose-200 flex items-center gap-1.5">
+                  <ShieldAlert className="w-3.5 h-3.5 text-rose-700 dark:text-rose-400 shrink-0" />
                   <span>Berhenti Lama Non-Mitra</span>
                 </div>
-                <div className="text-[10px] text-rose-300/80">
-                  Stop &ge; 15 mnt bukan toko • <span className="font-mono text-rose-300 font-bold">{unifiedStats.nonMitraStopMinutes} Mnt</span>
+                <div className="text-[11px] text-rose-800/80 dark:text-rose-300/80 mt-0.5">
+                  Stop &ge; 15 mnt bukan toko ·{' '}
+                  <span className="font-mono tabular-nums font-bold">{unifiedStats.nonMitraStopMinutes} Mnt</span>
                 </div>
               </div>
-              <span className="text-lg font-black text-rose-400 font-mono tabular-nums">
+              <span className="text-xl font-black text-rose-700 dark:text-rose-400 font-mono tabular-nums">
                 {unifiedStats.longNonCustomerCount}
               </span>
-            </div>
+            </button>
           </div>
 
-          {/* Ringkasan Kepatuhan Form Kirim Armada */}
-          <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          {/* Ringkasan Kepatuhan Form Kirim Armada & Link Ke Tab Laporan Terpisah */}
+          <div className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
             <div className="space-y-1">
               <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span className="font-bold text-slate-200 flex items-center gap-1.5">
-                  <FileCheck2 className="w-4 h-4 text-indigo-400" />
+                <span className="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                  <FileCheck2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                   <span>Integrasi Form Kirim Armada:</span>
                 </span>
                 {unifiedStats.linkedFormKirimNos.length > 0 ? (
                   unifiedStats.linkedFormKirimNos.map(no => (
                     <span
                       key={no}
-                      className="px-2 py-0.5 rounded-md bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 font-mono text-[11px] font-bold"
+                      className="px-2 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-900/50 text-indigo-900 dark:text-indigo-200 border border-indigo-200 dark:border-indigo-700 font-mono text-[11px] font-bold"
                     >
                       {no}
                     </span>
                   ))
                 ) : (
-                  <span className="text-[11px] text-amber-300 font-semibold">
+                  <span className="text-[11px] text-amber-800 dark:text-amber-300 font-semibold">
                     Belum ada Form Kirim aktif untuk armada terpilih — seluruh kunjungan toko mitra ditandai di luar Form Kirim.
                   </span>
                 )}
               </div>
               {unifiedStats.formKirimTotalTargets > 0 && (
-                <div className="text-[11px] text-slate-400 flex flex-wrap items-center gap-x-3 gap-y-1">
+                <div className="text-[11px] text-slate-600 dark:text-slate-400 flex flex-wrap items-center gap-x-3 gap-y-1">
                   <span>
                     Target Pelanggan Form Kirim:{' '}
-                    <strong className="text-white font-mono">{unifiedStats.formKirimTotalTargets} Toko</strong>
+                    <strong className="text-slate-900 dark:text-white font-mono">{unifiedStats.formKirimTotalTargets} Toko</strong>
                   </span>
                   <span>
                     Terverifikasi GPS:{' '}
-                    <strong className="text-emerald-400 font-mono">{unifiedStats.formKirimVisitedCount} Toko</strong>
+                    <strong className="text-emerald-700 dark:text-emerald-400 font-mono">{unifiedStats.formKirimVisitedCount} Toko</strong>
                   </span>
                   {unifiedStats.formKirimUnvisited.length > 0 && (
-                    <span className="text-amber-300">
+                    <span className="text-amber-800 dark:text-amber-300">
                       Belum terdeteksi berhenti:{' '}
                       <strong className="font-semibold">
                         {unifiedStats.formKirimUnvisited
@@ -3973,113 +4005,27 @@ export const ExcelTrackingEvaluator: React.FC = () => {
             <div className="flex flex-wrap items-center gap-2 shrink-0">
               <button
                 type="button"
-                onClick={handleExportNonFormKirimReport}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-200 border border-amber-400/40 text-xs font-bold transition cursor-pointer"
+                onClick={() => setActiveTab('non_form_kirim_stops')}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold transition cursor-pointer shadow-xs"
               >
-                <FileSpreadsheet className="w-3.5 h-3.5 text-amber-300" />
-                <span>Unduh Laporan Stop Di Luar Form Kirim</span>
+                <AlertTriangle className="w-3.5 h-3.5" />
+                <span>Lihat Laporan Stop Di Luar Form Kirim</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleExportNonFormKirimReport}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 text-xs font-bold transition cursor-pointer"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                <span>Unduh Excel</span>
               </button>
             </div>
           </div>
 
-          {/* Laporan Khusus: Berhenti di Toko Selain Pelanggan dari Form Kirim (Dilengkapi GPS Otomatis dari File Upload) */}
-          {(() => {
-            const nonFkReportRows = unifiedRows.filter(
-              item =>
-                (selectedDateGroup === 'all' || item.dateGroup === selectedDateGroup) &&
-                (item.formKirimStatus === 'pelanggan_luar_form_kirim' || item.formKirimStatus === 'long_non_customer')
-            );
-            const totalNonFkMinutes = nonFkReportRows.reduce((s, r) => s + (r.stopDurationMinutes || 0), 0);
-
-            return (
-              <div className="bg-amber-950/15 border border-amber-500/30 rounded-2xl p-4 space-y-3">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <div>
-                    <h4 className="text-xs font-black uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
-                      <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-                      <span>Laporan Berhenti di Toko Selain Pelanggan Form Kirim ({nonFkReportRows.length} Kejadian • {totalNonFkMinutes} Menit)</span>
-                    </h4>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
-                      Daftar otomatis seluruh pemberhentian armada pada toko/lokasi di luar daftar pelanggan Form Kirim lengkap dengan titik GPS terbaca dari file upload.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleExportNonFormKirimReport}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-[11px] transition cursor-pointer shrink-0 self-start"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Ekspor Laporan Excel</span>
-                  </button>
-                </div>
-
-                {nonFkReportRows.length === 0 ? (
-                  <div className="rounded-xl bg-slate-950/70 border border-slate-800 px-4 py-3 text-xs text-emerald-300 font-semibold flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>Seluruh pemberhentian armada pada filter ini sesuai dengan daftar pelanggan Form Kirim.</span>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto rounded-xl border border-amber-500/25">
-                    <table className="w-full text-left text-xs text-slate-200">
-                      <thead className="bg-slate-950/90 text-[10px] uppercase font-bold text-amber-300/90 border-b border-amber-500/20">
-                        <tr>
-                          <th className="py-2 px-3">Armada &amp; Tgl</th>
-                          <th className="py-2 px-3">Kategori</th>
-                          <th className="py-2 px-3">Nama Toko / Lokasi Stop</th>
-                          <th className="py-2 px-3">Lama Berhenti</th>
-                          <th className="py-2 px-3">Titik GPS Otomatis (File Upload)</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800/80 bg-slate-950/40">
-                        {nonFkReportRows.map(row => (
-                          <tr key={`nonfk-${row.id}`} className="hover:bg-amber-500/5">
-                            <td className="py-2 px-3 whitespace-nowrap">
-                              <div className="font-mono font-bold text-white">{row.fleetInitial}</div>
-                              <div className="text-[10px] text-slate-400 font-mono">{row.dateGroup} • #{row.legNumber}</div>
-                            </td>
-                            <td className="py-2 px-3">
-                              {row.formKirimStatus === 'pelanggan_luar_form_kirim' ? (
-                                <span className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-200 border border-amber-400/40 text-[10px] font-bold">
-                                  Toko Mitra Di Luar Form Kirim
-                                </span>
-                              ) : (
-                                <span className="px-2 py-0.5 rounded-md bg-rose-500/20 text-rose-200 border border-rose-400/40 text-[10px] font-bold">
-                                  Bukan Toko Mitra (&ge;15 Mnt)
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-2 px-3 max-w-xs">
-                              <div className="font-bold text-white truncate">{row.namaTokoAtauLokasi}</div>
-                              <div className="text-[10px] text-slate-400 truncate" title={row.startLocation}>
-                                {row.startLocation}
-                              </div>
-                            </td>
-                            <td className="py-2 px-3 whitespace-nowrap">
-                              <span className="font-mono font-black text-amber-300">{row.stopDurationMinutes} Menit</span>
-                              <div className="text-[10px] text-slate-400 font-mono">
-                                {row.stopStart.slice(0, 5)} - {row.stopEnd.slice(0, 5)}
-                              </div>
-                            </td>
-                            <td className="py-2 px-3 whitespace-nowrap">
-                              <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 font-mono text-[11px] text-cyan-300">
-                                <Navigation className="w-3 h-3 text-cyan-400 shrink-0" />
-                                <span>{row.gpsCoordLabel}</span>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-
-          {/* Unified Table */}
-          <div className="overflow-x-auto rounded-xl border border-slate-800">
-            <table className="w-full text-left text-xs text-slate-300">
-              <thead className="bg-slate-950/90 text-[11px] uppercase font-bold text-slate-400 border-b border-slate-800">
+          {/* Unified Movement & Delivery Compliance Table ONLY (Separated from Non-FK Report) */}
+          <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+            <table className="w-full text-left text-xs text-slate-800 dark:text-slate-200">
+              <thead className="bg-slate-100 dark:bg-slate-950 text-[11px] uppercase font-bold text-slate-700 dark:text-slate-300 border-b border-slate-200 dark:border-slate-800">
                 <tr>
                   <th className="py-3 px-3">Ritase &amp; Armada</th>
                   <th className="py-3 px-3">Status Gerak &amp; Form Kirim</th>
@@ -4091,224 +4037,233 @@ export const ExcelTrackingEvaluator: React.FC = () => {
                   <th className="py-3 px-3 text-right">Kecepatan</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800/80">
-                {filteredUnifiedRows.map(item => {
-                  const isSesuaiFk = item.formKirimStatus === 'sesuai_form_kirim';
-                  const isLuarFk = item.formKirimStatus === 'pelanggan_luar_form_kirim';
-                  const isLongNonCustomer = item.formKirimStatus === 'long_non_customer';
-                  const isDalamKota = item.regionType === 'dalam_kota';
-                  const isLuarKota = item.regionType === 'luar_kota';
-                  const isLuarPulau = item.regionType === 'luar_pulau';
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                {filteredUnifiedRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="py-8 text-center text-xs text-slate-500 dark:text-slate-400">
+                      Tidak ada aktivitas perjalanan pada filter pencarian/status yang dipilih.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredUnifiedRows.map(item => {
+                    const isSesuaiFk = item.formKirimStatus === 'sesuai_form_kirim';
+                    const isLuarFk = item.formKirimStatus === 'pelanggan_luar_form_kirim';
+                    const isLongNonCustomer = item.formKirimStatus === 'long_non_customer';
+                    const isDalamKota = item.regionType === 'dalam_kota';
+                    const isLuarKota = item.regionType === 'luar_kota';
+                    const isLuarPulau = item.regionType === 'luar_pulau';
 
-                  return (
-                    <tr
-                      key={item.id}
-                      className={`transition ${
-                        isLongNonCustomer
-                          ? 'bg-rose-950/25 hover:bg-rose-950/40 border-l-4 border-l-rose-500'
-                          : isLuarFk
-                          ? 'bg-amber-950/20 hover:bg-amber-950/35 border-l-4 border-l-amber-400'
-                          : isSesuaiFk
-                          ? 'bg-emerald-950/10 hover:bg-emerald-950/20 border-l-4 border-l-emerald-500'
-                          : 'hover:bg-slate-800/40'
-                      }`}
-                    >
-                      {/* Col 1: Ritase & Armada */}
-                      <td className="py-3 px-3">
-                        <div className="font-mono font-bold text-white">#{item.legNumber}</div>
-                        <div className="text-[10px] font-bold text-blue-400 font-mono">{item.fleetInitial}</div>
-                        <div className="text-[10px] text-slate-500 font-mono">{item.dateGroup}</div>
-                      </td>
+                    return (
+                      <tr
+                        key={item.id}
+                        className={`transition ${
+                          isLongNonCustomer
+                            ? 'bg-rose-50/80 dark:bg-rose-950/25 hover:bg-rose-100/70 dark:hover:bg-rose-950/40'
+                            : isLuarFk
+                            ? 'bg-amber-50/75 dark:bg-amber-950/20 hover:bg-amber-100/70 dark:hover:bg-amber-950/35'
+                            : isSesuaiFk
+                            ? 'bg-emerald-50/65 dark:bg-emerald-950/20 hover:bg-emerald-100/60 dark:hover:bg-emerald-950/35'
+                            : 'bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                        }`}
+                      >
+                        {/* Col 1: Ritase & Armada */}
+                        <td className="py-3.5 px-3 align-top">
+                          <div className="font-mono tabular-nums font-black text-slate-900 dark:text-white">#{item.legNumber}</div>
+                          <div className="text-[11px] font-bold text-indigo-700 dark:text-indigo-300 font-mono">{item.fleetInitial}</div>
+                          <div className="text-[10px] text-slate-500 dark:text-slate-400 font-mono tabular-nums">{item.dateGroup}</div>
+                        </td>
 
-                      {/* Col 2: Status Gerak, Mitra & Form Kirim */}
-                      <td className="py-3 px-3">
-                        <div className="space-y-1">
-                          <span className="px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-300 border border-blue-500/25 font-semibold text-[10px] inline-flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-blue-400" /> Bergerak ({item.startTime.slice(0, 5)} - {item.endTime.slice(0, 5)})
-                          </span>
-
-                          {isSesuaiFk && (
-                            <div>
-                              <span className="px-2 py-0.5 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold text-[10px] inline-flex items-center gap-1">
-                                <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
-                                Sesuai Form Kirim
-                              </span>
-                            </div>
-                          )}
-
-                          {isLuarFk && (
-                            <div>
-                              <span className="px-2 py-1 rounded-lg bg-amber-500/20 text-amber-200 border border-amber-400/50 font-black text-[10px] inline-flex items-center gap-1">
-                                <AlertTriangle className="w-3 h-3 text-amber-300 shrink-0" />
-                                Pelanggan Tidak Sesuai Form Kirim
-                              </span>
-                            </div>
-                          )}
-
-                          {isLongNonCustomer && (
-                            <div>
-                              <span className="px-2 py-1 rounded-lg bg-rose-600 text-white border border-amber-300 font-black text-[10px] inline-flex items-center gap-1 shadow-xs">
-                                <AlertTriangle className="w-3 h-3 text-amber-200 shrink-0" />
-                                BERHENTI LAMA BUKAN TOKO MITRA
-                              </span>
-                            </div>
-                          )}
-
-                          {item.formKirimStatus === 'short_transit' && (
-                            <div>
-                              <span className="px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 font-semibold text-[10px] inline-flex items-center gap-1">
-                                <Clock className="w-3 h-3 text-slate-400" />
-                                Transit Singkat Non-Toko
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      </td>
-
-                      {/* Col 3: Berhenti Berapa Lama (Selalu tampil eksplisit dalam Menit) */}
-                      <td className="py-3 px-3 whitespace-nowrap">
-                        {item.stopDurationMinutes > 0 ? (
-                          <div className="space-y-0.5">
-                            <span
-                              className={`px-2.5 py-1 rounded-lg font-mono tabular-nums font-black text-xs inline-flex items-center gap-1.5 border ${
-                                isLongNonCustomer
-                                  ? 'bg-rose-500/20 text-rose-300 border-rose-500/50'
-                                  : isLuarFk
-                                  ? 'bg-amber-500/20 text-amber-300 border-amber-400/50'
-                                  : isSesuaiFk
-                                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-                                  : 'bg-slate-800 text-slate-200 border-slate-700'
-                              }`}
-                            >
-                              <Clock className="w-3.5 h-3.5" />
-                              {item.stopDurationMinutes} Menit
+                        {/* Col 2: Status Gerak, Mitra & Form Kirim */}
+                        <td className="py-3.5 px-3 align-top">
+                          <div className="space-y-1.5">
+                            <span className="px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-900/40 text-blue-900 dark:text-blue-200 border border-blue-200 dark:border-blue-800 font-semibold text-[10px] inline-flex items-center gap-1 whitespace-nowrap">
+                              Bergerak ({item.startTime.slice(0, 5)} - {item.endTime.slice(0, 5)})
                             </span>
-                            <div className="text-[10px] text-slate-400 font-mono">
-                              {item.stopStart.slice(0, 5)} s/d {item.stopEnd.slice(0, 5)}
-                            </div>
+
+                            {isSesuaiFk && (
+                              <div>
+                                <span className="px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-900/40 text-emerald-900 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700 font-bold text-[10px] inline-flex items-center gap-1">
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-700 dark:text-emerald-400 shrink-0" />
+                                  Sesuai Form Kirim
+                                </span>
+                              </div>
+                            )}
+
+                            {isLuarFk && (
+                              <div>
+                                <span className="px-2 py-1 rounded-md bg-amber-100 dark:bg-amber-900/50 text-amber-950 dark:text-amber-200 border border-amber-300 dark:border-amber-700 font-bold text-[10px] inline-flex items-center gap-1">
+                                  <AlertTriangle className="w-3 h-3 text-amber-700 dark:text-amber-300 shrink-0" />
+                                  Pelanggan Tidak Sesuai Form Kirim
+                                </span>
+                              </div>
+                            )}
+
+                            {isLongNonCustomer && (
+                              <div>
+                                <span className="px-2 py-1 rounded-md bg-rose-600 text-white border border-rose-700 font-extrabold text-[10px] inline-flex items-center gap-1 shadow-2xs">
+                                  <AlertTriangle className="w-3 h-3 text-white shrink-0" />
+                                  BERHENTI LAMA BUKAN TOKO MITRA
+                                </span>
+                              </div>
+                            )}
+
+                            {item.formKirimStatus === 'short_transit' && (
+                              <div>
+                                <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-semibold text-[10px] inline-flex items-center gap-1">
+                                  <Clock className="w-3 h-3 text-slate-500 dark:text-slate-400" />
+                                  Transit Singkat Non-Toko
+                                </span>
+                              </div>
+                            )}
                           </div>
-                        ) : (
-                          <div className="space-y-0.5">
-                            <span className="px-2 py-0.5 rounded-md bg-slate-800/80 text-slate-400 font-mono tabular-nums font-semibold text-[11px] inline-flex items-center gap-1">
-                              <Clock className="w-3 h-3" />0 Menit
+                        </td>
+
+                        {/* Col 3: Berhenti Berapa Lama */}
+                        <td className="py-3.5 px-3 whitespace-nowrap align-top">
+                          {item.stopDurationMinutes > 0 ? (
+                            <div className="space-y-1">
+                              <span
+                                className={`px-2.5 py-1 rounded-lg font-mono tabular-nums font-black text-xs inline-flex items-center gap-1.5 border ${
+                                  isLongNonCustomer
+                                    ? 'bg-rose-100 dark:bg-rose-900/50 text-rose-900 dark:text-rose-200 border-rose-300 dark:border-rose-700'
+                                    : isLuarFk
+                                    ? 'bg-amber-100 dark:bg-amber-900/50 text-amber-950 dark:text-amber-200 border-amber-300 dark:border-amber-700'
+                                    : isSesuaiFk
+                                    ? 'bg-emerald-100 dark:bg-emerald-900/50 text-emerald-900 dark:text-emerald-200 border-emerald-300 dark:border-emerald-700'
+                                    : 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-700'
+                                }`}
+                              >
+                                <Clock className="w-3.5 h-3.5" />
+                                {item.stopDurationMinutes} Menit
+                              </span>
+                              <div className="text-[11px] text-slate-600 dark:text-slate-400 font-mono tabular-nums font-semibold">
+                                {item.stopStart.slice(0, 5)} s/d {item.stopEnd.slice(0, 5)}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="space-y-0.5">
+                              <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-mono tabular-nums font-semibold text-[11px] inline-flex items-center gap-1">
+                                <Clock className="w-3 h-3" />0 Menit
+                              </span>
+                              <div className="text-[10px] text-slate-500">Langsung Jalan</div>
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Col 4: Toko Pelanggan (Mitra), Kesesuaian Form Kirim & Koordinat GPS */}
+                        <td className="py-3.5 px-4 max-w-xs align-top">
+                          {isSesuaiFk ? (
+                            <div>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {item.nomorToko !== '-' && (
+                                  <span className="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-mono text-[10px] font-bold">
+                                    No. {item.nomorToko}
+                                  </span>
+                                )}
+                                <span className="font-bold text-slate-900 dark:text-white text-xs">{item.namaTokoAtauLokasi}</span>
+                              </div>
+                              <div className="text-[11px] text-emerald-800 dark:text-emerald-300 font-semibold mt-0.5 flex items-center gap-1 flex-wrap">
+                                <span>Form Kirim: {item.matchedFormKirimNo}</span>
+                                {item.matchedFormKirimFaktur && (
+                                  <span className="text-slate-600 dark:text-slate-400 font-mono">({item.matchedFormKirimFaktur})</span>
+                                )}
+                              </div>
+                              <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
+                                Kec. {item.kecamatan}, Kab. {item.kabupaten}
+                              </div>
+                            </div>
+                          ) : isLuarFk ? (
+                            <div>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {item.nomorToko !== '-' && (
+                                  <span className="px-1.5 py-0.5 rounded bg-amber-200/80 dark:bg-amber-900/60 text-amber-950 dark:text-amber-200 font-mono text-[10px] font-bold">
+                                    No. {item.nomorToko}
+                                  </span>
+                                )}
+                                <span className="font-bold text-slate-900 dark:text-white text-xs">{item.namaTokoAtauLokasi}</span>
+                              </div>
+                              <div className="text-[11px] text-amber-900 dark:text-amber-300 font-semibold mt-0.5">
+                                Titik toko mitra terdeteksi, tidak tercantum di Form Kirim armada
+                              </div>
+                              <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
+                                Kec. {item.kecamatan}, Kab. {item.kabupaten}
+                              </div>
+                            </div>
+                          ) : isLongNonCustomer ? (
+                            <div>
+                              <div className="font-bold text-rose-900 dark:text-rose-200 text-xs flex items-center gap-1">
+                                <AlertTriangle className="w-3.5 h-3.5 text-rose-700 dark:text-rose-400 shrink-0" />
+                                <span>Tidak Terdaftar di Mitra Pelanggan &amp; Form Kirim</span>
+                              </div>
+                              <div className="text-[11px] text-slate-800 dark:text-slate-200 font-semibold mt-0.5 truncate" title={item.startLocation}>
+                                Lokasi: {item.startLocation}
+                              </div>
+                              <div className="text-[11px] text-rose-800 dark:text-rose-300 mt-0.5">
+                                Armada berhenti {item.stopDurationMinutes} menit di luar titik pelanggan
+                              </div>
+                            </div>
+                          ) : (
+                            <div>
+                              <div className="font-semibold text-slate-900 dark:text-slate-100 text-xs">{item.namaTokoAtauLokasi}</div>
+                              <div className="text-[11px] text-slate-600 dark:text-slate-400 truncate max-w-[240px]">
+                                {item.startLocation}
+                              </div>
+                            </div>
+                          )}
+                          <div className="mt-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-sky-50 dark:bg-slate-950 border border-sky-200 dark:border-slate-700 text-[10px] font-mono tabular-nums font-bold text-sky-900 dark:text-cyan-300">
+                            <Navigation className="w-2.5 h-2.5 text-sky-700 dark:text-cyan-400 shrink-0" />
+                            <span>GPS: {item.gpsCoordLabel}</span>
+                          </div>
+                        </td>
+
+                        {/* Col 5: Wilayah */}
+                        <td className="py-3.5 px-3 align-top whitespace-nowrap">
+                          {isDalamKota && (
+                            <span className="px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-900/40 text-blue-900 dark:text-blue-200 border border-blue-200 dark:border-blue-800 font-bold text-[10px] inline-flex items-center">
+                              Dalam Kota
                             </span>
-                            <div className="text-[10px] text-slate-500">Langsung Jalan</div>
-                          </div>
-                        )}
-                      </td>
+                          )}
+                          {isLuarKota && (
+                            <span className="px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-900/40 text-amber-900 dark:text-amber-200 border border-amber-200 dark:border-amber-800 font-bold text-[10px] inline-flex items-center">
+                              Luar Kota
+                            </span>
+                          )}
+                          {isLuarPulau && (
+                            <span className="px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-900/40 text-emerald-900 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-800 font-bold text-[10px] inline-flex items-center">
+                              Luar Pulau
+                            </span>
+                          )}
+                        </td>
 
-                      {/* Col 4: Toko Pelanggan (Mitra), Kesesuaian Form Kirim & Koordinat GPS Otomatis */}
-                      <td className="py-3 px-4 max-w-xs">
-                        {isSesuaiFk ? (
-                          <div>
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              {item.nomorToko !== '-' && (
-                                <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-200 font-mono text-[10px] font-bold">
-                                  No. {item.nomorToko}
-                                </span>
-                              )}
-                              <span className="font-bold text-white text-xs">{item.namaTokoAtauLokasi}</span>
-                            </div>
-                            <div className="text-[10px] text-emerald-300 font-semibold mt-0.5 flex items-center gap-1 flex-wrap">
-                              <span>Form Kirim: {item.matchedFormKirimNo}</span>
-                              {item.matchedFormKirimFaktur && (
-                                <span className="text-slate-400 font-mono">({item.matchedFormKirimFaktur})</span>
-                              )}
-                            </div>
-                            <div className="text-[10px] text-slate-400 mt-0.5">
-                              Kec. {item.kecamatan}, Kab. {item.kabupaten}
-                            </div>
+                        {/* Col 6: Rute Perjalanan */}
+                        <td className="py-3.5 px-4 max-w-xs align-top">
+                          <div className="text-[11px] text-slate-800 dark:text-slate-200 truncate" title={item.startLocation}>
+                            <span className="text-slate-500 dark:text-slate-400 font-semibold">Dari:</span>{' '}
+                            {item.startLocation.split(',')[0]}
                           </div>
-                        ) : isLuarFk ? (
-                          <div>
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              {item.nomorToko !== '-' && (
-                                <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-200 font-mono text-[10px] font-bold">
-                                  No. {item.nomorToko}
-                                </span>
-                              )}
-                              <span className="font-bold text-amber-200 text-xs">{item.namaTokoAtauLokasi}</span>
-                            </div>
-                            <div className="text-[10px] text-amber-300 font-semibold mt-0.5">
-                              Titik toko mitra terdeteksi, namun tidak tercantum di Form Kirim armada
-                            </div>
-                            <div className="text-[10px] text-slate-400 mt-0.5">
-                              Kec. {item.kecamatan}, Kab. {item.kabupaten}
-                            </div>
+                          <div className="text-[11px] text-emerald-800 dark:text-emerald-300 font-medium truncate mt-0.5" title={item.endLocation}>
+                            <span className="text-slate-500 dark:text-slate-400 font-semibold">Ke:</span>{' '}
+                            {item.endLocation.split(',')[0]}
                           </div>
-                        ) : isLongNonCustomer ? (
-                          <div>
-                            <div className="font-bold text-rose-300 text-xs flex items-center gap-1">
-                              <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                              <span>Tidak Terdaftar di Mitra Pelanggan &amp; Form Kirim</span>
-                            </div>
-                            <div className="text-[11px] text-slate-200 font-semibold mt-0.5 truncate" title={item.startLocation}>
-                              Lokasi: {item.startLocation}
-                            </div>
-                            <div className="text-[10px] text-rose-300/80 mt-0.5">
-                              Armada berhenti {item.stopDurationMinutes} menit di luar titik pelanggan
-                            </div>
+                        </td>
+
+                        {/* Col 7: Jarak & Durasi Gerak */}
+                        <td className="py-3.5 px-3 text-right font-mono tabular-nums align-top whitespace-nowrap">
+                          <div className="font-black text-emerald-700 dark:text-emerald-400">{item.mileageKm.toFixed(2)} km</div>
+                          <div className="text-[11px] text-slate-600 dark:text-slate-400">{item.travelTime}</div>
+                        </td>
+
+                        {/* Col 8: Kecepatan */}
+                        <td className="py-3.5 px-3 text-right font-mono tabular-nums align-top whitespace-nowrap">
+                          <div className="text-slate-800 dark:text-slate-200 font-semibold">Avg: {item.avgSpeedKmh.toFixed(1)}</div>
+                          <div className="text-[11px] text-rose-700 dark:text-rose-300 font-bold">
+                            Max: {item.maxSpeedKmh.toFixed(1)} km/h
                           </div>
-                        ) : (
-                          <div>
-                            <div className="font-semibold text-slate-200 text-xs">{item.namaTokoAtauLokasi}</div>
-                            <div className="text-[10px] text-slate-400 truncate max-w-[240px]">
-                              {item.startLocation}
-                            </div>
-                          </div>
-                        )}
-                        {/* Koordinat GPS Otomatis dari File Upload */}
-                        <div className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-950 border border-slate-800 text-[10px] font-mono text-cyan-300">
-                          <Navigation className="w-2.5 h-2.5 text-cyan-400 shrink-0" />
-                          <span>GPS: {item.gpsCoordLabel}</span>
-                        </div>
-                      </td>
-
-                      {/* Col 5: Wilayah (Biru / Kuning / Hijau) */}
-                      <td className="py-3 px-3">
-                        {isDalamKota && (
-                          <span className="px-2 py-0.5 rounded-full bg-blue-600/20 text-blue-300 border border-blue-500/40 font-bold text-[10px] inline-flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500" /> Dalam Kota
-                          </span>
-                        )}
-                        {isLuarKota && (
-                          <span className="px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/50 font-bold text-[10px] inline-flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> Luar Kota
-                          </span>
-                        )}
-                        {isLuarPulau && (
-                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold text-[10px] inline-flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Luar Pulau
-                          </span>
-                        )}
-                      </td>
-
-                      {/* Col 6: Rute Perjalanan */}
-                      <td className="py-3 px-4 max-w-xs">
-                        <div className="text-[11px] text-slate-200 truncate" title={item.startLocation}>
-                          <span className="text-slate-500">Dari:</span> {item.startLocation.split(',')[0]}
-                        </div>
-                        <div className="text-[11px] text-emerald-300 truncate mt-0.5" title={item.endLocation}>
-                          <span className="text-slate-500">Ke:</span> {item.endLocation.split(',')[0]}
-                        </div>
-                      </td>
-
-                      {/* Col 7: Jarak & Durasi Gerak */}
-                      <td className="py-3 px-3 text-right font-mono">
-                        <div className="font-bold text-emerald-400">{item.mileageKm.toFixed(2)} km</div>
-                        <div className="text-[10px] text-slate-400">{item.travelTime}</div>
-                      </td>
-
-                      {/* Col 8: Kecepatan */}
-                      <td className="py-3 px-3 text-right font-mono">
-                        <div className="text-slate-200">Avg: {item.avgSpeedKmh.toFixed(1)}</div>
-                        <div className="text-[10px] text-rose-300 font-semibold">
-                          Max: {item.maxSpeedKmh.toFixed(1)} km/h
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
@@ -4316,26 +4271,216 @@ export const ExcelTrackingEvaluator: React.FC = () => {
       )}
 
       {/* ======================================================================
-          TAB 3: PROFIL KECEPATAN & REKAPITULASI PER HARI (NO FUEL)
+          TAB 3 (TERPISAH): LAPORAN BERHENTI DI TOKO SELAIN PELANGGAN FORM KIRIM
+         ====================================================================== */}
+      {activeTab === 'non_form_kirim_stops' && (() => {
+        const nonFkReportRows = unifiedRows.filter(item => {
+          if (selectedDateGroup !== 'all' && item.dateGroup !== selectedDateGroup) return false;
+          if (item.formKirimStatus !== 'pelanggan_luar_form_kirim' && item.formKirimStatus !== 'long_non_customer') {
+            return false;
+          }
+          const q = searchFilter.trim().toLowerCase();
+          if (!q) return true;
+          return (
+            item.namaTokoAtauLokasi.toLowerCase().includes(q) ||
+            item.startLocation.toLowerCase().includes(q) ||
+            item.fleetInitial.toLowerCase().includes(q) ||
+            item.gpsCoordLabel.toLowerCase().includes(q)
+          );
+        });
+        const totalNonFkMinutes = nonFkReportRows.reduce((s, r) => s + (r.stopDurationMinutes || 0), 0);
+        const mitraLuarFkCount = nonFkReportRows.filter(r => r.formKirimStatus === 'pelanggan_luar_form_kirim').length;
+        const nonMitraCount = nonFkReportRows.filter(r => r.formKirimStatus === 'long_non_customer').length;
+
+        return (
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4 shadow-xs">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-3 border-b border-slate-200 dark:border-slate-800">
+              <div>
+                <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0" />
+                  <span>Laporan Berhenti di Toko Selain Pelanggan Form Kirim</span>
+                </h3>
+                <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
+                  Daftar khusus seluruh pemberhentian armada di luar daftar pelanggan Form Kirim lengkap dengan lama berhenti (menit) dan titik koordinat GPS terbaca dari file upload.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative w-56">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="Cari toko, armada, GPS..."
+                    value={searchFilter}
+                    onChange={e => setSearchFilter(e.target.value)}
+                    className="w-full pl-8 pr-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <select
+                  value={selectedDateGroup}
+                  onChange={e => setSelectedDateGroup(e.target.value)}
+                  className="bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-800 dark:text-slate-200 font-bold px-3 py-2 rounded-xl focus:outline-none cursor-pointer"
+                >
+                  <option value="all">Semua Tanggal ({subtotals.length} Hari)</option>
+                  {subtotals.map(ds => (
+                    <option key={ds.dateGroup} value={ds.dateGroup}>
+                      {ds.dateGroup} ({ds.tripCount} Ritase)
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={handleExportNonFormKirimReport}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs transition cursor-pointer shadow-xs shrink-0"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Ekspor Laporan Excel</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Crisp Summary Strip */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                <div>
+                  <div className="text-[11px] font-bold text-slate-600 dark:text-slate-400">Total Kejadian Di Luar Form Kirim</div>
+                  <div className="text-lg font-black text-slate-900 dark:text-white font-mono tabular-nums mt-0.5">
+                    {nonFkReportRows.length} Kejadian
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400">Total Durasi Stop</div>
+                  <div className="text-base font-black text-amber-700 dark:text-amber-400 font-mono tabular-nums mt-0.5">
+                    {totalNonFkMinutes} Menit
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-amber-50/80 dark:bg-amber-950/25 border border-amber-200 dark:border-amber-800 flex items-center justify-between">
+                <div>
+                  <div className="text-[11px] font-bold text-amber-900 dark:text-amber-200">Toko Mitra Di Luar Form Kirim</div>
+                  <div className="text-xs text-amber-800/80 dark:text-amber-300/80 mt-0.5">Terdaftar di Jaringan Mitra</div>
+                </div>
+                <span className="text-xl font-black text-amber-700 dark:text-amber-400 font-mono tabular-nums">
+                  {mitraLuarFkCount}
+                </span>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-rose-50/80 dark:bg-rose-950/25 border border-rose-200 dark:border-rose-800 flex items-center justify-between">
+                <div>
+                  <div className="text-[11px] font-bold text-rose-900 dark:text-rose-200">Bukan Toko Mitra (&ge; 15 Menit)</div>
+                  <div className="text-xs text-rose-800/80 dark:text-rose-300/80 mt-0.5">Lokasi di luar titik pelanggan</div>
+                </div>
+                <span className="text-xl font-black text-rose-700 dark:text-rose-400 font-mono tabular-nums">
+                  {nonMitraCount}
+                </span>
+              </div>
+            </div>
+
+            {nonFkReportRows.length === 0 ? (
+              <div className="rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 px-4 py-4 text-xs text-emerald-900 dark:text-emerald-200 font-semibold flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-700 dark:text-emerald-400 shrink-0" />
+                <span>Seluruh pemberhentian armada pada filter ini sesuai dengan daftar pelanggan Form Kirim.</span>
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                <table className="w-full text-left text-xs text-slate-800 dark:text-slate-200">
+                  <thead className="bg-slate-100 dark:bg-slate-950 text-[11px] uppercase font-bold text-slate-700 dark:text-slate-300 border-b border-slate-200 dark:border-slate-800">
+                    <tr>
+                      <th className="py-3 px-4">Armada &amp; Tanggal</th>
+                      <th className="py-3 px-3">Kategori</th>
+                      <th className="py-3 px-4">Nama Toko / Lokasi Stop</th>
+                      <th className="py-3 px-3">Lama Berhenti</th>
+                      <th className="py-3 px-4">Titik GPS Otomatis (File Upload)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                    {nonFkReportRows.map(row => {
+                      const isNonMitra = row.formKirimStatus === 'long_non_customer';
+                      return (
+                        <tr
+                          key={`nonfk-${row.id}`}
+                          className={`transition ${
+                            isNonMitra
+                              ? 'bg-rose-50/75 dark:bg-rose-950/20 hover:bg-rose-100/70 dark:hover:bg-rose-950/35'
+                              : 'bg-white dark:bg-slate-900 hover:bg-amber-50/60 dark:hover:bg-slate-800/60'
+                          }`}
+                        >
+                          <td className="py-3 px-4 whitespace-nowrap align-top">
+                            <div className="font-mono font-black text-slate-900 dark:text-white">{row.fleetInitial}</div>
+                            <div className="text-[11px] text-slate-600 dark:text-slate-400 font-mono tabular-nums">
+                              {row.dateGroup} · #{row.legNumber}
+                            </div>
+                          </td>
+                          <td className="py-3 px-3 align-top whitespace-nowrap">
+                            {row.formKirimStatus === 'pelanggan_luar_form_kirim' ? (
+                              <span className="px-2.5 py-1 rounded-md bg-amber-100 dark:bg-amber-900/40 text-amber-950 dark:text-amber-200 border border-amber-300 dark:border-amber-700 text-[11px] font-bold">
+                                Toko Mitra Di Luar Form Kirim
+                              </span>
+                            ) : (
+                              <span className="px-2.5 py-1 rounded-md bg-rose-600 text-white border border-rose-700 text-[11px] font-bold">
+                                Bukan Toko Mitra (&ge;15 Mnt)
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 max-w-md align-top">
+                            <div className="font-bold text-slate-900 dark:text-white text-xs">{row.namaTokoAtauLokasi}</div>
+                            <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5 truncate" title={row.startLocation}>
+                              {row.startLocation}
+                            </div>
+                          </td>
+                          <td className="py-3 px-3 whitespace-nowrap align-top">
+                            <span
+                              className={`font-mono tabular-nums font-black text-xs px-2 py-0.5 rounded-md ${
+                                isNonMitra
+                                  ? 'bg-rose-100 dark:bg-rose-900/50 text-rose-900 dark:text-rose-200'
+                                  : 'bg-amber-100 dark:bg-amber-900/50 text-amber-900 dark:text-amber-200'
+                              }`}
+                            >
+                              {row.stopDurationMinutes} Menit
+                            </span>
+                            <div className="text-[11px] text-slate-600 dark:text-slate-400 font-mono tabular-nums mt-1">
+                              {row.stopStart.slice(0, 5)} - {row.stopEnd.slice(0, 5)}
+                            </div>
+                          </td>
+                          <td className="py-3 px-4 whitespace-nowrap align-top">
+                            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-sky-50 dark:bg-slate-950 border border-sky-200 dark:border-slate-700 font-mono tabular-nums text-xs font-bold text-sky-900 dark:text-cyan-300">
+                              <Navigation className="w-3.5 h-3.5 text-sky-700 dark:text-cyan-400 shrink-0" />
+                              <span>{row.gpsCoordLabel}</span>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* ======================================================================
+          TAB 4: PROFIL KECEPATAN & REKAPITULASI PER HARI (NO FUEL)
          ====================================================================== */}
       {activeTab === 'speed_summary' && (
         <div className="space-y-5">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200 dark:border-slate-800">
               <div>
-                <h3 className="text-base font-bold text-white">
+                <h3 className="text-base font-black text-slate-900 dark:text-white">
                   Grafik Profil Kecepatan Perjalanan Armada ({activeEvaluation?.plateNumber})
                 </h3>
-                <p className="text-xs text-slate-400 mt-0.5">
+                <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
                   Perbandingan kecepatan rata-rata dan kecepatan maksimal per ritase perjalanan.
                 </p>
               </div>
-              <div className="flex items-center gap-3 text-xs">
-                <span className="flex items-center gap-1.5 font-bold text-blue-400">
-                  <span className="w-3 h-3 rounded-full bg-blue-500" /> Rata-Rata Kecepatan (km/h)
+              <div className="flex items-center gap-4 text-xs">
+                <span className="flex items-center gap-1.5 font-bold text-blue-700 dark:text-blue-400">
+                  <span className="w-3 h-3 rounded-full bg-blue-600" /> Rata-Rata Kecepatan (km/h)
                 </span>
-                <span className="flex items-center gap-1.5 font-bold text-rose-400">
-                  <span className="w-3 h-3 rounded-full bg-rose-500" /> Kecepatan Maksimal (km/h)
+                <span className="flex items-center gap-1.5 font-bold text-rose-700 dark:text-rose-400">
+                  <span className="w-3 h-3 rounded-full bg-rose-600" /> Kecepatan Maksimal (km/h)
                 </span>
               </div>
             </div>
@@ -4353,7 +4498,7 @@ export const ExcelTrackingEvaluator: React.FC = () => {
                       <stop offset="95%" stopColor="#f43f5e" stopOpacity={0.0} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#64748b" opacity={0.2} />
                   <XAxis dataKey="name" stroke="#64748b" tick={{ fontSize: 10 }} />
                   <YAxis stroke="#64748b" tick={{ fontSize: 10 }} unit=" km/h" />
                   <Tooltip
@@ -4361,6 +4506,7 @@ export const ExcelTrackingEvaluator: React.FC = () => {
                       backgroundColor: '#0f172a',
                       borderColor: '#334155',
                       borderRadius: '0.75rem',
+                      color: '#ffffff',
                       fontSize: '11px'
                     }}
                     labelStyle={{ color: '#ffffff', fontWeight: 'bold' }}
@@ -4389,39 +4535,41 @@ export const ExcelTrackingEvaluator: React.FC = () => {
             </div>
           </div>
 
-          {/* Subtotal Per Hari & Rekapitulasi Baris Bawah Excel (Tanpa Fuel) */}
+          {/* Subtotal Per Hari & Rekapitulasi Baris Bawah Excel */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
-              <h4 className="text-sm font-bold text-slate-300 uppercase tracking-wider">
-                Rincian Per Hari (Trips, KM, Durasi Harian & Kecepatan Harian)
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-3 shadow-xs">
+              <h4 className="text-sm font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider">
+                Rincian Per Hari (Trips, KM, Durasi Harian &amp; Kecepatan Harian)
               </h4>
               <div className="space-y-2.5">
                 {subtotals.map(st => (
                   <div
                     key={st.dateGroup}
-                    className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 flex items-center justify-between"
+                    className="bg-slate-50 dark:bg-slate-950 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 flex items-center justify-between"
                   >
                     <div>
-                      <div className="text-xs font-bold text-white flex items-center gap-2">
+                      <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
                         <span>Tanggal: {st.dateGroup}</span>
-                        <span className="px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 font-mono text-[10px]">
+                        <span className="px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-200 font-mono text-[10px]">
                           {st.tripCount} Trips
                         </span>
                       </div>
-                      <div className="text-[11px] text-slate-400 mt-1 flex flex-wrap items-center gap-3">
+                      <div className="text-[11px] text-slate-600 dark:text-slate-400 mt-1 flex flex-wrap items-center gap-3">
                         <span>
-                          Durasi Hari Ini: <strong className="text-amber-300 font-mono">{st.travelTime}</strong>
+                          Durasi Hari Ini: <strong className="text-amber-700 dark:text-amber-300 font-mono">{st.travelTime}</strong>
                         </span>
                         <span>
-                          Rata-Rata Kecepatan: <strong className="text-blue-400">{st.avgSpeedKmh} km/h</strong>
+                          Rata-Rata: <strong className="text-blue-700 dark:text-blue-400">{st.avgSpeedKmh} km/h</strong>
                         </span>
                         <span>
-                          Kecepatan Maks: <strong className="text-rose-400">{st.maxSpeedKmh} km/h</strong>
+                          Maks: <strong className="text-rose-700 dark:text-rose-400">{st.maxSpeedKmh} km/h</strong>
                         </span>
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="text-lg font-black text-emerald-400">{st.totalMileageKm} km</div>
+                      <div className="text-lg font-black text-emerald-700 dark:text-emerald-400 font-mono tabular-nums">
+                        {st.totalMileageKm} km
+                      </div>
                       <div className="text-[10px] text-slate-500">Total KM Harian</div>
                     </div>
                   </div>
@@ -4429,30 +4577,30 @@ export const ExcelTrackingEvaluator: React.FC = () => {
               </div>
             </div>
 
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
-              <h4 className="text-sm font-bold text-slate-300 uppercase tracking-wider">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-3 shadow-xs">
+              <h4 className="text-sm font-black text-slate-800 dark:text-slate-200 uppercase tracking-wider">
                 Rekapitulasi Baris Bawah Excel ({activeEvaluation?.plateNumber})
               </h4>
-              <div className="bg-slate-950 rounded-xl border border-slate-800 divide-y divide-slate-800/80 text-xs">
+              <div className="bg-slate-50 dark:bg-slate-950 rounded-xl border border-slate-200 dark:border-slate-800 divide-y divide-slate-200 dark:divide-slate-800 text-xs">
                 <div className="flex items-center justify-between p-3">
-                  <span className="text-slate-400">Trips (Total Ritase)</span>
-                  <span className="font-mono font-bold text-white text-sm">{bottom.trips} Ritase</span>
+                  <span className="text-slate-600 dark:text-slate-400 font-medium">Trips (Total Ritase)</span>
+                  <span className="font-mono tabular-nums font-bold text-slate-900 dark:text-white text-sm">{bottom.trips} Ritase</span>
                 </div>
                 <div className="flex items-center justify-between p-3">
-                  <span className="text-slate-400">Total KM (Total Mileage)</span>
-                  <span className="font-mono font-bold text-emerald-400 text-sm">{bottom.totalMileageKm} km</span>
+                  <span className="text-slate-600 dark:text-slate-400 font-medium">Total KM (Total Mileage)</span>
+                  <span className="font-mono tabular-nums font-bold text-emerald-700 dark:text-emerald-400 text-sm">{bottom.totalMileageKm} km</span>
                 </div>
                 <div className="flex items-center justify-between p-3">
-                  <span className="text-slate-400">Total Durasi Perjalanan</span>
-                  <span className="font-mono font-bold text-amber-300 text-sm">{bottom.duration}</span>
+                  <span className="text-slate-600 dark:text-slate-400 font-medium">Total Durasi Perjalanan</span>
+                  <span className="font-mono tabular-nums font-bold text-amber-700 dark:text-amber-300 text-sm">{bottom.duration}</span>
                 </div>
                 <div className="flex items-center justify-between p-3">
-                  <span className="text-slate-400">Rata-Rata Kecepatan Keseluruhan</span>
-                  <span className="font-mono font-bold text-blue-400 text-sm">{bottom.avgSpeedKmh} km/h</span>
+                  <span className="text-slate-600 dark:text-slate-400 font-medium">Rata-Rata Kecepatan Keseluruhan</span>
+                  <span className="font-mono tabular-nums font-bold text-blue-700 dark:text-blue-400 text-sm">{bottom.avgSpeedKmh} km/h</span>
                 </div>
                 <div className="flex items-center justify-between p-3">
-                  <span className="text-slate-400">Kecepatan Maksimal Tertinggi</span>
-                  <span className="font-mono font-bold text-rose-400 text-sm">{bottom.maxSpeedKmh} km/h</span>
+                  <span className="text-slate-600 dark:text-slate-400 font-medium">Kecepatan Maksimal Tertinggi</span>
+                  <span className="font-mono tabular-nums font-bold text-rose-700 dark:text-rose-400 text-sm">{bottom.maxSpeedKmh} km/h</span>
                 </div>
               </div>
             </div>

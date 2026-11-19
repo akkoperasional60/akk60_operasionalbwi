@@ -6302,6 +6302,163 @@ Kembalikan HANYA JSON valid:
     }
   });
 
+  app.patch('/api/marketing-invoice-validations/status', express.json({ limit: '5mb' }), async (req, res) => {
+    try {
+      if (isDatabaseConfigured() && !inMemoryMarketingValidationsLoaded) {
+        await Promise.race([
+          refreshMarketingValidationsFromDb(),
+          new Promise<null>(resolve => setTimeout(() => resolve(null), 1200))
+        ]);
+      }
+      const targetIds: string[] = Array.isArray(req.body?.ids)
+        ? req.body.ids.map(String)
+        : req.body?.id
+        ? [String(req.body.id)]
+        : [];
+      if (targetIds.length === 0) {
+        return res.status(400).json({ success: false, error: 'Missing invoice id(s).' });
+      }
+      const idSet = new Set(targetIds);
+      const patchFields: Record<string, any> = {};
+      if (typeof req.body?.validationStatus === 'string') {
+        patchFields.validationStatus =
+          req.body.validationStatus === 'Tervalidasi Siap Kirim'
+            ? 'Tervalidasi Siap Kirim'
+            : req.body.validationStatus.toLowerCase().includes('revisi')
+            ? 'Revisi'
+            : 'Menunggu Validasi';
+      }
+      if (typeof req.body?.validatedBy === 'string') patchFields.validatedBy = req.body.validatedBy;
+      if (typeof req.body?.validatedAt === 'string') patchFields.validatedAt = req.body.validatedAt;
+      if (typeof req.body?.salesWhatsapp === 'string') patchFields.salesWhatsapp = req.body.salesWhatsapp;
+      if (typeof req.body?.waNotifiedAt === 'string') patchFields.waNotifiedAt = req.body.waNotifiedAt;
+
+      inMemoryMarketingValidations = sanitizeMarketingValidations(
+        inMemoryMarketingValidations.map(item =>
+          idSet.has(String(item.id)) ? { ...item, ...patchFields } : item
+        )
+      );
+
+      if (isDatabaseConfigured()) {
+        try {
+          await mysqlQuery(
+            `INSERT INTO app_state (state_key, state_json, updated_at) VALUES ('marketing_invoice_validations_v2', ?, NOW())
+             ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+            [JSON.stringify(inMemoryMarketingValidations)]
+          );
+        } catch (dbErr: any) {
+          console.warn('[Hostinger MySQL Sync Warning for Marketing Invoice Patch]', dbErr?.message);
+        }
+      }
+      inMemoryMarketingValidationsLoaded = true;
+      lastMarketingValidationsSyncAt = Date.now();
+      return res.json({
+        success: true,
+        records: inMemoryMarketingValidations,
+        count: inMemoryMarketingValidations.length
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message });
+    }
+  });
+
+  // 👥 HR: Data Karyawan, Rolling Departemen & Riwayat Kerja — Tersimpan di MySQL app_state + Disk
+  const HR_EMPLOYEES_STATE_KEY = 'hr_employees_rolling_v1';
+  let inMemoryHrEmployeesState: { initialized: boolean; records: any[] } = (() => {
+    const disk = readPersistentAppState(HR_EMPLOYEES_STATE_KEY);
+    if (disk && typeof disk === 'object' && Array.isArray((disk as any).records)) {
+      return { initialized: Boolean((disk as any).initialized), records: (disk as any).records };
+    }
+    if (Array.isArray(disk)) {
+      return { initialized: disk.length > 0, records: disk };
+    }
+    return { initialized: false, records: [] };
+  })();
+  let inMemoryHrEmployeesLoaded = false;
+  let lastHrEmployeesSyncAt = 0;
+
+  const refreshHrEmployeesFromDb = async (): Promise<{ initialized: boolean; records: any[] } | null> => {
+    if (!isDatabaseConfigured()) return null;
+    try {
+      const rows = await mysqlQuery<any[]>(
+        'SELECT state_json FROM app_state WHERE state_key = ? LIMIT 1',
+        [HR_EMPLOYEES_STATE_KEY]
+      );
+      if (Array.isArray(rows) && rows.length > 0 && rows[0]?.state_json) {
+        const parsed = typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json;
+        if (parsed && typeof parsed === 'object' && Array.isArray(parsed.records)) {
+          inMemoryHrEmployeesState = {
+            initialized: Boolean(parsed.initialized),
+            records: parsed.records
+          };
+        } else if (Array.isArray(parsed)) {
+          inMemoryHrEmployeesState = { initialized: true, records: parsed };
+        }
+      }
+      inMemoryHrEmployeesLoaded = true;
+      lastHrEmployeesSyncAt = Date.now();
+      return inMemoryHrEmployeesState;
+    } catch {
+      return null;
+    }
+  };
+
+  app.get('/api/hr-employees', async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    try {
+      if (isDatabaseConfigured() && (!inMemoryHrEmployeesLoaded || Date.now() - lastHrEmployeesSyncAt > 3000)) {
+        await Promise.race([
+          refreshHrEmployeesFromDb(),
+          new Promise<null>(resolve => setTimeout(() => resolve(null), 1200))
+        ]);
+      }
+      return res.json({
+        success: true,
+        initialized: inMemoryHrEmployeesState.initialized,
+        records: inMemoryHrEmployeesState.records,
+        count: inMemoryHrEmployeesState.records.length
+      });
+    } catch (err: any) {
+      return res.json({
+        success: true,
+        initialized: inMemoryHrEmployeesState.initialized,
+        records: inMemoryHrEmployeesState.records,
+        count: inMemoryHrEmployeesState.records.length
+      });
+    }
+  });
+
+  app.post('/api/hr-employees', express.json({ limit: '15mb' }), async (req, res) => {
+    try {
+      const records = Array.isArray(req.body?.records) ? req.body.records : [];
+      const initialized = req.body?.initialized !== false;
+      inMemoryHrEmployeesState = { initialized, records };
+      writePersistentAppState(HR_EMPLOYEES_STATE_KEY, inMemoryHrEmployeesState);
+
+      if (isDatabaseConfigured()) {
+        try {
+          await mysqlQuery(
+            `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
+             ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+            [HR_EMPLOYEES_STATE_KEY, JSON.stringify(inMemoryHrEmployeesState)]
+          );
+        } catch (dbErr: any) {
+          console.warn('[Hostinger MySQL Sync Warning for HR Employees]', dbErr?.message);
+        }
+      }
+      inMemoryHrEmployeesLoaded = true;
+      lastHrEmployeesSyncAt = Date.now();
+      return res.json({
+        success: true,
+        initialized: inMemoryHrEmployeesState.initialized,
+        records: inMemoryHrEmployeesState.records,
+        count: inMemoryHrEmployeesState.records.length
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, error: err?.message });
+    }
+  });
+
   // 📦 Form Kirim Sales (Terintegrasi Area Kirim & Portal Driver - Persistent di MySQL app_state & Disk)
   const LEGACY_DUMMY_FK_IDS = new Set(['FK-202611-001', 'FK-202611-002']);
   const sanitizeFormKirimRecords = (list: any[]): any[] =>
