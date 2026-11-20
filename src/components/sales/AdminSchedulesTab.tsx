@@ -79,8 +79,19 @@ export const NON_AREA_TERMS = [
   'Muat Toko',
   'Cek Eceran Toko',
   'Cek Surat Jalan Toko',
-  'Input Retur'
+  'Input Retur',
+  'Area Pengiriman',
+  'Area Kiriman',
+  'Area Kirim'
 ];
+
+const NON_AREA_TERM_SET = new Set(NON_AREA_TERMS.map(t => t.toLowerCase()));
+
+function isNonAreaTerm(value?: string | null): boolean {
+  const clean = String(value || '').trim().toLowerCase();
+  if (!clean || clean === '-') return true;
+  return NON_AREA_TERM_SET.has(clean);
+}
 
 const LS_ADMIN_BRANCH_MAP_KEY = 'akk_sales_admin_branch_map_v1';
 
@@ -495,15 +506,15 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
     liveSchedules.forEach(s => {
       const schBranch = branchStore.getScheduleBranchId(s.id, s.originName || s.areaName, s.fleetId);
       if (schBranch !== effectiveBranchId) return;
-      const raw = s.areaName || s.store?.city || '';
-      if (raw && !NON_AREA_TERMS.includes(raw)) {
+      const raw = (s.areaName || s.store?.city || '').trim();
+      if (raw && !isNonAreaTerm(raw)) {
         const std = standardizeAreaName(raw, effectiveBranchId);
-        if (std && std !== '-' && !NON_AREA_TERMS.includes(std)) {
+        if (std && !isNonAreaTerm(std)) {
           areaSet.add(std);
         }
       }
     });
-    return Array.from(areaSet);
+    return Array.from(areaSet).filter(area => !isNonAreaTerm(area));
   }, [effectiveBranchId]);
 
   const nowCurrent = new Date();
@@ -664,7 +675,7 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
     setEditAbsenceReason(item.absenceReason || '');
     setEditAreaDuties(
       safeDuties.filter(
-        d => typeof d === 'string' && !ADDITIONAL_JOBDESK_OPTIONS.includes(d) && d !== 'Back Up ACC' && !NON_AREA_TERMS.includes(d)
+        d => typeof d === 'string' && !ADDITIONAL_JOBDESK_OPTIONS.includes(d) && d !== 'Back Up ACC' && !isNonAreaTerm(d)
       )
     );
     setEditAdditionalDuties(
@@ -913,7 +924,7 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
         const safeDuties = Array.isArray(item.duties) ? item.duties : [];
         const safeAdd = Array.isArray(item.additionalDuties) ? item.additionalDuties : [];
         const areaDuties = safeDuties.filter(
-          d => !ADDITIONAL_JOBDESK_OPTIONS.includes(d) && d !== 'Back Up ACC' && !NON_AREA_TERMS.includes(d)
+          d => !ADDITIONAL_JOBDESK_OPTIONS.includes(d) && d !== 'Back Up ACC' && !isNonAreaTerm(d)
         );
         const addDuties = Array.from(
           new Set([
@@ -1392,7 +1403,7 @@ export const AdminSchedulesTab: React.FC<AdminSchedulesTabProps> = ({
                       typeof d === 'string' &&
                       !ADDITIONAL_JOBDESK_OPTIONS.includes(d) &&
                       d !== 'Back Up ACC' &&
-                      !NON_AREA_TERMS.includes(d)
+                      !isNonAreaTerm(d)
                   );
                   const rowAdditionalDuties = Array.from(
                     new Set([
