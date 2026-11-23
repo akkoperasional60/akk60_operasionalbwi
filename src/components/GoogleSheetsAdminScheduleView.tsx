@@ -181,7 +181,7 @@ const CrewCustomSelectDropdown: React.FC<{
   label: string;
   value: string;
   options: CrewOptionItem[];
-  onChange: (newValue: string) => void;
+  onChange: (newValue: string, selectedOption?: CrewOptionItem) => void;
   emptyLabel?: string;
   emptyValue?: string;
   roleBadgeText: string;
@@ -223,9 +223,51 @@ const CrewCustomSelectDropdown: React.FC<{
   }, [isOpen]);
 
   const filteredOptions = useMemo(() => {
-    const q = search.trim().toLowerCase();
+    const normalize = (value: string) => value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const editDistance = (a: string, b: string): number => {
+      if (a === b) return 0;
+      if (!a) return b.length;
+      if (!b) return a.length;
+      let previous = Array.from({ length: b.length + 1 }, (_, i) => i);
+      for (let i = 1; i <= a.length; i += 1) {
+        const current = [i];
+        for (let j = 1; j <= b.length; j += 1) {
+          current[j] = Math.min(
+            current[j - 1] + 1,
+            previous[j] + 1,
+            previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+          );
+        }
+        previous = current;
+      }
+      return previous[b.length];
+    };
+
+    const q = normalize(search);
     if (!q) return options;
-    return options.filter(o => o.name.toLowerCase().includes(q));
+    const queryParts = q.split(' ').filter(Boolean);
+    return options
+      .map(option => {
+        const name = normalize(option.name);
+        const nameParts = name.split(' ').filter(Boolean);
+        const exactScore = name === q ? 100 : name.includes(q) ? 90 : 0;
+        const tokenScore = queryParts.every(part =>
+          nameParts.some(token => token === part || token.startsWith(part) || token.includes(part))
+        ) ? 80 : 0;
+        const fuzzyScore = queryParts.every(part =>
+          nameParts.some(token => token.length >= 3 && part.length >= 4 && editDistance(token, part) <= (part.length >= 7 ? 2 : 1))
+        ) ? 60 : 0;
+        return { option, score: Math.max(exactScore, tokenScore, fuzzyScore) };
+      })
+      .filter(item => item.score > 0)
+      .sort((a, b) => b.score - a.score || a.option.name.localeCompare(b.option.name))
+      .map(item => item.option);
   }, [options, search]);
 
   const isNoneSelected = !value || value === '-' || value === emptyValue;
@@ -252,7 +294,7 @@ const CrewCustomSelectDropdown: React.FC<{
       const key = firstValid.name.trim().toLowerCase();
       const isAlreadyScheduled = scheduledCrewMap?.has(key) && (isNoneSelected || key !== value.trim().toLowerCase());
       if (!isAlreadyScheduled) {
-        onChange(firstValid.name);
+        onChange(firstValid.name, firstValid);
         setIsOpen(false);
       }
     }
@@ -366,7 +408,7 @@ const CrewCustomSelectDropdown: React.FC<{
                     disabled={isAlreadyScheduled}
                     onClick={() => {
                       if (isAlreadyScheduled) return;
-                      onChange(item.name);
+                      onChange(item.name, item);
                       setIsOpen(false);
                     }}
                     className={`w-full flex items-center justify-between gap-2.5 px-2.5 py-2 rounded-lg text-left transition cursor-pointer ${
@@ -1737,7 +1779,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     const allUsers = logisticsStore.getUsers();
     const allCrews = logisticsStore.getCrews();
     const activeDriverAndHelperUsers = allUsers
-      .filter(u => logisticsStore.isActiveDeliveryCrewUser(u, branchFilter) && branchStore.getCrewBranchId(u.id, u.fullName) === branchFilter)
+      .filter(u => logisticsStore.isActiveDeliveryCrewUser(u, branchFilter))
       .sort((a, b) => {
         if (a.role === 'driver' && b.role !== 'driver') return -1;
         if (a.role !== 'driver' && b.role === 'driver') return 1;
@@ -1785,7 +1827,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     const allUsers = logisticsStore.getUsers();
     const allCrews = logisticsStore.getCrews();
     const activeHelperAndDriverUsers = allUsers.filter(u =>
-      logisticsStore.isActiveDeliveryCrewUser(u, branchFilter) && branchStore.getCrewBranchId(u.id, u.fullName) === branchFilter
+      logisticsStore.isActiveDeliveryCrewUser(u, branchFilter)
     );
     const names = new Set<string>();
     const result: { id: string; name: string; hasAccount?: boolean }[] = [];
@@ -1885,6 +1927,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     departureDateIso: string;
     returnDateIso: string;
     driver: string;
+    driverId?: string;
     helper: string;
     helper2: string;
     area: string;
@@ -2005,6 +2048,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     tripIndex: number;
     scheduleId?: string;
     driver: string;
+    driverId?: string;
     helper: string;
     helper2: string;
     area: string;
@@ -2019,6 +2063,15 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
   } | null>(null);
   const [editTripModalError, setEditTripModalError] = useState<string | null>(null);
   const [manualScheduleFormError, setManualScheduleFormError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!editingTripModal?.isOpen || typeof document === 'undefined') return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [editingTripModal?.isOpen]);
 
   const editingScheduledCrewMap = useMemo(() => {
     if (!editingTripModal) return new Map<string, { role: string; area: string }>();
@@ -2101,7 +2154,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     // 1. Approved Driver & Helper accounts in Portal (strictly separated by effectiveActiveBranchId: Sidoarjo vs Nusantara)
     const allUsers = logisticsStore.getUsers();
     allUsers
-      .filter(u => logisticsStore.isActiveDeliveryCrewUser(u, effectiveActiveBranchId) && branchStore.getCrewBranchId(u.id, u.fullName) === effectiveActiveBranchId)
+      .filter(u => logisticsStore.isActiveDeliveryCrewUser(u, effectiveActiveBranchId))
       .forEach(u => {
         addCandidateToPool(
           u.id,
@@ -2631,6 +2684,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     const effectiveMo = selectedMonth === -1 ? 0 : selectedMonth;
     const defaultDayIso = `${selectedYear}-${String(effectiveMo + 1).padStart(2, '0')}-${String(dayNumber).padStart(2, '0')}`;
     const tripBranch = p.branchId || (p.id ? branchStore.getScheduleBranchId(p.id, p.target, p.armada) : (branchStore.getSelectedOriginBranchId() !== 'ALL' ? branchStore.getSelectedOriginBranchId() : 'cab-banyuwangi'));
+    const sourceSchedule = p.id ? logisticsStore.getSchedules().find(s => s.id === p.id) : undefined;
     setEditingTripModal({
       isOpen: true,
       dayNumber,
@@ -2638,6 +2692,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       tripIndex,
       scheduleId: p.id,
       driver: p.driver,
+      driverId: sourceSchedule?.crewId || sourceSchedule?.crew?.id || '',
       helper: p.helper && p.helper !== '-' ? p.helper : '',
       helper2: p.helper2 && p.helper2 !== '-' ? p.helper2 : '',
       area: p.area,
@@ -2654,7 +2709,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
 
   const handleOpenAddTripModal = (dayNumber: number, dateString: string) => {
     setEditTripModalError(null);
-    const defaultDriver = getIntegratedDrivers()[0]?.name || 'Budiono';
+    const defaultDriverOption = getIntegratedDrivers()[0];
+    const defaultDriver = defaultDriverOption?.name || 'Budiono';
     const defaultHelper = getIntegratedHelpers()[0]?.name || 'Saifur Rizal';
     const effectiveMo = selectedMonth === -1 ? 0 : selectedMonth;
     const defaultDayIso = `${selectedYear}-${String(effectiveMo + 1).padStart(2, '0')}-${String(dayNumber).padStart(2, '0')}`;
@@ -2666,6 +2722,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       tripIndex: -1,
       scheduleId: undefined,
       driver: defaultDriver,
+      driverId: defaultDriverOption?.id || '',
       helper: defaultHelper,
       helper2: '',
       area: '',
@@ -3265,7 +3322,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     if (!canEditSchedules) return;
     if (!editingTripModal) return;
     setEditTripModalError(null);
-    const { dayNumber, dateString, tripIndex, scheduleId, driver, helper, helper2, area, armada, target, departureDateIso, returnDateIso, departureTime, targetReturnTime, isNew } = editingTripModal;
+    const { dayNumber, dateString, tripIndex, scheduleId, driver, driverId, helper, helper2, area, armada, target, departureDateIso, returnDateIso, departureTime, targetReturnTime, isNew } = editingTripModal;
 
     const effectiveMonth = selectedMonth === -1 ? 0 : selectedMonth;
     const defaultMonthPadded = String(effectiveMonth + 1).padStart(2, '0');
@@ -3358,20 +3415,99 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       return;
     }
 
-    const matchedDriver = crews.find(c => 
-      c.name.toLowerCase().includes(driver.toLowerCase()) || 
-      driver.toLowerCase().includes(c.name.toLowerCase())
-    ) || crews[0];
+    const normalizeCrewName = (value: string) => value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+    const allUsers = logisticsStore.getUsers();
+    const resolveSelectedCrew = (
+      selectedName: string,
+      roleHint: 'Driver' | 'Helper',
+      selectedOptionId?: string
+    ): Crew | undefined => {
+      const cleanName = (selectedName || '').trim();
+      if (!cleanName || cleanName === '-') return undefined;
+      const normalizedName = normalizeCrewName(cleanName);
+      const optionId = String(selectedOptionId || '').trim();
+      const optionUserId = optionId.replace(/^crw-/, '');
+      const matchedUser = allUsers.find(u =>
+        (optionId && (u.id === optionId || u.id === optionUserId)) ||
+        normalizeCrewName(u.fullName || '') === normalizedName
+      );
+      if (matchedUser) {
+        if (!logisticsStore.isActiveDeliveryCrewUser(matchedUser, modalBranchId)) return undefined;
+        // Rebuild account-linked crew records using exact account identity. Do not reuse
+        // a similarly named legacy crew merely because its name contains the short name.
+        const syncedCrews = logisticsStore.syncUsersWithCrews();
+        const exactNameCrew = syncedCrews.find(c => normalizeCrewName(c.name) === normalizeCrewName(matchedUser.fullName || cleanName));
+        const accountCrew = syncedCrews.find(c => c.id === `crw-${matchedUser.id}`);
+        const fromStore = accountCrew || exactNameCrew;
+        branchStore.syncCrewBranchIdSilent(`crw-${matchedUser.id}`, modalBranchId, matchedUser.fullName || cleanName);
+        if (fromStore) {
+          return {
+            ...fromStore,
+            // The option is selected from User Management, so its account ID is the
+            // authoritative identity. Never persist an old legacy crew ID just because
+            // a crew cache entry has the same display name.
+            id: `crw-${matchedUser.id}`,
+            name: (matchedUser.fullName || cleanName).trim(),
+            phone: matchedUser.phone || fromStore.phone || '',
+            role: matchedUser.role === 'crew_helper' ? 'Kernet / Helper' : (fromStore.role || 'Driver Utama')
+          };
+        }
+        // User Management is the source of truth for eligible portal users; create a schedule snapshot
+        // when the legacy crew cache has not caught up with the user record yet.
+        return {
+          id: `crw-${matchedUser.id}`,
+          name: (matchedUser.fullName || cleanName).trim(),
+          phone: matchedUser.phone || '',
+          role: roleHint === 'Driver' ? 'Driver Utama' : 'Kernet / Helper',
+          licenseNumber: '',
+          licenseType: roleHint === 'Driver' ? 'SIM B1/B2 Umum' : 'SIM A',
+          status: 'available',
+          tripsCompleted: 0,
+          rating: 0
+        };
+      }
+      // Akun dengan nama yang sama tetapi tanpa akses cabang yang sesuai tidak boleh
+      // diubah menjadi kru legacy untuk melewati validasi hak akses.
+      if (allUsers.length > 0) return undefined;
+      return crews.find(c =>
+        normalizeCrewName(c.name) === normalizedName &&
+        c.status !== 'off' &&
+        branchStore.getCrewBranchId(c.id, c.name) === modalBranchId
+      );
+    };
 
-    const matchedHelper = helper && helper.trim() && helper !== '-' ? crews.find(c => 
-      c.name.toLowerCase().includes(helper.toLowerCase()) || 
-      helper.toLowerCase().includes(c.name.toLowerCase())
-    ) : undefined;
+    const selectedDriverIsAvailable = getIntegratedDrivers(modalBranchId)
+      .some(option => (driverId && option.id === driverId) || normalizeCrewName(option.name) === normalizeCrewName(driver));
+    const matchedDriver = selectedDriverIsAvailable ? resolveSelectedCrew(driver, 'Driver', driverId) : undefined;
+    if (!matchedDriver) {
+      const branchName = branchStore.getBranchById(modalBranchId)?.name || modalBranchId;
+      const driverErr = `Driver "${driver || '-'}" tidak ditemukan sebagai kru aktif dengan akses Portal Driver cabang ${branchName}. Periksa Hak Akses Cabang dan akses Portal Driver di Manajemen User.`;
+      setEditTripModalError(driverErr);
+      setUploadToast({ type: 'error', message: driverErr });
+      return;
+    }
 
-    const matchedHelper2 = helper2 && helper2.trim() && helper2 !== '-' ? crews.find(c => 
-      c.name.toLowerCase().includes(helper2.toLowerCase()) || 
-      helper2.toLowerCase().includes(c.name.toLowerCase())
-    ) : undefined;
+    const isHelperSelected = (name: string) => Boolean(name && name.trim() && name.trim() !== '-');
+    const selectedHelperIsAvailable = !isHelperSelected(helper) || getIntegratedHelpers(modalBranchId)
+      .some(option => normalizeCrewName(option.name) === normalizeCrewName(helper));
+    const selectedHelper2IsAvailable = !isHelperSelected(helper2) || getIntegratedHelpers(modalBranchId)
+      .some(option => normalizeCrewName(option.name) === normalizeCrewName(helper2));
+    const matchedHelper = isHelperSelected(helper) && selectedHelperIsAvailable
+      ? resolveSelectedCrew(helper, 'Helper')
+      : undefined;
+    const matchedHelper2 = isHelperSelected(helper2) && selectedHelper2IsAvailable
+      ? resolveSelectedCrew(helper2, 'Helper')
+      : undefined;
+    if ((isHelperSelected(helper) && !matchedHelper) || (isHelperSelected(helper2) && !matchedHelper2)) {
+      const helperErr = `Helper tidak ditemukan sebagai kru aktif dengan akses Portal Driver cabang ${branchStore.getBranchById(modalBranchId)?.name || modalBranchId}. Periksa Hak Akses Cabang di Manajemen User.`;
+      setEditTripModalError(helperErr);
+      setUploadToast({ type: 'error', message: helperErr });
+      return;
+    }
 
     const isBali = modalBranchId !== 'cab-sidoarjo' && (stdArea.includes('DENPASAR') || stdArea.includes('SINGARAJA') || stdArea.includes('NEGARA') || stdArea.includes('BALI'));
     const modalBranchInfo = branchStore.getBranchById(modalBranchId);
@@ -3509,24 +3645,43 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       // Editing existing
       let targetId = scheduleId;
       const storeSchedules = logisticsStore.getSchedules();
-
       const prevTrip = weeks
         .flatMap(w => w.days)
         .find(d => d.dayNumber === dayNumber)?.pengiriman[tripIndex];
 
-      if (!targetId) {
-        const found = storeSchedules.find(s => {
-          if (!s.departureDate) return false;
-          const d = new Date(s.departureDate);
-          const isSameDay = d.getFullYear() === selectedYear && d.getMonth() === effectiveMonth && d.getDate() === dayNumber;
-          if (!isSameDay) return false;
-          return s.fleet?.initialCode === armada || (s.trackingNumber && s.trackingNumber.includes(armada)) || s.crew?.name?.toLowerCase().includes(driver.toLowerCase());
-        }) || storeSchedules.find(s => {
-          if (!s.departureDate) return false;
-          const d = new Date(s.departureDate);
-          return d.getFullYear() === selectedYear && d.getMonth() === effectiveMonth && d.getDate() === dayNumber;
+      // Never fall back to an arbitrary schedule from the same date. Use the selected
+      // schedule ID, or a unique legacy identity (date + fleet + old driver/area).
+      if (!targetId || !storeSchedules.some(s => s.id === targetId)) {
+        const normalizeKey = (value?: string) => (value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const oldDriverKey = normalizeKey(prevTrip?.driver || driver);
+        const oldAreaKey = normalizeKey(prevTrip?.area || area);
+        const oldFleetKey = normalizeKey(prevTrip?.armada || armada);
+        const candidates = storeSchedules.filter(s => {
+          if (!s.departureDate && !s.deliveryDate) return false;
+          const d = new Date(s.departureDate || s.deliveryDate || '');
+          const sameDay = !Number.isNaN(d.getTime()) &&
+            d.getFullYear() === selectedYear && d.getMonth() === effectiveMonth && d.getDate() === dayNumber;
+          if (!sameDay) return false;
+          const scheduleFleetKeys = [s.armada, s.fleet?.initialCode, s.fleet?.plateNumber]
+            .map(normalizeKey)
+            .filter(Boolean);
+          const fleetMatches = Boolean(oldFleetKey) && scheduleFleetKeys.includes(oldFleetKey);
+          if (!fleetMatches) return false;
+          const driverMatches = Boolean(oldDriverKey) && normalizeKey(s.crew?.name) === oldDriverKey;
+          const areaMatches = Boolean(oldAreaKey) && normalizeKey(s.areaName || s.store?.storeName) === oldAreaKey;
+          return driverMatches || areaMatches;
         });
-        if (found) targetId = found.id;
+        if (candidates.length === 1) {
+          targetId = candidates[0].id;
+        } else {
+          const identityError = candidates.length > 1
+            ? 'Ada lebih dari satu jadwal yang cocok dengan tanggal dan armada ini.'
+            : 'ID jadwal tidak ditemukan dan identitas jadwal lama tidak cocok.';
+          const message = `${identityError} Data tidak diubah untuk mencegah laporan atau ritase area lain ikut berubah. Muat ulang jadwal, lalu buka kembali rincian ritase yang benar.`;
+          setEditTripModalError(message);
+          setUploadToast({ type: 'error', message });
+          return;
+        }
       }
 
       if (targetId && storeSchedules.some(s => s.id === targetId)) {
@@ -6954,9 +7109,9 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
       ) : null}
 
       {/* Modal Edit / Tambah Ritase Pengiriman */}
-      {editingTripModal && editingTripModal.isOpen && (
-        <div className="fixed inset-0 z-[9999] flex items-start justify-center pt-20 sm:pt-24 pb-6 px-3 sm:px-4 bg-slate-950/80 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-6 max-w-lg w-full shadow-2xl flex flex-col max-h-[calc(100vh-7rem)] overflow-hidden">
+      {editingTripModal?.isOpen && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[10000] grid place-items-center p-2 sm:p-4 bg-slate-950/80 backdrop-blur-xs overflow-hidden animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 max-w-5xl w-full shadow-2xl flex flex-col max-h-[calc(100dvh-1rem)] overflow-hidden">
             <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3 mb-4 shrink-0">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-amber-500/15 text-amber-500 flex items-center justify-center border border-amber-500/30">
@@ -6981,18 +7136,20 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               </button>
             </div>
 
-            <div className="space-y-3.5 text-xs flex-1 overflow-y-auto pr-1">
+            <div className="text-xs flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1">
               {editTripModalError && (
-                <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-600 dark:text-rose-300 text-xs font-bold flex items-start gap-2">
+                <div className="mb-3 p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-600 dark:text-rose-300 text-xs font-bold flex items-start gap-2">
                   <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
                   <span>{editTripModalError}</span>
                 </div>
               )}
-              <CrewCustomSelectDropdown
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+                <div className="space-y-3.5 min-w-0 lg:sticky lg:top-0 self-start">
+                  <CrewCustomSelectDropdown
                 label="Driver / Pengemudi *"
                 value={editingTripModal.driver}
                 options={getIntegratedDrivers(editingTripModal.branchId || effectiveActiveBranchId)}
-                onChange={(val) => setEditingTripModal({ ...editingTripModal, driver: val })}
+                onChange={(val, option) => setEditingTripModal({ ...editingTripModal, driver: val, driverId: option?.id || '' })}
                 roleBadgeText="Kru Supir"
                 accentColor="blue"
                 scheduledCrewMap={editingScheduledCrewMap}
@@ -7055,6 +7212,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                 accentColor="blue"
               />
 
+                </div>
+                <div className="space-y-3.5 min-w-0">
               {/* Tanggal & Jam Keberangkatan serta Tanggal & Jam Kepulangan (Kepulangan Sesuai Tanggal Kirim) */}
               <div className="p-3.5 rounded-xl bg-blue-500/5 border border-blue-500/25 space-y-3">
                 <div className="flex items-center justify-between">
@@ -7124,9 +7283,11 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                   </div>
                 )}
               </div>
+                </div>
+              </div>
             </div>
 
-            <div className="pt-3 mt-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-2 shrink-0">
+            <div className="pt-3 mt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-2 shrink-0 bg-white dark:bg-slate-900">
               <button
                 type="button"
                 onClick={() => setEditingTripModal(null)}
@@ -7144,7 +7305,8 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Pop-up Modal: Form Tambah Jadwal Baru (Manual) */}

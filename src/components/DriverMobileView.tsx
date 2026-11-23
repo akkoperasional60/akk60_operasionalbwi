@@ -111,6 +111,11 @@ const isPhantomOperationalPlate = (plate?: string): boolean => {
   return /^FLT-\d+$/i.test(clean) || clean === '*AKK';
 };
 
+// Legacy user/crew rows can be incomplete (for example, accounts without email).
+// Normalize unknown values defensively so one incomplete row cannot crash the whole portal.
+const normalizePortalIdentity = (value: unknown): string =>
+  String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+
 const getPortalAuthHeaders = (): Record<string, string> => {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   try {
@@ -194,7 +199,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   }, [currentUser]);
 
   const portalInitials = useMemo(() => {
-    const name = portalDisplayName.trim();
+    const name = String(portalDisplayName || '').trim();
     if (!name) return 'DR';
     const parts = name.split(/\s+/).filter(Boolean);
     if (parts.length >= 2) {
@@ -221,11 +226,14 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   // Sinkronisasi Role dengan User Manajemen (Driver / Helper / Role lainnya)
   const syncedUserRoleInfo = useMemo(() => {
     const allUsers = logisticsStore.getUsers();
-    const matchedUser = allUsers.find(
-      u =>
+    const currentEmailKey = normalizePortalIdentity(currentUser?.email);
+    const currentNameKey = normalizePortalIdentity(portalDisplayName);
+    const matchedUser = (Array.isArray(allUsers) ? allUsers : []).find(
+      u => Boolean(u) && (
         (currentUser?.id && u.id === currentUser.id) ||
-        (currentUser?.email && u.email.toLowerCase() === currentUser.email.toLowerCase()) ||
-        (portalDisplayName && u.fullName.toLowerCase() === portalDisplayName.toLowerCase())
+        (currentEmailKey && normalizePortalIdentity(u.email) === currentEmailKey) ||
+        (currentNameKey && normalizePortalIdentity(u.fullName) === currentNameKey)
+      )
     );
     const rawRole = matchedUser?.role || currentUser?.role || loggedInDriver?.role || 'driver';
     const roleLower = String(rawRole).toLowerCase();
@@ -316,7 +324,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       return;
     }
 
-    const crewMatch = crews.find(c => c.name.toLowerCase() === user.fullName.toLowerCase())
+    const crewMatch = crews.find(c => normalizePortalIdentity(c?.name) === normalizePortalIdentity(user?.fullName))
       || logisticsStore.getActiveDriverCrew()
       || null;
     setLoggedInDriver(crewMatch);
@@ -377,6 +385,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   };
 
   const [deliveries, setDeliveries] = useState<Schedule[]>([]);
+  const deliveriesRef = useRef<Schedule[]>([]);
+  deliveriesRef.current = deliveries;
   const [formKirimList, setFormKirimList] = useState<FormKirimRecord[]>(() => formKirimStore.getAll());
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
@@ -848,6 +858,8 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
   const [gmapsModalRoleOverride, setGmapsModalRoleOverride] = useState<'driver' | 'helper' | undefined>(undefined);
   const [jobdeskRoleOverride, setJobdeskRoleOverride] = useState<'auto' | 'driver' | 'helper'>('auto');
   const lastGpsPingAtRef = useRef<number>(0);
+  const lastGpsPingLocationRef = useRef<{ lat: number; lng: number } | null>(null);
+  const lastGpsPingTripIdRef = useRef<string>('');
 
   const openGmapsFeature = (cat?: GmapsReportCategory, roleForModal?: 'driver' | 'helper') => {
     setGmapsInitialCategory(cat);
@@ -1170,19 +1182,96 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     };
   }, [selectedDriverId]);
 
+  // Filter kru khusus untuk SPV Logistik & Super Admin di Portal Driver ('all' = tampilkan semua jadwal kru)
+  const [spvCrewFilter, setSpvCrewFilter] = useState<string>('all');
+  const spvCrewFilterRef = useRef<string>('all');
+  useEffect(() => {
+    spvCrewFilterRef.current = spvCrewFilter;
+  }, [spvCrewFilter]);
+
   // 📢 Arahan & Solusi Kendala dari SPV Logistik / Super Admin (Hanya tampil pada hari tersebut, otomatis hilang keesokan harinya)
   const [driverKendalaReports, setDriverKendalaReports] = useState<DriverHelperReport[]>([]);
   const [todayOfflineReports, setTodayOfflineReports] = useState<DriverHelperReport[]>([]);
   const todayLocalStr = useMemo(() => getLocalDateStr(realtimeNow), [realtimeNow]);
 
+  const resolveReportAssignedDelivery = (report: DriverHelperReport): Schedule | null => {
+    const assigned = deliveriesRef.current;
+    if (!assigned.length) return null;
+
+    const normalizeKey = (value: unknown) => String(value ?? '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+    const reportPlate = normalizeKey(report.plateNumber);
+    const reportArea = normalizeKey(report.areaName);
+    const reportPeople = [report.driverName, report.helperName].map(normalizeKey).filter(Boolean);
+    const reportId = normalizeKey(report.driverId).replace(/^(usr|crw)/, '');
+
+    const matchesCrew = (schedule: Schedule) => {
+      // Crew identity is the primary relationship. A schedule may be edited to use a
+      // different truck after a proof was submitted, so an old plate must not detach it.
+      const schedulePeople = [
+        schedule.crew?.name,
+        schedule.crewHelper?.name,
+        schedule.crewHelper2?.name,
+        schedule.backupCrewName,
+        schedule.backupTargetName
+      ].map(normalizeKey).filter(Boolean);
+      const crewNameMatches = reportPeople.some(name => schedulePeople.includes(name));
+
+      const scheduleIds = [
+        schedule.crewId, schedule.crewHelperId, schedule.crewHelper2Id,
+        schedule.backupCrewId, schedule.crew?.id, schedule.crewHelper?.id,
+        schedule.crewHelper2?.id
+      ].map(normalizeKey).filter(Boolean).map(id => id.replace(/^(usr|crw)/, ''));
+      // Prefer explicit names whenever present; old records can carry reused/stale crew IDs.
+      const crewIdMatches = reportPeople.length === 0 && Boolean(reportId) && scheduleIds.includes(reportId);
+      return crewNameMatches || crewIdMatches;
+    };
+
+    const areaMatches = (schedule: Schedule) => {
+      if (!reportArea) return false;
+      const area = normalizeKey(schedule.areaName || schedule.store?.storeName);
+      return Boolean(area && (area === reportArea || area.startsWith(reportArea) || reportArea.startsWith(area)));
+    };
+
+    const plateMatches = (schedule: Schedule) => {
+      const schedulePlate = normalizeKey(schedule.fleet?.plateNumber || schedule.armada);
+      return !reportPlate || !schedulePlate || reportPlate === schedulePlate;
+    };
+
+    // Prefer the report's saved schedule ID, but verify the actual assigned crew. Plate
+    // numbers are only a tie-breaker because a schedule can receive a replacement truck.
+    if (report.deliveryId) {
+      const linked = assigned.find(schedule => schedule.id === report.deliveryId);
+      if (linked && matchesCrew(linked)) return linked;
+
+      // Repair a stale/incorrect link only when the crew identifies one unique active trip.
+      const candidates = assigned.filter(matchesCrew);
+      const areaCandidates = candidates.filter(areaMatches);
+      if (areaCandidates.length === 1) return areaCandidates[0];
+      const plateCandidates = candidates.filter(plateMatches);
+      if (plateCandidates.length === 1) return plateCandidates[0];
+      return candidates.length === 1 ? candidates[0] : null;
+    }
+
+    // Legacy reports use crew + area first; the old vehicle plate is a tie-breaker only.
+    const candidates = assigned.filter(matchesCrew);
+    const areaCandidates = candidates.filter(areaMatches);
+    if (areaCandidates.length === 1) return areaCandidates[0];
+    const plateCandidates = candidates.filter(plateMatches);
+    if (plateCandidates.length === 1) return plateCandidates[0];
+    return candidates.length === 1 ? candidates[0] : null;
+  };
+
+  const isReportBoundToAssignedDelivery = (report: DriverHelperReport): boolean =>
+    Boolean(resolveReportAssignedDelivery(report));
+
   const loadDriverKendalaReports = () => {
     try {
       const all = driverReportService.getReports();
-      const current = crews.find(c => c.id === selectedDriverId);
-      const displayLower = (portalDisplayName || '').toLowerCase();
-      const userFullLower = (currentUser?.fullName || '').toLowerCase();
       const spvFilterLower = (spvCrewFilterRef.current && spvCrewFilterRef.current !== 'all' ? spvCrewFilterRef.current : '').toLowerCase();
-      const activePlateClean = (deliveries[0]?.fleet?.plateNumber || activeShift?.plateNumber || '').replace(/\s+/g, '').toLowerCase();
       const isSpvOrAdminRole =
         currentUser?.role === 'super_admin' ||
         currentUser?.role === 'spv_logistik' ||
@@ -1192,28 +1281,31 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       const filtered = all.filter(r => {
         const rDriverLower = (r.driverName || '').toLowerCase();
         const rHelperLower = (r.helperName || '').toLowerCase();
-        const currentCrewLower = (current?.name || '').toLowerCase();
-        const rPlateClean = (r.plateNumber || '').replace(/\s+/g, '').toLowerCase();
 
         if (spvFilterLower) {
           return rDriverLower.includes(spvFilterLower) || rHelperLower.includes(spvFilterLower) || spvFilterLower.includes(rDriverLower);
         }
         if (isSpvOrAdminRole) return true;
-        if (r.driverId === selectedDriverId) return true;
-        if (currentCrewLower && (rDriverLower.includes(currentCrewLower) || rHelperLower.includes(currentCrewLower) || currentCrewLower.includes(rDriverLower))) return true;
-        if (displayLower && (rDriverLower.includes(displayLower) || rHelperLower.includes(displayLower) || displayLower.includes(rDriverLower))) return true;
-        if (userFullLower && (rDriverLower.includes(userFullLower) || rHelperLower.includes(userFullLower) || userFullLower.includes(rDriverLower))) return true;
-        if (activePlateClean && rPlateClean && activePlateClean === rPlateClean) return true;
-        return false;
+        return isReportBoundToAssignedDelivery(r);
       });
-      const filteredSig = JSON.stringify(filtered.map(r => `${r.id}:${r.status}:${r.solution || ''}:${r.driverAcknowledged ? 1 : 0}`));
+      // Keep the report's author and notes as sent, but resolve its displayed route from
+      // the exact schedule ID. This repairs old mislabelled area cards without mutating
+      // the historical report stored on the server.
+      const displayReports = filtered.map(report => {
+        const linkedSchedule = resolveReportAssignedDelivery(report);
+        const linkedArea = linkedSchedule?.areaName || linkedSchedule?.store?.storeName;
+        return linkedSchedule && linkedArea && report.areaName !== linkedArea
+          ? { ...report, areaName: linkedArea }
+          : report;
+      });
+      const filteredSig = JSON.stringify(displayReports.map(r => `${r.id}:${r.areaName}:${r.status}:${r.solution || ''}:${r.driverAcknowledged ? 1 : 0}`));
       setDriverKendalaReports(prev => {
-        const prevSig = JSON.stringify(prev.map(r => `${r.id}:${r.status}:${r.solution || ''}:${r.driverAcknowledged ? 1 : 0}`));
-        return prevSig === filteredSig ? prev : filtered;
+        const prevSig = JSON.stringify(prev.map(r => `${r.id}:${r.areaName}:${r.status}:${r.solution || ''}:${r.driverAcknowledged ? 1 : 0}`));
+        return prevSig === filteredSig ? prev : displayReports;
       });
 
       // Jika ada solusi baru hari ini yang belum dikonfirmasi kru, pastikan langsung muncul pada banner atas tanpa menunggu
-      const latestUnackSol = filtered.find(r => {
+      const latestUnackSol = displayReports.find(r => {
         if (!r.solution || !r.solution.trim() || r.driverAcknowledged) return false;
         const solDate = r.solutionAt ? getLocalDateStr(new Date(r.solutionAt)) : getLocalDateStr(r.date || r.timestamp);
         return solDate === todayLocalStr;
@@ -1267,6 +1359,12 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       window.removeEventListener('driver-report-updated', handleUpdate);
     };
   }, [selectedDriverId, portalDisplayName, todayLocalStr]);
+
+  // Refresh the local report view whenever the assigned trip list changes, without
+  // launching an extra network sync for every schedule update.
+  useEffect(() => {
+    loadDriverKendalaReports();
+  }, [deliveries, selectedDriverId, spvCrewFilter]);
 
   const activeDriverSolutions = useMemo(() => {
     return driverKendalaReports
@@ -1781,13 +1879,6 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     loadDeliveries(true);
     return targetF;
   };
-
-  // Filter kru khusus untuk SPV Logistik & Super Admin di Portal Driver ('all' = tampilkan semua jadwal kru)
-  const [spvCrewFilter, setSpvCrewFilter] = useState<string>('all');
-  const spvCrewFilterRef = useRef<string>('all');
-  useEffect(() => {
-    spvCrewFilterRef.current = spvCrewFilter;
-  }, [spvCrewFilter]);
 
   // Pembagian Cabang Portal Driver langsung sesuai hak akses pada Manajemen User (tanpa switcher manual)
   const [globalOriginBranchId, setGlobalOriginBranchId] = useState<string>(() => {
@@ -2349,11 +2440,14 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
       const latestFleets = logisticsStore.getFleets();
       const latestActiveCrew = logisticsStore.getActiveDriverCrew();
       const latestUsersList = logisticsStore.getUsers();
-      const matchedUserInStore = latestUsersList.find(
-        u =>
+      const latestEmailKey = normalizePortalIdentity(latestUser?.email);
+      const latestNameKey = normalizePortalIdentity(latestUser?.fullName);
+      const matchedUserInStore = (Array.isArray(latestUsersList) ? latestUsersList : []).find(
+        u => Boolean(u) && (
           (latestUser?.id && u.id === latestUser.id) ||
-          (latestUser?.email && u.email.toLowerCase() === latestUser.email.toLowerCase()) ||
-          (latestUser?.fullName && u.fullName.toLowerCase() === latestUser.fullName.toLowerCase())
+          (latestEmailKey && normalizePortalIdentity(u.email) === latestEmailKey) ||
+          (latestNameKey && normalizePortalIdentity(u.fullName) === latestNameKey)
+        )
       );
       const effectiveRole = String(matchedUserInStore?.role || latestUser?.role || '').toLowerCase();
       const isManagerPortal = ['super_admin'].includes(effectiveRole);
@@ -2888,21 +2982,12 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         : getLocalDateStr(updated.date || updated.timestamp);
       if (solDateStr !== todayStr) return;
 
-      const current = crews.find(c => c.id === selectedDriverId);
-      const displayLower = (portalDisplayName || '').toLowerCase();
-      const userFullLower = (currentUser?.fullName || '').toLowerCase();
       const isSpvOrAdminRole =
-        currentUser?.role === 'super_admin' || currentUser?.role === 'spv_logistik';
-      const uDriverLower = (updated.driverName || '').toLowerCase();
-      const uHelperLower = (updated.helperName || '').toLowerCase();
-      const currentCrewLower = (current?.name || '').toLowerCase();
-
-      const isForCurrentCrew =
-        updated.driverId === selectedDriverId ||
-        (currentCrewLower && (uDriverLower.includes(currentCrewLower) || uHelperLower.includes(currentCrewLower))) ||
-        (displayLower && (uDriverLower.includes(displayLower) || uHelperLower.includes(displayLower))) ||
-        (userFullLower && (uDriverLower.includes(userFullLower) || uHelperLower.includes(userFullLower))) ||
-        isSpvOrAdminRole;
+        currentUser?.role === 'super_admin' ||
+        currentUser?.role === 'spv_logistik' ||
+        currentUser?.role === 'operasional' ||
+        currentUser?.role === 'koordinator_driver';
+      const isForCurrentCrew = isSpvOrAdminRole || isReportBoundToAssignedDelivery(updated);
 
       if (isForCurrentCrew) {
         setLatestSolutionBanner({
@@ -3088,20 +3173,47 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     activeShift?.selectedArea
   ]);
 
-  // 🛰️ Kirim ping GPS berkala (heartbeat 15 detik + watchPosition real-time) ke Hostinger MySQL selama armada sedang dalam perjalanan
+  // 🛰️ Sinkronisasi GPS hemat data: kirim jika berpindah >=75 m (minimal jeda 30 dtk),
+  // atau kirim heartbeat maksimal setiap 2 menit bila posisi tidak berubah.
+  const activeGpsTrip = activeDeliveries.find(
+    d => d.status === 'in_transit' || d.status === 'picked_up'
+  );
+
   useEffect(() => {
-    const activeTrip = activeDeliveries.find(
-      d => d.status === 'in_transit' || d.status === 'picked_up'
-    );
-    if (!activeTrip) return;
+    if (!activeGpsTrip) return;
+
+    if (lastGpsPingTripIdRef.current !== activeGpsTrip.id) {
+      lastGpsPingTripIdRef.current = activeGpsTrip.id;
+      lastGpsPingAtRef.current = 0;
+      lastGpsPingLocationRef.current = null;
+    }
 
     const pushGpsPing = (lat: number, lng: number, speedKmh: number) => {
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
       const nowMs = Date.now();
-      if (nowMs - lastGpsPingAtRef.current < 12000) return;
-      lastGpsPingAtRef.current = nowMs;
 
-      void fetch(`/api/gps-trips/${encodeURIComponent(`TRIP-${activeTrip.id}`)}/ping`, {
+      const previousLocation = lastGpsPingLocationRef.current;
+      const elapsedMs = nowMs - lastGpsPingAtRef.current;
+      let movedMeters = Infinity;
+      if (previousLocation) {
+        const toRad = (value: number) => (value * Math.PI) / 180;
+        const dLat = toRad(lat - previousLocation.lat);
+        const dLng = toRad(lng - previousLocation.lng);
+        const a =
+          Math.sin(dLat / 2) ** 2 +
+          Math.cos(toRad(previousLocation.lat)) * Math.cos(toRad(lat)) * Math.sin(dLng / 2) ** 2;
+        movedMeters = 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      }
+
+      // Saat bergerak, kirim maksimal sekali per 30 detik dan setelah perpindahan
+      // bermakna. Saat berhenti, tetap kirim heartbeat setiap 120 detik.
+      if (previousLocation && elapsedMs < 30000) return;
+      if (previousLocation && elapsedMs < 120000 && movedMeters < 75) return;
+
+      lastGpsPingAtRef.current = nowMs;
+      lastGpsPingLocationRef.current = { lat, lng };
+
+      void fetch(`/api/gps-trips/${encodeURIComponent(`TRIP-${activeGpsTrip.id}`)}/ping`, {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
@@ -3109,7 +3221,7 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           lat,
           lng,
           speedKmh: speedKmh || 0,
-          locationName: activeTrip.areaName || activeTrip.store?.storeName || 'Dalam Perjalanan'
+          locationName: activeGpsTrip.areaName || activeGpsTrip.store?.storeName || 'Dalam Perjalanan'
         })
       })
         .then(() => {
@@ -3121,8 +3233,13 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     if (deviceGps.source === 'native') {
       pushGpsPing(deviceGps.lat, deviceGps.lng, deviceGps.speedKmh);
     }
+  }, [deviceGps.lat, deviceGps.lng, deviceGps.speedKmh, deviceGps.source, deviceGps.lastUpdated, activeGpsTrip?.id, activeGpsTrip?.areaName, activeGpsTrip?.store?.storeName]);
 
-    // Active 15-second GPS heartbeat polling agar track Live Trips tetap terekam meskipun perangkat sempat idle
+  // Heartbeat lokasi dipisah dari effect sinkronisasi agar timer tidak dibuat
+  // ulang setiap watchPosition memperbarui koordinat. GPS cache dipakai hingga 30 dtk.
+  useEffect(() => {
+    if (!activeGpsTrip || deviceGps.permissionState !== 'granted') return;
+
     const heartbeatTimer = window.setInterval(() => {
       if (typeof navigator === 'undefined' || !navigator.geolocation) return;
       navigator.geolocation.getCurrentPosition(
@@ -3142,15 +3259,14 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
             permissionState: 'granted',
             errorMsg: null
           });
-          pushGpsPing(pos.coords.latitude, pos.coords.longitude, speedKmh);
         },
         () => {},
-        { enableHighAccuracy: true, timeout: 8000, maximumAge: 5000 }
+        { enableHighAccuracy: false, timeout: 10000, maximumAge: 30000 }
       );
-    }, 15000);
+    }, 60000);
 
     return () => window.clearInterval(heartbeatTimer);
-  }, [deviceGps.lat, deviceGps.lng, deviceGps.speedKmh, deviceGps.source, activeDeliveries]);
+  }, [activeGpsTrip?.id, deviceGps.permissionState]);
 
   // 🧭 Deteksi Posisi Jobdesk Terjadwal (Driver vs Helper) untuk Jadwal Tertentu maupun Portal Utama
   const getScheduledJobdeskForDelivery = (delivery?: Schedule | null): 'driver' | 'helper' => {
@@ -3185,7 +3301,10 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     }
 
     if (canManageAllPortalSchedules && spvCrewFilter !== 'all') {
-      const matchedFilterUser = logisticsStore.getUsers().find(u => u.fullName.toLowerCase() === spvCrewFilter.toLowerCase());
+      const filterKey = normalizePortalIdentity(spvCrewFilter);
+      const matchedFilterUser = logisticsStore.getUsers().find(
+        u => Boolean(u) && normalizePortalIdentity(u.fullName) === filterKey
+      );
       if (matchedFilterUser?.role === 'crew_helper') return 'helper';
       if (matchedFilterUser?.role === 'driver') return 'driver';
     }
@@ -4657,6 +4776,11 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
       // Rekam perjalanan Live GPS ke MySQL Hostinger (/api/gps-trips) dengan koordinat GPS asli yang baru terkunci
       const { driverName: tripDriver, helper1Name: tripHelper1, helper2Name: tripHelper2 } = getDeliveryCrewComposition(preparedSchedule);
+      // Titik Gate-Out sudah disimpan sebagai titik pertama; jadikan patokan
+      // ping agar koordinat yang sama tidak langsung dikirim dua kali.
+      lastGpsPingTripIdRef.current = delivery.id;
+      lastGpsPingAtRef.current = Date.now();
+      lastGpsPingLocationRef.current = { lat: lockedLat, lng: lockedLng };
       void fetch('/api/gps-trips', {
         method: 'POST',
         credentials: 'same-origin',

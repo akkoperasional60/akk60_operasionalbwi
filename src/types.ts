@@ -1102,3 +1102,6 @@ export interface ChatMessage {
   attachmentName?: string;
   cabangId?: string;
 }
+
+
+
