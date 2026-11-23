@@ -137,13 +137,19 @@ export const DriverReportsManagement: React.FC = () => {
     return r === 'superadmin';
   }, [currentUser]);
 
-  const fleets = useMemo(() => logisticsStore.getFleets(), []);
-  const schedules = useMemo(() => logisticsStore.getSchedules(), []);
+  const [storeTick, setStoreTick] = useState(0);
+  useEffect(() => {
+    const bump = () => setStoreTick(t => t + 1);
+    return logisticsStore.subscribe(bump);
+  }, []);
+
+  const fleets = useMemo(() => logisticsStore.getFleets(), [storeTick]);
+  const schedules = useMemo(() => logisticsStore.getSchedules(), [storeTick]);
 
   // Helper untuk menampilkan Plat Nomor beserta Nama Inisial Armada (contoh: P 8711 UW (N21 / NL2))
   const formatPlateWithInitial = (plateRaw?: string): string => {
     const raw = (plateRaw || '-').trim();
-    if (!raw || raw === '-') return '-';
+    if (!raw || raw === '-' || /^FLT-\d+$/i.test(raw) || raw.toUpperCase().endsWith('AKK')) return '-';
     if (raw.includes('(') && raw.includes(')')) return raw;
     const cleanPlate = raw.replace(/\s+/g, '').toUpperCase();
     const matchedFleet = fleets.find(
@@ -1102,21 +1108,33 @@ export const DriverReportsManagement: React.FC = () => {
           (!cleanPlate || (s.plateNumber || '').replace(/\s+/g, '').toUpperCase() === cleanPlate))
       );
 
-      let helperName = (base.helperName || '').trim();
-      if (!helperName && matchedShift) {
+      const isHelperRow = String(base.userRole || '').toLowerCase().includes('helper');
+      const rawSanitizedPlate =
+        !base.plateNumber || /^FLT-\d+$/i.test(base.plateNumber.trim()) || base.plateNumber.trim().toUpperCase().endsWith('AKK')
+          ? '-'
+          : base.plateNumber.trim();
+
+      let helperName = isHelperRow ? '' : (base.helperName || '').trim();
+      if (!isHelperRow && helperName && helperName.toLowerCase() === lowerDriver) {
+        helperName = '';
+      }
+      if (!isHelperRow && !helperName && matchedShift) {
         const hParts = [matchedShift.helper1Name, matchedShift.helper2Name]
           .map(v => (v || '').trim())
           .filter(v => v && v !== '-' && v.toLowerCase() !== lowerDriver);
         if (hParts.length > 0) helperName = hParts.join(', ');
       }
-      if (!helperName && matchedSchedule) {
+      if (!isHelperRow && !helperName && matchedSchedule) {
         const schHelpers = [resolveCrewName(matchedSchedule.crewHelper), resolveCrewName(matchedSchedule.crewHelper2)]
           .map(v => v.trim())
           .filter(v => v && v !== '-' && v.toLowerCase() !== lowerDriver);
         if (schHelpers.length > 0) helperName = schHelpers.join(', ');
       }
-      if (!helperName) {
-        helperName = extractHelperFromNotes(base.notes);
+      if (!isHelperRow && !helperName) {
+        const extracted = extractHelperFromNotes(base.notes);
+        if (extracted && extracted.trim().toLowerCase() !== lowerDriver) {
+          helperName = extracted;
+        }
       }
 
       // Target departure & return from matched Schedule or SOP Area Timing
@@ -1142,6 +1160,7 @@ export const DriverReportsManagement: React.FC = () => {
 
       return {
         ...base,
+        plateNumber: rawSanitizedPlate,
         helperName: helperName || '-',
         targetDepartureLabel,
         targetReturnLabel,

@@ -2594,6 +2594,43 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
   let inMemoryDriverPins: Record<string, string> = {};
   let inMemoryShiftsLoadedFromDb = false;
 
+  const sanitizeOperationalPlate = (plate?: any): string => {
+    const clean = String(plate || '').trim();
+    if (!clean || /^FLT-\d+$/i.test(clean) || clean.toUpperCase().endsWith('AKK')) {
+      return '-';
+    }
+    return clean;
+  };
+
+  const sanitizeShiftRecord = (s: any) => {
+    if (!s || typeof s !== 'object') return s;
+    const cleanPlate = sanitizeOperationalPlate(s.plateNumber);
+    const isHelperRole = String(s.checkinRole || '').toLowerCase() === 'helper';
+    const dNameLower = String(s.driverName || '').trim().toLowerCase();
+    const h1Lower = String(s.helper1Name || '').trim().toLowerCase();
+    const clearDuplicateH1 = isHelperRole && h1Lower && dNameLower && h1Lower === dNameLower;
+    return {
+      ...s,
+      plateNumber: cleanPlate,
+      fleetId: cleanPlate === '-' && /^flt-\d+$/i.test(String(s.fleetId || '').trim()) ? undefined : s.fleetId,
+      ...(clearDuplicateH1 ? { helper1Id: undefined, helper1Name: undefined } : {})
+    };
+  };
+
+  const sanitizeReportRecord = (r: any) => {
+    if (!r || typeof r !== 'object') return r;
+    const cleanPlate = sanitizeOperationalPlate(r.plateNumber);
+    const isHelperRole = String(r.userRole || '').toLowerCase().includes('helper');
+    const dNameLower = String(r.driverName || '').trim().toLowerCase();
+    const hNameLower = String(r.helperName || '').trim().toLowerCase();
+    const clearSelfHelper = isHelperRole && hNameLower && dNameLower && hNameLower === dNameLower;
+    return {
+      ...r,
+      plateNumber: cleanPlate,
+      ...(clearSelfHelper ? { helperName: undefined } : {})
+    };
+  };
+
   const loadDriverShiftsFromDbIfNeeded = async (): Promise<{ shifts: any[]; pins: Record<string, string> }> => {
     if (inMemoryShiftsLoadedFromDb) {
       return { shifts: inMemoryDriverShifts, pins: inMemoryDriverPins };
@@ -2612,7 +2649,24 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
           ? JSON.parse(shiftRows[0].state_json)
           : shiftRows[0].state_json;
         if (Array.isArray(parsed)) {
-          inMemoryDriverShifts = parsed;
+          let changed = false;
+          inMemoryDriverShifts = parsed.map((s: any) => {
+            const next = sanitizeShiftRecord(s);
+            if (
+              next &&
+              (next.plateNumber !== s?.plateNumber || next.helper1Name !== s?.helper1Name)
+            ) {
+              changed = true;
+            }
+            return next;
+          });
+          if (changed) {
+            mysqlQuery(
+              `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
+               ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+              ['driver_shifts_v2', JSON.stringify(inMemoryDriverShifts)]
+            ).catch(() => {});
+          }
         }
       }
       if (Array.isArray(pinRows) && pinRows.length > 0 && pinRows[0].state_json) {
@@ -2630,7 +2684,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
   };
 
   const persistDriverShiftsToDb = async (shiftsList: any[], pinsMap?: Record<string, string>) => {
-    inMemoryDriverShifts = shiftsList.slice(0, 150);
+    inMemoryDriverShifts = shiftsList.slice(0, 150).map(sanitizeShiftRecord);
     if (pinsMap) {
       inMemoryDriverPins = { ...pinsMap };
     }
@@ -2683,7 +2737,23 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
           ? JSON.parse(rows[0].state_json)
           : rows[0].state_json;
         if (Array.isArray(parsed)) {
-          inMemoryDriverReports = parsed.filter((r: any) => !deletedDriverReportIds.has(String(r?.id || '')));
+          let changed = false;
+          inMemoryDriverReports = parsed
+            .filter((r: any) => !deletedDriverReportIds.has(String(r?.id || '')))
+            .map((r: any) => {
+              const next = sanitizeReportRecord(r);
+              if (next && (next.plateNumber !== r?.plateNumber || next.helperName !== r?.helperName)) {
+                changed = true;
+              }
+              return next;
+            });
+          if (changed) {
+            mysqlQuery(
+              `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
+               ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+              ['driver_reports_payload', JSON.stringify(inMemoryDriverReports)]
+            ).catch(() => {});
+          }
         }
       }
     } catch (err: any) {
@@ -2769,18 +2839,19 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       const map = new Map<string, any>();
       for (const s of [...shifts, ...nextShifts]) {
         if (s && s.id) {
-          map.set(String(s.id), s);
+          map.set(String(s.id), sanitizeShiftRecord(s));
         }
       }
       nextShifts = Array.from(map.values()).sort(
         (a, b) => new Date(b.checkinTime || b.createdAt || 0).getTime() - new Date(a.checkinTime || a.createdAt || 0).getTime()
       );
     } else if (shift && shift.id) {
-      const idx = nextShifts.findIndex((s: any) => s.id === shift.id);
+      const sanitizedShift = sanitizeShiftRecord(shift);
+      const idx = nextShifts.findIndex((s: any) => s.id === sanitizedShift.id);
       if (idx >= 0) {
-        nextShifts[idx] = { ...nextShifts[idx], ...shift };
+        nextShifts[idx] = { ...nextShifts[idx], ...sanitizedShift };
       } else {
-        nextShifts.unshift(shift);
+        nextShifts.unshift(sanitizedShift);
       }
     }
     const nextPins = pins && typeof pins === 'object' ? { ...inMemoryDriverPins, ...pins } : undefined;
@@ -2824,12 +2895,18 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     sjKeluarSistemMap: Record<string, string>;
     activeFormKirimByCrew?: Record<string, string>;
     activeScheduleByCrew?: Record<string, string>;
+    scopedCrewState?: Record<string, string>;
+    pendingTabByUser?: Record<string, string>;
+    standbyCrewSnapshot?: any;
   } = {
     sharedScheduleFlowMap: {},
     keluarArgoMap: {},
     sjKeluarSistemMap: {},
     activeFormKirimByCrew: {},
-    activeScheduleByCrew: {}
+    activeScheduleByCrew: {},
+    scopedCrewState: {},
+    pendingTabByUser: {},
+    standbyCrewSnapshot: null
   };
   let inMemoryPortalFlowLoaded = false;
 
@@ -2852,7 +2929,10 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
             keluarArgoMap: parsed.keluarArgoMap || {},
             sjKeluarSistemMap: parsed.sjKeluarSistemMap || {},
             activeFormKirimByCrew: parsed.activeFormKirimByCrew || {},
-            activeScheduleByCrew: parsed.activeScheduleByCrew || {}
+            activeScheduleByCrew: parsed.activeScheduleByCrew || {},
+            scopedCrewState: parsed.scopedCrewState || {},
+            pendingTabByUser: parsed.pendingTabByUser || {},
+            standbyCrewSnapshot: parsed.standbyCrewSnapshot || null
           };
         }
       }
@@ -2890,7 +2970,19 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       activeScheduleByCrew: {
         ...(inMemoryPortalFlowState.activeScheduleByCrew || {}),
         ...(body.activeScheduleByCrew || {})
-      }
+      },
+      scopedCrewState: {
+        ...(inMemoryPortalFlowState.scopedCrewState || {}),
+        ...(body.scopedCrewState || {})
+      },
+      pendingTabByUser: {
+        ...(inMemoryPortalFlowState.pendingTabByUser || {}),
+        ...(body.pendingTabByUser || {})
+      },
+      standbyCrewSnapshot:
+        body.standbyCrewSnapshot !== undefined
+          ? body.standbyCrewSnapshot
+          : inMemoryPortalFlowState.standbyCrewSnapshot
     };
     if (isDatabaseConfigured()) {
       try {
@@ -2904,6 +2996,306 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       }
     }
     return res.json({ success: true, state: inMemoryPortalFlowState });
+  });
+
+  // =========================================================================
+  // MULTI-BRANCH & RBAC STATE SYNC (Hostinger MySQL app_state)
+  // =========================================================================
+  let inMemoryBranchState: {
+    branches: any[];
+    userBranchPerms: Record<string, any>;
+    entityBranches: {
+      schedules: Record<string, string>;
+      fleets: Record<string, string>;
+      crews: Record<string, string>;
+      inventory: Record<string, string>;
+    };
+    activeBranchByUser: Record<string, string>;
+  } = {
+    branches: [],
+    userBranchPerms: {},
+    entityBranches: { schedules: {}, fleets: {}, crews: {}, inventory: {} },
+    activeBranchByUser: {}
+  };
+  let inMemoryBranchStateLoaded = false;
+
+  const loadBranchStateIfNeeded = async () => {
+    if (inMemoryBranchStateLoaded) return inMemoryBranchState;
+    inMemoryBranchStateLoaded = true;
+    if (!isDatabaseConfigured()) return inMemoryBranchState;
+    try {
+      const rows = await mysqlQuery<any[]>(
+        "SELECT state_json FROM app_state WHERE state_key = ? LIMIT 1",
+        ['branch_store_state_v1']
+      ).catch(() => []);
+      if (Array.isArray(rows) && rows.length > 0 && rows[0].state_json) {
+        const parsed = typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json;
+        if (parsed && typeof parsed === 'object') {
+          inMemoryBranchState = {
+            branches: Array.isArray(parsed.branches) ? parsed.branches : [],
+            userBranchPerms: parsed.userBranchPerms && typeof parsed.userBranchPerms === 'object' ? parsed.userBranchPerms : {},
+            entityBranches: {
+              schedules: parsed.entityBranches?.schedules || {},
+              fleets: parsed.entityBranches?.fleets || {},
+              crews: parsed.entityBranches?.crews || {},
+              inventory: parsed.entityBranches?.inventory || {}
+            },
+            activeBranchByUser: parsed.activeBranchByUser && typeof parsed.activeBranchByUser === 'object' ? parsed.activeBranchByUser : {}
+          };
+        }
+      }
+    } catch (err: any) {
+      console.warn('[Branch State Load Warning]', err?.message || err);
+    }
+    return inMemoryBranchState;
+  };
+
+  app.get("/api/branch-state", requireAuth, async (_req, res) => {
+    const state = await loadBranchStateIfNeeded();
+    return res.json({ success: true, source: 'hostinger_mysql', state });
+  });
+
+  app.put("/api/branch-state", requireAuth, express.json({ limit: '5mb' }), async (req: any, res) => {
+    await loadBranchStateIfNeeded();
+    const body = req.body || {};
+    const authRole = String(req.authUser?.role || '').toLowerCase();
+    const isSuper = authRole === 'super_admin';
+
+    if (isSuper && Array.isArray(body.branches) && body.branches.length > 0) {
+      inMemoryBranchState.branches = body.branches;
+    }
+    if (isSuper && body.userBranchPerms && typeof body.userBranchPerms === 'object') {
+      inMemoryBranchState.userBranchPerms = {
+        ...inMemoryBranchState.userBranchPerms,
+        ...body.userBranchPerms
+      };
+    }
+    if (body.entityBranches && typeof body.entityBranches === 'object') {
+      inMemoryBranchState.entityBranches = {
+        schedules: { ...inMemoryBranchState.entityBranches.schedules, ...(body.entityBranches.schedules || {}) },
+        fleets: { ...inMemoryBranchState.entityBranches.fleets, ...(body.entityBranches.fleets || {}) },
+        crews: { ...inMemoryBranchState.entityBranches.crews, ...(body.entityBranches.crews || {}) },
+        inventory: { ...inMemoryBranchState.entityBranches.inventory, ...(body.entityBranches.inventory || {}) }
+      };
+    }
+    if (body.activeBranchByUser && typeof body.activeBranchByUser === 'object') {
+      inMemoryBranchState.activeBranchByUser = {
+        ...inMemoryBranchState.activeBranchByUser,
+        ...body.activeBranchByUser
+      };
+    }
+
+    if (isDatabaseConfigured()) {
+      try {
+        await mysqlQuery(
+          `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
+           ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+          ['branch_store_state_v1', JSON.stringify(inMemoryBranchState)]
+        );
+      } catch (err: any) {
+        console.warn('[Branch State Persist Warning]', err?.message || err);
+      }
+    }
+    return res.json({ success: true, state: inMemoryBranchState });
+  });
+
+  // =========================================================================
+  // DRIVER OUTBOUND WAYBILLS & AREA AUTO-MAPPER (Hostinger MySQL app_state)
+  // =========================================================================
+  let inMemoryDriverWaybills: Record<string, any> = {};
+  let inMemoryWaybillsLoaded = false;
+
+  const loadWaybillsIfNeeded = async () => {
+    if (inMemoryWaybillsLoaded) return inMemoryDriverWaybills;
+    inMemoryWaybillsLoaded = true;
+    if (!isDatabaseConfigured()) return inMemoryDriverWaybills;
+    try {
+      const rows = await mysqlQuery<any[]>(
+        "SELECT state_json FROM app_state WHERE state_key = ? LIMIT 1",
+        ['driver_outbound_waybills_v3']
+      ).catch(() => []);
+      if (Array.isArray(rows) && rows.length > 0 && rows[0].state_json) {
+        const parsed = typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json;
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          inMemoryDriverWaybills = parsed;
+        }
+      }
+    } catch (err: any) {
+      console.warn('[Waybills Load Warning]', err?.message || err);
+    }
+    return inMemoryDriverWaybills;
+  };
+
+  app.get("/api/driver-waybills", requireAuth, async (_req, res) => {
+    const waybills = await loadWaybillsIfNeeded();
+    return res.json({ success: true, waybills });
+  });
+
+  app.post("/api/driver-waybills", requireAuth, express.json({ limit: '10mb' }), async (req, res) => {
+    await loadWaybillsIfNeeded();
+    const body = req.body || {};
+    if (body.waybill && body.waybill.id) {
+      inMemoryDriverWaybills[String(body.waybill.id)] = body.waybill;
+    } else if (body.waybills && typeof body.waybills === 'object' && !Array.isArray(body.waybills)) {
+      inMemoryDriverWaybills = { ...inMemoryDriverWaybills, ...body.waybills };
+    }
+    if (isDatabaseConfigured()) {
+      try {
+        await mysqlQuery(
+          `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
+           ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+          ['driver_outbound_waybills_v3', JSON.stringify(inMemoryDriverWaybills)]
+        );
+      } catch (err: any) {
+        console.warn('[Waybills Persist Warning]', err?.message || err);
+      }
+    }
+    return res.json({ success: true, waybills: inMemoryDriverWaybills });
+  });
+
+  let inMemoryAreaMappings: { customAreas: any[]; savedMappings: Record<string, string> } = {
+    customAreas: [],
+    savedMappings: {}
+  };
+  let inMemoryAreaMappingsLoaded = false;
+
+  const loadAreaMappingsIfNeeded = async () => {
+    if (inMemoryAreaMappingsLoaded) return inMemoryAreaMappings;
+    inMemoryAreaMappingsLoaded = true;
+    if (!isDatabaseConfigured()) return inMemoryAreaMappings;
+    try {
+      const rows = await mysqlQuery<any[]>(
+        "SELECT state_json FROM app_state WHERE state_key = ? LIMIT 1",
+        ['area_auto_mapper_state_v1']
+      ).catch(() => []);
+      if (Array.isArray(rows) && rows.length > 0 && rows[0].state_json) {
+        const parsed = typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json;
+        if (parsed && typeof parsed === 'object') {
+          inMemoryAreaMappings = {
+            customAreas: Array.isArray(parsed.customAreas) ? parsed.customAreas : [],
+            savedMappings: parsed.savedMappings && typeof parsed.savedMappings === 'object' ? parsed.savedMappings : {}
+          };
+        }
+      }
+    } catch (err: any) {
+      console.warn('[Area Mappings Load Warning]', err?.message || err);
+    }
+    return inMemoryAreaMappings;
+  };
+
+  app.get("/api/area-mappings", requireAuth, async (_req, res) => {
+    const data = await loadAreaMappingsIfNeeded();
+    return res.json({ success: true, ...data });
+  });
+
+  app.post("/api/area-mappings", requireAuth, express.json({ limit: '5mb' }), async (req, res) => {
+    await loadAreaMappingsIfNeeded();
+    const body = req.body || {};
+    if (Array.isArray(body.customAreas)) {
+      const seen = new Set(inMemoryAreaMappings.customAreas.map((a: any) => String(a?.name || '').toUpperCase()));
+      for (const item of body.customAreas) {
+        const key = String(item?.name || '').toUpperCase();
+        if (key && !seen.has(key)) {
+          seen.add(key);
+          inMemoryAreaMappings.customAreas.push(item);
+        }
+      }
+    }
+    if (body.savedMappings && typeof body.savedMappings === 'object') {
+      inMemoryAreaMappings.savedMappings = {
+        ...inMemoryAreaMappings.savedMappings,
+        ...body.savedMappings
+      };
+    }
+    if (isDatabaseConfigured()) {
+      try {
+        await mysqlQuery(
+          `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
+           ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+          ['area_auto_mapper_state_v1', JSON.stringify(inMemoryAreaMappings)]
+        );
+      } catch (err: any) {
+        console.warn('[Area Mappings Persist Warning]', err?.message || err);
+      }
+    }
+    return res.json({ success: true, ...inMemoryAreaMappings });
+  });
+
+  // =========================================================================
+  // GENERIC KEY-VALUE APP STATE PERSISTENCE (Hostinger MySQL app_state)
+  // =========================================================================
+  const inMemoryGenericAppState = new Map<string, any>();
+
+  app.get("/api/app-state", requireAuth, async (req, res) => {
+    const rawKeys = String(req.query?.keys || '').trim();
+    const keys = rawKeys
+      .split(',')
+      .map(k => k.trim())
+      .filter(k => k.length > 0 && k.length <= 120)
+      .slice(0, 30);
+
+    const entries: Record<string, any> = {};
+    if (keys.length === 0) {
+      return res.json({ success: true, entries });
+    }
+
+    if (isDatabaseConfigured()) {
+      try {
+        const placeholders = keys.map(() => '?').join(', ');
+        const rows = await mysqlQuery<any[]>(
+          `SELECT state_key, state_json FROM app_state WHERE state_key IN (${placeholders})`,
+          keys
+        ).catch(() => []);
+        if (Array.isArray(rows)) {
+          for (const row of rows) {
+            if (!row?.state_key || row.state_json == null) continue;
+            try {
+              const parsed = typeof row.state_json === 'string'
+                ? JSON.parse(row.state_json)
+                : row.state_json;
+              entries[row.state_key] = parsed;
+              inMemoryGenericAppState.set(row.state_key, parsed);
+            } catch {}
+          }
+        }
+      } catch (err: any) {
+        console.warn('[App State GET Warning]', err?.message || err);
+      }
+    }
+
+    for (const k of keys) {
+      if (entries[k] === undefined && inMemoryGenericAppState.has(k)) {
+        entries[k] = inMemoryGenericAppState.get(k);
+      }
+    }
+
+    return res.json({ success: true, entries });
+  });
+
+  app.post("/api/app-state", requireAuth, express.json({ limit: '20mb' }), async (req, res) => {
+    const entriesObj = req.body?.entries;
+    if (!entriesObj || typeof entriesObj !== 'object') {
+      return res.status(400).json({ success: false, error: 'Payload entries tidak valid' });
+    }
+
+    const keys = Object.keys(entriesObj).filter(k => k.length > 0 && k.length <= 120);
+    for (const k of keys) {
+      const val = entriesObj[k];
+      inMemoryGenericAppState.set(k, val);
+      if (isDatabaseConfigured()) {
+        try {
+          await mysqlQuery(
+            `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
+             ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+            [k, JSON.stringify(val ?? null)]
+          );
+        } catch (err: any) {
+          console.warn('[App State POST Warning]', k, err?.message || err);
+        }
+      }
+    }
+
+    return res.json({ success: true, savedKeys: keys });
   });
 
   // =========================================================================
@@ -3189,7 +3581,10 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
         }
         sql += " ORDER BY updated_at DESC LIMIT 120";
         const rows = await mysqlQuery<any[]>(sql, params);
-        const mapped = (Array.isArray(rows) ? rows : []).map(mapDbTripRow);
+        const mapped = (Array.isArray(rows) ? rows : []).map((r: any) => {
+          const t = mapDbTripRow(r);
+          return { ...t, plateNumber: sanitizeOperationalPlate(t.plateNumber) };
+        });
         return res.json({ success: true, trips: mapped, source: 'mysql' });
       } catch (err: any) {
         console.warn('[GPS Trips GET Warning]', err?.message || err);
@@ -3208,7 +3603,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     const tripDate = String(b.tripDate || new Date().toISOString().slice(0, 10)).slice(0, 10);
     const branchId = String(b.branchId || 'cab-banyuwangi').slice(0, 64);
     const fleetId = b.fleetId ? String(b.fleetId).slice(0, 64) : null;
-    const plateNumber = String(b.plateNumber || '-').slice(0, 32);
+    const plateNumber = sanitizeOperationalPlate(b.plateNumber).slice(0, 32);
     const initialCode = b.initialCode ? String(b.initialCode).slice(0, 32) : null;
     const vehicleType = b.vehicleType ? String(b.vehicleType).slice(0, 64) : null;
     const driverName = String(b.driverName || 'Driver AKK').slice(0, 120);
@@ -3378,7 +3773,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     const { report, reports } = req.body || {};
 
     if (report && typeof report === 'object' && String(report.id || '').trim()) {
-      const safeReport = { ...report, id: String(report.id).slice(0, 160) };
+      const safeReport = sanitizeReportRecord({ ...report, id: String(report.id).slice(0, 160) });
       if (deletedDriverReportIds.has(safeReport.id)) {
         return res.json({ success: true, ignoredDeleted: true, count: inMemoryDriverReports.length });
       }
@@ -3416,7 +3811,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
         if (!r || !String(r.id || '').trim()) continue;
         const id = String(r.id).slice(0, 160);
         if (deletedDriverReportIds.has(id)) continue;
-        const normalized = { ...r, id };
+        const normalized = sanitizeReportRecord({ ...r, id });
         const existing = map.get(id);
         if (!existing) {
           map.set(id, normalized);
@@ -4115,12 +4510,16 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       if (rows.length > 0 && rows[0].state_json) {
         const parsed = typeof rows[0].state_json === 'string' ? JSON.parse(rows[0].state_json) : rows[0].state_json;
         if (Array.isArray(parsed)) {
-          inMemoryFleetChecklists = parsed;
-          return parsed;
+          inMemoryFleetChecklists = parsed.map((c: any) =>
+            c && typeof c === 'object' ? { ...c, plateNumber: sanitizeOperationalPlate(c.plateNumber) } : c
+          );
+          return inMemoryFleetChecklists;
         }
       }
     } catch {}
-    return inMemoryFleetChecklists;
+    return inMemoryFleetChecklists.map((c: any) =>
+      c && typeof c === 'object' ? { ...c, plateNumber: sanitizeOperationalPlate(c.plateNumber) } : c
+    );
   };
 
   const savePersistedChecklists = async (list: any[]): Promise<void> => {
@@ -4147,7 +4546,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
     try {
       const current = await getPersistedChecklists();
-      const syncedItem = { ...incoming, synced: true };
+      const syncedItem = { ...incoming, plateNumber: sanitizeOperationalPlate(incoming.plateNumber), synced: true };
       const idx = current.findIndex((c: any) => c && c.id === syncedItem.id);
       if (idx >= 0) {
         current[idx] = syncedItem;

@@ -189,6 +189,9 @@ const MYSQL_BACKED_STORAGE_KEYS = new Set<string>([
   STORAGE_KEYS.IMAGES,
   STORAGE_KEYS.SECURITY_LOGS,
   STORAGE_KEYS.SCHEDULE_CHANGE_LOGS,
+  STORAGE_KEYS.DEVICES,
+  STORAGE_KEYS.MESSAGES,
+  'akk_offline_sync_queue',
   'akk_system_activities_v1',
   'akk_admin_schedule_weeks_cache',
   'akk_last_admin_schedule_sync_time',
@@ -1977,16 +1980,14 @@ class LogisticsStore {
       return dpVal === 'full_access';
     };
 
+    if (targetBranchId && targetBranchId !== 'ALL') {
+      return hasBranchPortalFullAccess(branchPerms[targetBranchId]);
+    }
+
     const anyBranchHasPortalFullAccess = Object.values(branchPerms).some(bEntry =>
       hasBranchPortalFullAccess(bEntry)
     );
-    if (!anyBranchHasPortalFullAccess) return false;
-
-    if (targetBranchId && targetBranchId !== 'ALL') {
-      return this.getCrewUserPrimaryBranchId(u) === targetBranchId;
-    }
-
-    return true;
+    return anyBranchHasPortalFullAccess;
   }
 
   public getCrewUserPrimaryBranchId(u: UserProfile): string {
@@ -2103,7 +2104,7 @@ class LogisticsStore {
     this.cachedCrews = syncedCrews;
     this.cachedSchedules = null;
     try {
-      safeSetItem(STORAGE_KEYS.CREWS, JSON.stringify(this.crews));
+      if (typeof localStorage !== 'undefined') localStorage.removeItem(STORAGE_KEYS.CREWS);
     } catch {}
     return syncedCrews;
   }
@@ -3026,6 +3027,7 @@ class LogisticsStore {
 
       this.users = this.deduplicateSuperAdmins(mappedUsers);
       this.saveToStorage(STORAGE_KEYS.USERS, this.users);
+      branchStore.hydrateUserBranchPermissionsFromUsers(this.users);
 
       // Pastikan currentUser tetap mengacu pada ID & email akun yang sedang login (tidak tertukar dengan super_admin lain)
       if (this.currentUser && this.currentUser.id !== 'usr-guest') {
@@ -3911,31 +3913,38 @@ class LogisticsStore {
           );
           const isPhantomPlate = (plate?: string): boolean =>
             /^FLT-\d+$/i.test(String(plate || '').trim()) || String(plate || '').trim().toUpperCase().endsWith('AKK');
-          const baseFleets = (this.fleets && this.fleets.length > 0 ? this.fleets : INITIAL_FLEETS).filter(bf => {
+          const isMysqlSource = fleetPayload?.source === 'hostinger_mysql';
+          const fallbackPool = isMysqlSource ? this.fleets : (this.fleets && this.fleets.length > 0 ? this.fleets : INITIAL_FLEETS);
+          const baseFleets = (fallbackPool || []).filter(bf => {
             const cleanP = String(bf.plateNumber || '').replace(/\s+/g, '').toUpperCase();
             return cleanP && !isPhantomPlate(bf.plateNumber) && !deletedIdSet.has(bf.id) && !deletedPlateSet.has(cleanP);
           });
 
           if (fleetPayload.data.length > 0) {
-            const mergedMap = new Map<string, Fleet>();
+            const localByPlate = new Map<string, Fleet>();
             baseFleets.forEach(bf => {
               const cleanP = String(bf.plateNumber || '').replace(/\s+/g, '').toUpperCase();
-              if (cleanP && !mergedMap.has(cleanP)) mergedMap.set(cleanP, bf);
+              if (cleanP && !localByPlate.has(cleanP)) localByPlate.set(cleanP, bf);
             });
+            const mergedMap = new Map<string, Fleet>();
+            if (!isMysqlSource) {
+              baseFleets.forEach(bf => {
+                const cleanP = String(bf.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+                if (cleanP && !mergedMap.has(cleanP)) mergedMap.set(cleanP, bf);
+              });
+            }
             fleetPayload.data.forEach((remoteF: Fleet) => {
               const cleanRemotePlate = String(remoteF.plateNumber || '').replace(/\s+/g, '').toUpperCase();
               if (!cleanRemotePlate || isPhantomPlate(remoteF.plateNumber)) return;
               if (deletedIdSet.has(remoteF.id) || deletedPlateSet.has(cleanRemotePlate)) return;
-              const matchExisting = mergedMap.get(cleanRemotePlate);
-              // WAJIB pertahankan remoteF.id asli dari Hostinger MySQL (mis. flt-r2kmuc, flt-catnp6)
-              // agar relasi FOREIGN KEY (fleet_id -> fleets.id) di tabel fuel_logs MySQL selalu cocok!
+              const matchExisting = localByPlate.get(cleanRemotePlate);
               const canonicalId = (remoteF.id && String(remoteF.id).trim()) || matchExisting?.id || remoteF.id;
               mergedMap.set(cleanRemotePlate, this.enrichFleetItem({ ...remoteF, id: canonicalId }, matchExisting));
             });
             this.fleets = sortFleetsByCanonicalOrder(Array.from(mergedMap.values()));
             this.cachedFleets = null;
             this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets, true);
-          } else {
+          } else if (!isMysqlSource) {
             this.fleets = sortFleetsByCanonicalOrder(baseFleets);
             this.cachedFleets = null;
             this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets, true);
@@ -4126,7 +4135,9 @@ class LogisticsStore {
         notes: remote.notes ?? existing?.notes,
         permissions: normalizeUserPermissions(
           role,
-          (remote.permissions && remote.permissions.modules) ? remote.permissions : existing?.permissions
+          (remote.permissions && (remote.permissions.modules || remote.permissions.branchPermissions))
+            ? remote.permissions
+            : existing?.permissions
         ),
         password: undefined
       } as UserProfile;
@@ -4142,6 +4153,7 @@ class LogisticsStore {
       }
       this.users = this.deduplicateSuperAdmins(this.users);
       this.saveToStorage(STORAGE_KEYS.USERS, this.users);
+      branchStore.hydrateUserBranchPermissionsFromUsers(this.users);
       this.setCurrentUser(user);
       void this.hydrateOperationalDataFromHostinger();
       void this.refreshUsersFromHostinger();
@@ -4389,12 +4401,12 @@ class LogisticsStore {
         this.crews.push(matchedCrew);
       }
       try {
-        safeSetItem(STORAGE_KEYS.CREWS, JSON.stringify(this.crews));
+        if (typeof localStorage !== 'undefined') localStorage.removeItem(STORAGE_KEYS.CREWS);
       } catch {}
     }
 
     try {
-      localStorage.setItem('akk_driver_auth_session', JSON.stringify(matchedCrew));
+      if (typeof localStorage !== 'undefined') localStorage.removeItem('akk_driver_auth_session');
     } catch {}
 
     return matchedCrew;
@@ -5626,23 +5638,10 @@ class LogisticsStore {
         ? (tomorrowDateSch.areaName || tomorrowDateSch.store?.storeName || null)
         : null;
 
-    // Cek juga dari data Check-In shift aktif hari ini jika belum ada di jadwal
-    if (!resolvedArea && typeof localStorage !== 'undefined') {
+    // Bersihkan cache shift lama dari localStorage bila masih tersisa
+    if (typeof localStorage !== 'undefined') {
       try {
-        const rawShifts = localStorage.getItem('akk_driver_shifts_v2');
-        if (rawShifts) {
-          const shifts: any[] = JSON.parse(rawShifts);
-          const activeShift = shifts.find(
-            s =>
-              s.date === targetIso &&
-              s.status !== 'checked_out' &&
-              (s.fleetId === fleet.id ||
-                (s.plateNumber && s.plateNumber.trim().toUpperCase() === cleanPlate))
-          );
-          if (activeShift) {
-            resolvedDriver = resolvedDriver || activeShift.driverName || null;
-          }
-        }
+        localStorage.removeItem('akk_driver_shifts_v2');
       } catch {}
     }
 
