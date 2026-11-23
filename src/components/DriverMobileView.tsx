@@ -149,10 +149,10 @@ function getPortalTodayWibIso(): string {
 }
 
 function matchSamePerson(nameA?: string, nameB?: string): boolean {
-  const a = (nameA || '').trim().toLowerCase();
-  const b = (nameB || '').trim().toLowerCase();
+  const a = (nameA || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const b = (nameB || '').trim().toLowerCase().replace(/\s+/g, ' ');
   if (!a || !b || a === '-' || b === '-') return false;
-  if (a === b || a.includes(b) || b.includes(a)) return true;
+  if (a === b) return true;
   const compactA = a.replace(/[^a-z0-9]/g, '');
   const compactB = b.replace(/[^a-z0-9]/g, '');
   if (compactA && compactB && compactA === compactB) return true;
@@ -164,9 +164,17 @@ function matchSamePerson(nameA?: string, nameB?: string): boolean {
   ) {
     return true;
   }
-  const tokA = a.split(/\s+/).filter(t => t.length >= 4);
-  const tokB = b.split(/\s+/).filter(t => t.length >= 4);
-  return tokA.length > 0 && tokB.length > 0 && tokA[0] === tokB[0];
+  const tokensA = a.split(/\s+/).filter(Boolean);
+  const tokensB = b.split(/\s+/).filter(Boolean);
+  if (tokensA.length === 1 || tokensB.length === 1) {
+    const single = tokensA.length === 1 ? tokensA[0] : tokensB[0];
+    const multi = tokensA.length === 1 ? tokensB : tokensA;
+    // Hanya cocokkan nama tunggal panjang (>= 5 huruf) dengan bagian akhir/lengkap nama, bukan nama depan umum seperti "bayu"
+    return single.length >= 5 && multi.some(t => t === single || (t.length >= 5 && (t.startsWith(single) || single.startsWith(t))));
+  }
+  const shorter = tokensA.length <= tokensB.length ? tokensA : tokensB;
+  const longer = tokensA.length <= tokensB.length ? tokensB : tokensA;
+  return shorter.every(t => longer.includes(t));
 }
 
 export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
@@ -1655,19 +1663,21 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
     const partnerDriverLower = (primarySharedSchedule?.crew?.name || '').trim().toLowerCase();
     const partnerHelperLower = (primarySharedSchedule?.crewHelper?.name || '').trim().toLowerCase();
 
-    const matchingPreTrip = checklists.find(c => {
-      if ((c.date !== todayStr && c.date !== todayUtc) || c.inspectionType !== 'pre_trip') return false;
-      const cName = (c.driverName || '').trim().toLowerCase();
-      if (c.driverId === selectedDriverId || (driverNameLower && cName === driverNameLower)) return true;
-      if (primarySharedSchedule) {
-        if (primarySharedSchedule.crewId && c.driverId === primarySharedSchedule.crewId) return true;
-        if (primarySharedSchedule.crewHelperId && c.driverId === primarySharedSchedule.crewHelperId) return true;
-        if (partnerDriverLower && cName === partnerDriverLower) return true;
-        if (partnerHelperLower && cName === partnerHelperLower) return true;
-        if (assignedFleet && (c.fleetId === assignedFleet.id || c.plateNumber === assignedFleet.plateNumber)) return true;
-      }
-      return false;
-    });
+    const matchingPreTrip = activeShift
+      ? checklists.find(c => {
+          if ((c.date !== todayStr && c.date !== todayUtc) || c.inspectionType !== 'pre_trip') return false;
+          const cName = (c.driverName || '').trim().toLowerCase();
+          if (c.driverId === selectedDriverId || (driverNameLower && cName === driverNameLower)) return true;
+          if (primarySharedSchedule) {
+            if (primarySharedSchedule.crewId && c.driverId === primarySharedSchedule.crewId) return true;
+            if (primarySharedSchedule.crewHelperId && c.driverId === primarySharedSchedule.crewHelperId) return true;
+            if (partnerDriverLower && cName === partnerDriverLower) return true;
+            if (partnerHelperLower && cName === partnerHelperLower) return true;
+            if (assignedFleet && (c.fleetId === assignedFleet.id || c.plateNumber === assignedFleet.plateNumber)) return true;
+          }
+          return false;
+        })
+      : undefined;
 
     const sharedFlow = primarySharedSchedule ? sharedScheduleFlowMap[primarySharedSchedule.id] : undefined;
     const isSameDayFlow = Boolean(sharedFlow?.date === todayStr || sharedFlow?.date === todayUtc);
@@ -2494,19 +2504,27 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
 
         const sameDayHelperShifts = sameDayShifts.filter(s => {
           if (s.checkinRole !== 'helper') return false;
+          const sPlateNorm = normPlateStr(s.plateNumber);
+          const plateConflicts = Boolean(
+            shiftPlateNorm && shiftPlateNorm !== '-' && sPlateNorm && sPlateNorm !== '-' && sPlateNorm !== shiftPlateNorm
+          );
+          if (plateConflicts) return false;
           if (primaryDriverShift && s.pairedDriverId && s.pairedDriverId === primaryDriverShift.driverId) return true;
           if (primaryDriverShift && s.pairedDriverName && doesCrewNameMatch(s.pairedDriverName, primaryDriverShift.driverName)) return true;
           if (shiftItem.fleetId && s.fleetId && s.fleetId === shiftItem.fleetId) return true;
-          const sPlateNorm = normPlateStr(s.plateNumber);
           if (shiftPlateNorm && shiftPlateNorm !== '-' && sPlateNorm && sPlateNorm !== '-' && sPlateNorm === shiftPlateNorm) return true;
-          return Boolean(shiftAreaStd && standardizeAreaName(s.selectedArea || '') === shiftAreaStd);
+          return Boolean(
+            shiftAreaStd &&
+              standardizeAreaName(s.selectedArea || '') === shiftAreaStd &&
+              (!shiftItem.branchId || !s.branchId || shiftItem.branchId === s.branchId)
+          );
         });
 
         const isHelperCheckin = shiftItem.checkinRole === 'helper';
         const resolvedDriverName =
           primaryDriverShift?.driverName ||
           (isHelperCheckin && shiftItem.pairedDriverName ? shiftItem.pairedDriverName : '') ||
-          (isHelperCheckin ? 'Driver Armada Terkait' : shiftItem.driverName || portalDisplayName);
+          (isHelperCheckin ? 'Driver Armada Terkait' : shiftItem.driverName || '');
 
         const helperNamesPool: string[] = [];
         const pushHelperName = (n?: string) => {
@@ -2522,7 +2540,6 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
         if (isHelperCheckin) {
           pushHelperName(shiftItem.driverName);
           pushHelperName(shiftItem.helper1Name);
-          pushHelperName(portalDisplayName);
         } else {
           pushHelperName(shiftItem.helper1Name);
           pushHelperName(shiftItem.helper2Name);
@@ -2537,14 +2554,11 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
           if ((s.departureDate || s.createdAt || '').slice(0, 10) !== (shiftItem.date || todayIsoLocal)) return false;
           const areaMatch = standardizeAreaName(s.areaName || s.store?.city || '') === shiftAreaStd;
           const sPlateNorm = normPlateStr(s.fleet?.plateNumber);
-          const samePortalFleet = Boolean(
-            s.id.startsWith('PORTAL-') &&
-              shiftPlateNorm &&
-              shiftPlateNorm !== '-' &&
-              sPlateNorm === shiftPlateNorm
-          );
+          const plateMatch = Boolean(shiftPlateNorm && shiftPlateNorm !== '-' && sPlateNorm && sPlateNorm === shiftPlateNorm);
+          const samePortalFleet = Boolean(s.id.startsWith('PORTAL-') && plateMatch);
           if (!areaMatch && !samePortalFleet) return false;
-          if (!isManagerPortal) return true;
+          if (shiftPlateNorm && shiftPlateNorm !== '-' && sPlateNorm && sPlateNorm !== '-' && !plateMatch) return false;
+          if (plateMatch || (shiftFleetObj?.id && s.fleetId === shiftFleetObj.id)) return true;
           return (
             doesCrewNameMatch(s.crew?.name || '', resolvedDriverName) ||
             doesCrewNameMatch(s.crewHelper?.name || '', resolvedHelper1Name) ||
@@ -2605,6 +2619,19 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
               ? 'delivered'
               : existing.status;
 
+          const shouldClearStaleDriverBackup = Boolean(
+            existing.backupCrewName &&
+              (!existing.backupPosition || existing.backupPosition === 'driver') &&
+              nextDriverCrew?.name &&
+              nextDriverCrew.name !== '-' &&
+              !doesCrewNameMatch(existing.backupCrewName, nextDriverCrew.name) &&
+              (Boolean(primaryDriverShift) ||
+                nextStatus === 'in_transit' ||
+                nextStatus === 'picked_up' ||
+                nextStatus === 'delivered' ||
+                (existing.backupTargetName && !doesCrewNameMatch(existing.backupTargetName, nextDriverCrew.name)))
+          );
+
           const enrichedExisting: Schedule = {
             ...existing,
             areaName: shiftItem.selectedArea,
@@ -2631,6 +2658,14 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                   rating: 5
                 }
               : existing.crewHelper2,
+            ...(shouldClearStaleDriverBackup
+              ? {
+                  backupCrewId: undefined,
+                  backupCrewName: undefined,
+                  backupPosition: undefined,
+                  backupTargetName: undefined
+                }
+              : {}),
             status: nextStatus,
             actualArrival: existing.actualArrival || shiftItem.arrivedAtWarehouseAt
           };
@@ -6829,7 +6864,16 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                     helper2Name,
                     hasHelper2
                   } = getDeliveryCrewComposition(delivery);
-                  const isBackupMode = Boolean(delivery.backupCrewName);
+                  const hasActiveNonBackupDriver = Boolean(
+                    delivery.backupCrewName &&
+                      (!delivery.backupPosition || delivery.backupPosition === 'driver') &&
+                      driverCrewName &&
+                      driverCrewName !== '-' &&
+                      !matchSamePerson(driverCrewName, delivery.backupCrewName) &&
+                      (['picked_up', 'in_transit', 'delivered'].includes(delivery.status) ||
+                        Boolean(delivery.backupTargetName && !matchSamePerson(driverCrewName, delivery.backupTargetName)))
+                  );
+                  const isBackupMode = Boolean(delivery.backupCrewName) && !hasActiveNonBackupDriver;
                   const backupPosLabel =
                     delivery.backupPosition === 'helper'
                       ? 'Helper 1'
@@ -9985,6 +10029,16 @@ export const DriverMobileView: React.FC<DriverMobileViewProps> = ({
                   }),
                   name: driverName
                 };
+                if (
+                  matchedSchedule.backupCrewName &&
+                  (!matchedSchedule.backupPosition || matchedSchedule.backupPosition === 'driver') &&
+                  !doesCrewNameMatch(matchedSchedule.backupCrewName, driverName)
+                ) {
+                  (patch as any).backupCrewId = undefined;
+                  (patch as any).backupCrewName = undefined;
+                  (patch as any).backupPosition = undefined;
+                  (patch as any).backupTargetName = undefined;
+                }
                 if (shift.helper1Name) {
                   patch.crewHelperId = shift.helper1Id || 'hlp-1';
                   patch.crewHelper = {

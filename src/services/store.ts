@@ -1943,19 +1943,16 @@ class LogisticsStore {
     if (normalizedStatus !== 'approved' || (u as any).isActive === false) return false;
     const cleanEmail = (u.email || '').trim().toLowerCase();
     const cleanName = (u.fullName || '').trim().toLowerCase();
-    // Kecualikan akun sistem/manajemen/non-lapangan
+    // Kecualikan akun sistem pusat / super admin / manajemen eksekutif non-lapangan
     if (
       u.role === 'super_admin' ||
-      u.role === 'spv_logistik' ||
-      u.role === 'operasional' ||
-      u.role === 'koordinator_driver' ||
-      u.role === 'dispatcher' ||
-      String(u.role) === 'pengiriman' ||
       cleanName === 'super admin' ||
       cleanName === 'tamu / belum login' ||
       cleanEmail === 'akkoperasional60@gmail.com' ||
       cleanEmail === 'hendri123@gmail.com' ||
       cleanEmail === 'hendri.st@gmail.com' ||
+      cleanEmail === 'bahri@gmail.com' ||
+      cleanEmail === 'bayun791@gmail.com' ||
       u.id === 'usr-hendri' ||
       u.id === 'usr-operasional' ||
       u.id === 'usr-bahri'
@@ -3350,14 +3347,19 @@ class LogisticsStore {
           }).catch(() => {});
         });
       }
-    } else if (data.fullName && data.fullName !== oldName) {
+    } else if ((data.fullName && data.fullName !== oldName) || data.phone !== undefined) {
       // Direct synchronization: If name or phone changed on an active crew, sync with crew pool & active schedules
-      const newName = data.fullName;
+      const newName = data.fullName || oldName;
+      const newPhone = data.phone !== undefined ? data.phone : existing.phone;
       let crewsUpdated = false;
       this.crews = this.crews.map(c => {
-        if (this.isSameCrewPersonName(c.name, oldName) || (c.phone && existing.phone && c.phone === existing.phone)) {
+        if (
+          c.id === `crw-${userId}` ||
+          this.isSameCrewPersonName(c.name, oldName) ||
+          (c.phone && existing.phone && c.phone === existing.phone)
+        ) {
           crewsUpdated = true;
-          return { ...c, name: newName, phone: data.phone || c.phone };
+          return { ...c, name: newName, phone: newPhone || c.phone };
         }
         return c;
       });
@@ -3442,6 +3444,7 @@ class LogisticsStore {
   }
 
   public registerUser(data: {
+    id?: string;
     fullName: string;
     email: string;
     role?: UserRole;
@@ -3450,22 +3453,27 @@ class LogisticsStore {
     notes?: string;
     password?: string;
     status?: UserApprovalStatus;
+    permissions?: UserPermissions;
   }): UserProfile {
     const resolvedRole: UserRole = data.role || 'unassigned';
+    const cleanPhone = String(data.phone || '').trim();
     const newUser: UserProfile = {
-      id: 'usr-' + Math.random().toString(36).substring(2, 8),
+      id: data.id || ('usr-' + Math.random().toString(36).substring(2, 8)),
       fullName: data.fullName,
       email: data.email,
       role: resolvedRole,
       department: data.department || 'Logistik & Pengiriman',
-      phone: data.phone || '0812-3456-7890',
+      phone: cleanPhone,
       password: undefined,
       status: data.status || 'pending',
       createdAt: new Date().toISOString(),
       notes: data.notes || 'Pendaftaran mandiri melalui portal AKK - Menunggu persetujuan (acc) Super Admin',
-      permissions: normalizeUserPermissions(resolvedRole, {
-        modules: getDefaultPermissionsForRole(resolvedRole)
-      })
+      permissions: normalizeUserPermissions(
+        resolvedRole,
+        data.permissions || {
+          modules: getDefaultPermissionsForRole(resolvedRole)
+        }
+      )
     };
 
     this.users = [newUser, ...this.users];

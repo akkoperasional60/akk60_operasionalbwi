@@ -1895,8 +1895,6 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
     branchId: string;
     bypassChecklistDirectComplete: boolean;
   }>(() => {
-    const initDrivers = logisticsStore.getUsers().filter(u => u.role === 'driver' && u.status === 'approved');
-    const initHelpers = logisticsStore.getUsers().filter(u => (u.role === 'crew_helper' || u.role === 'driver') && u.status === 'approved');
     const today = getTodayIso();
     const initBranch = branchStore.getSelectedOriginBranchId() !== 'ALL'
       ? branchStore.getSelectedOriginBranchId()
@@ -2181,6 +2179,21 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
             backupTargetName = orig;
           }
         }
+      }
+
+      const isStaleDriverBackup = Boolean(
+        backupCrewName &&
+          (!backupPosition || backupPosition === 'driver') &&
+          effectiveDriver &&
+          effectiveDriver !== '-' &&
+          !isSameCrewPerson(effectiveDriver, backupCrewName) &&
+          (Boolean(matchedSch && ['picked_up', 'in_transit', 'delivered'].includes(matchedSch.status)) ||
+            Boolean(backupTargetName && !isSameCrewPerson(effectiveDriver, backupTargetName)))
+      );
+      if (isStaleDriverBackup) {
+        backupCrewName = undefined;
+        backupPosition = undefined;
+        backupTargetName = undefined;
       }
 
       if (backupCrewName && backupTargetName) {
@@ -5673,7 +5686,7 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                 return false;
                               });
 
-                              const backupCrewName = p.backupCrewName || matchedSch?.backupCrewName;
+                              const rawBackupCrewName = p.backupCrewName || matchedSch?.backupCrewName;
                               const backupPosition = p.backupPosition || matchedSch?.backupPosition || 'driver';
                               const backupTargetName =
                                 p.backupTargetName ||
@@ -5681,9 +5694,20 @@ export const GoogleSheetsAdminScheduleView: React.FC<GoogleSheetsAdminScheduleVi
                                 (backupPosition === 'helper' ? p.helper : backupPosition === 'helper2' ? p.helper2 : p.driver);
 
                               const displayDriver =
-                                backupCrewName && backupTargetName && backupPosition === 'driver' && isSameCrewPerson(p.driver, backupCrewName)
+                                rawBackupCrewName && backupTargetName && backupPosition === 'driver' && isSameCrewPerson(p.driver, rawBackupCrewName)
                                   ? backupTargetName
                                   : p.driver;
+
+                              const isStaleDriverBackupRow = Boolean(
+                                rawBackupCrewName &&
+                                  backupPosition === 'driver' &&
+                                  displayDriver &&
+                                  displayDriver !== '-' &&
+                                  !isSameCrewPerson(displayDriver, rawBackupCrewName) &&
+                                  (Boolean(matchedSch && ['picked_up', 'in_transit', 'delivered'].includes(matchedSch.status)) ||
+                                    Boolean(backupTargetName && !isSameCrewPerson(displayDriver, backupTargetName)))
+                              );
+                              const backupCrewName = isStaleDriverBackupRow ? undefined : rawBackupCrewName;
 
                               const driverInitials = getDriverInitials(displayDriver);
                               const avatarStyle = DRIVER_AVATAR_COLORS[displayDriver] || { 
