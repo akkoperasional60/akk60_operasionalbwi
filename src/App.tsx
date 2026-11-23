@@ -19,8 +19,8 @@ import { canAccess, getFirstAccessibleTabForUser, getUserRoleDisplayTitle } from
 import { useRoleAccess } from './hooks/useRoleAccess';
 import { getTabPath, normalizePathname, resolveTabFromUrl } from './utils/navigationRoutes';
 import { ReadOnlyModuleBoundary } from './components/ReadOnlyModuleBoundary';
-import { ExecutiveDashboard } from './components/ExecutiveDashboard';
 import {
+  loadExecutiveDashboard,
   loadScheduleManagement,
   loadFleetCrewManagement,
   loadSparePartManagement,
@@ -58,6 +58,7 @@ if (typeof window !== 'undefined') {
   } catch {}
 }
 
+const ExecutiveDashboard = lazyWithRetry(loadExecutiveDashboard);
 const ScheduleManagement = lazyWithRetry(loadScheduleManagement);
 const FleetCrewManagement = lazyWithRetry(loadFleetCrewManagement);
 const SparePartManagement = lazyWithRetry(loadSparePartManagement);

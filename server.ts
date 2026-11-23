@@ -277,7 +277,9 @@ async function startServer() {
 
       if (shouldBypassBuffering()) {
         restoreAndFlushRaw();
-        return origEnd(actualChunk, encoding, cb);
+        return typeof encoding === 'function'
+          ? origEnd(actualChunk, actualCb)
+          : origEnd(actualChunk, actualEncoding, actualCb);
       }
 
       if (actualChunk !== undefined && actualChunk !== null) {
@@ -11246,7 +11248,8 @@ Kembalikan HANYA JSON valid:
         server: {
           middlewareMode: true,
           hmr: disableHmr ? false : undefined,
-          watch: {},
+          ws: disableHmr ? false : undefined,
+          watch: disableHmr ? null : {},
         },
         appType: "spa",
       });
