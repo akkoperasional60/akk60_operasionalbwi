@@ -45,7 +45,6 @@ import {
   loadE2ETesterModule,
   loadMasterCabang,
   loadSchedulePortalValidationReport,
-  loadLiveTripsMonitorPanel,
   preloadTabsSequential,
   lazyWithRetry
 } from './utils/tabLoaders';
@@ -83,7 +82,6 @@ const AnalyticsReportingModule = lazyWithRetry(loadAnalyticsReportingModule);
 const E2ETesterModule = lazyWithRetry(loadE2ETesterModule);
 const MasterCabang = lazyWithRetry(loadMasterCabang);
 const SchedulePortalValidationReport = lazyWithRetry(loadSchedulePortalValidationReport);
-const LiveTripsMonitorPanel = lazyWithRetry(loadLiveTripsMonitorPanel);
 
 const AppShellSkeleton: React.FC<{
   statusLabel?: string;
@@ -684,7 +682,6 @@ export default function App() {
       case 'operational_dashboard': return 'Dashboard Logistik & Pengiriman';
       case 'schedules': return 'Manajemen Jadwal Pengiriman & Muat';
       case 'portal_validation': return 'Validasi Portal Driver & Helper';
-      case 'live_trips': return 'Live Trips, Riwayat Rute & Playback Perjalanan';
       case 'fleets': return 'Manajemen Armada & Kru Supir';
       case 'spareparts': return 'Manajemen Stok & Pemakaian Sparepart';
       case 'maintenance_costs': return 'Biaya Servis & Pemeliharaan Armada';
@@ -1043,10 +1040,6 @@ export default function App() {
 
           {currentTab === 'portal_validation' && (canManageFleet() || canAccess(currentUser, 'portal_validation')) && (
             <SchedulePortalValidationReport />
-          )}
-
-          {currentTab === 'live_trips' && (canManageFleet() || canAccess(currentUser, 'live_trips')) && (
-            <LiveTripsMonitorPanel />
           )}
 
           {currentTab === 'fleets' && (canManageFleet() || canAccess(currentUser, 'fleets')) && (
