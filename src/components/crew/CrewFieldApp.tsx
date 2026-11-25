@@ -50,9 +50,7 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
   const [accountOpen, setAccountOpen] = useState(false);
   const [taskConfirm, setTaskConfirm] = useState<{tripId: string; kind: 'inspection' | 'waybill'} | null>(null);
   const [taskChecks, setTaskChecks] = useState<[boolean, boolean]>([false,false]);
-  const [inspectionChecks, setInspectionChecks] = useState<Record<VehicleChecklistKey, boolean>>(() =>
-    VEHICLE_CHECKLIST_ITEMS.reduce((acc, item) => ({ ...acc, [item.key]: false }), {} as Record<VehicleChecklistKey, boolean>)
-  );
+  const [inspectionStatuses, setInspectionStatuses] = useState<Partial<Record<VehicleChecklistKey, string>>>({});
   const [inspectionPhotos, setInspectionPhotos] = useState<Partial<Record<VehicleChecklistKey, CameraEvidence>>>({});
   const [inspectionCameraKey, setInspectionCameraKey] = useState<VehicleChecklistKey | null>(null);
   const [reportKind, setReportKind] = useState<WorkAction | null>(null);
@@ -221,9 +219,7 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
     });
   };
   const resetInspectionForm = () => {
-    setInspectionChecks(
-      VEHICLE_CHECKLIST_ITEMS.reduce((acc, item) => ({ ...acc, [item.key]: false }), {} as Record<VehicleChecklistKey, boolean>)
-    );
+    setInspectionStatuses({});
     setInspectionPhotos({});
     setInspectionCameraKey(null);
   };
@@ -250,10 +246,28 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
   const sendReport = (e: React.FormEvent) => {
     e.preventDefault();
     if (!reportTrip || !reportKind || !slotForUser(reportTrip,user) || reportNote.trim().length < 3 || busy || cameraOpen) return;
-    const invalid = validateCameraEvidence(reportEvidence);
-    if (!reportEvidence || invalid) { setFault(invalid || 'Ambil foto terlebih dahulu.'); return; }
+    if (reportKind !== 'form_kirim') {
+      const invalid = validateCameraEvidence(reportEvidence);
+      if (!reportEvidence || invalid) { setFault(invalid || 'Ambil foto terlebih dahulu.'); return; }
+    }
     const kind = reportKind, evidence = reportEvidence;
     void invoke(() => submitWorkReport(user, reportTrip.id, kind, reportNote, evidence), 'Laporan tersimpan.', resetReport);
+  };
+  const submitManifestDecision = (mode: 'confirm' | 'discrepancy') => {
+    if (!reportTrip || busy) return;
+    const summaryNote =
+      mode === 'confirm'
+        ? (reportNote.trim().length >= 3 ? reportNote.trim() : `Konfirmasi Sesuai Tagihan · ${reportTrip.area} · ${reportTrip.fleetLabel}`)
+        : `[SELISIH / RETUR] ${reportNote.trim()}`;
+    if (mode === 'discrepancy' && reportNote.trim().length < 3) {
+      setFault('Tuliskan keterangan selisih / retur minimal 3 huruf terlebih dahulu.');
+      return;
+    }
+    void invoke(
+      () => submitWorkReport(user, reportTrip.id, 'form_kirim', summaryNote, null),
+      mode === 'confirm' ? 'Manifest dikonfirmasi sesuai tagihan.' : 'Laporan selisih / retur tersimpan.',
+      resetReport
+    );
   };
   const saveKm = (e: React.FormEvent) => {
     e.preventDefault(); if (!activeTrip || activeSlot !== 'driver' || activeTrip.odometerStart) return;
@@ -266,10 +280,12 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
   const inspectionEntries = useMemo<InspectionChecklistEntry[]>(() =>
     VEHICLE_CHECKLIST_ITEMS.map(item => {
       const evidence = item.requiresPhoto ? inspectionPhotos[item.key] : undefined;
+      const chosen = inspectionStatuses[item.key] || '';
       return {
         key: item.key,
         label: item.label,
-        checked: Boolean(inspectionChecks[item.key]),
+        status: chosen,
+        checked: Boolean(chosen),
         requiresPhoto: item.requiresPhoto,
         ...(item.requiresPhoto ? {
           photo: evidence?.photo,
@@ -279,11 +295,11 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
         } : {})
       };
     }),
-    [inspectionChecks, inspectionPhotos]
+    [inspectionStatuses, inspectionPhotos]
   );
-  const inspectionCheckedCount = useMemo(
-    () => VEHICLE_CHECKLIST_ITEMS.filter(item => inspectionChecks[item.key]).length,
-    [inspectionChecks]
+  const inspectionAnsweredCount = useMemo(
+    () => VEHICLE_CHECKLIST_ITEMS.filter(item => Boolean(inspectionStatuses[item.key])).length,
+    [inspectionStatuses]
   );
   const inspectionPhotoTotal = useMemo(
     () => VEHICLE_CHECKLIST_ITEMS.filter(item => item.requiresPhoto).length,
@@ -307,7 +323,7 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
     if (!target || slot !== (taskConfirm.kind === 'inspection' ? 'driver' : 'helper')) {setFault('Tugas tidak tersedia. Muat ulang jadwal.');return;}
     if (taskConfirm.kind === 'inspection') {
       if (!target.odometerStart) {
-        setFault('Isi KM awal terlebih dahulu sebelum mengisi checklist kendaraan.');
+        setFault('Isi KM awal terlebih dahulu sebelum mengisi pemeriksaan armada.');
         return;
       }
       const err = validateVehicleChecklist(inspectionEntries);
@@ -317,7 +333,7 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
       }
       void invoke(
         () => markTask(user, taskConfirm.tripId, 'inspection', inspectionEntries),
-        'Checklist & foto kendaraan tersimpan.',
+        'Pemeriksaan & foto armada tersimpan.',
         () => { setTaskConfirm(null); resetInspectionForm(); }
       );
       return;
@@ -363,7 +379,7 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
                       <TaskRow
                         icon={ShieldCheck}
                         label="Cek Armada"
-                        detail={!activeTrip.odometerStart ? 'Isi KM awal terlebih dahulu' : activeTrip.inspectionDone ? '7 item & 4 foto bukti tersimpan' : '7 item checklist · 4 foto bukti wajib'}
+                        detail={!activeTrip.odometerStart ? 'Isi KM awal terlebih dahulu' : activeTrip.inspectionDone ? '7 kondisi & 4 foto bukti tersimpan' : '7 pemeriksaan kondisi · 4 foto bukti wajib'}
                         done={Boolean(activeTrip.inspectionDone)}
                         disabled={busy || !activeTrip.odometerStart}
                         onClick={()=>openTaskConfirm('inspection')}
@@ -377,11 +393,33 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
               {screen === 'laporan' && <>
                 {!reportKind && <Heading title="Laporan"/>}
                 {!activeTrip || !activeSlot ? <Empty icon={FileText} title="Belum ada kiriman aktif" action={{label:'Lihat Kiriman',run:()=>nav('kiriman')}}/>
-                  : reportKind ? !reportTrip ? <Empty icon={FileText} title="Kiriman tidak lagi aktif" action={{label:'Kembali',run:resetReport}}/> : <Panel><BackButton onClick={()=>{if(!busy){resetReport();clearNotice();}}}/><h2 className="cv66-section-title cv66-report-title">{WORK_LABELS[reportKind]}</h2><p className="cv66-meta">{reportTrip.area} · {reportTrip.fleetLabel}</p>
-                    <form className="cv66-form" onSubmit={sendReport}><label className="cv66-field"><span>Keterangan</span><textarea value={reportNote} onChange={e=>setReportNote(e.target.value)} minLength={3} maxLength={1200} required rows={4} placeholder="Tulis keterangan" disabled={busy}/></label>
-                      {reportEvidence ? <EvidencePreview evidence={reportEvidence} disabled={busy} onRetake={startCamera}/> : <motion.button type="button" className="cv69-camera-entry" disabled={busy} onClick={startCamera} whileTap={busy || reduced ? undefined : {scale:.97}}><CrewArt name="camera" size={56}/><span>Buka Kamera</span><ChevronRight size={20}/></motion.button>}
-                      <Button type="submit" disabled={busy || cameraOpen || !reportEvidence || reportNote.trim().length<3} loading={busy}><Check size={18}/>Simpan Laporan</Button>
-                    </form></Panel> : <>{tripPicker}<Panel title={activeTrip.area} className="cv66-report-list cv69-action-panel"><ActionGrid actions={WORK_FOR_SLOT[activeSlot]} busy={busy} onAction={openReport}/></Panel></>}
+                  : reportKind ? !reportTrip ? <Empty icon={FileText} title="Kiriman tidak lagi aktif" action={{label:'Kembali',run:resetReport}}/> : <Panel><BackButton onClick={()=>{if(!busy){resetReport();clearNotice();}}}/><h2 className="cv66-section-title cv66-report-title">{reportKind === 'form_kirim' ? 'Form Manifest Kiriman' : WORK_LABELS[reportKind]}</h2><p className="cv66-meta">{reportTrip.area} · {reportTrip.fleetLabel}</p>
+                    {reportKind === 'form_kirim' ? (
+                      <div className="cv66-form">
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5 space-y-2 text-xs">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-slate-500">Outlet / Area</span>
+                            <span className="font-bold text-slate-900">{reportTrip.area}</span>
+                          </div>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-slate-500">No. Tracking / SJ</span>
+                            <span className="font-mono font-semibold text-slate-800">{reportTrip.trackingNumber || reportTrip.id}</span>
+                          </div>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-slate-500">Armada</span>
+                            <span className="font-semibold text-slate-800">{reportTrip.fleetLabel}</span>
+                          </div>
+                        </div>
+                        <label className="cv66-field"><span>Catatan / Selisih (Opsional jika sesuai)</span><textarea value={reportNote} onChange={e=>setReportNote(e.target.value)} maxLength={1200} rows={3} placeholder="Tulis catatan jika ada selisih atau retur barang" disabled={busy}/></label>
+                        <Button type="button" disabled={busy} loading={busy} onClick={()=>submitManifestDecision('confirm')}><Check size={18}/>Konfirmasi Sesuai Tagihan</Button>
+                        <Button type="button" variant="secondary" disabled={busy} onClick={()=>submitManifestDecision('discrepancy')}>Lapor Selisih / Retur</Button>
+                      </div>
+                    ) : (
+                      <form className="cv66-form" onSubmit={sendReport}><label className="cv66-field"><span>Keterangan</span><textarea value={reportNote} onChange={e=>setReportNote(e.target.value)} minLength={3} maxLength={1200} required rows={4} placeholder="Tulis keterangan" disabled={busy}/></label>
+                        {reportEvidence ? <EvidencePreview evidence={reportEvidence} disabled={busy} onRetake={startCamera}/> : <motion.button type="button" className="cv69-camera-entry" disabled={busy} onClick={startCamera} whileTap={busy || reduced ? undefined : {scale:.97}}><CrewArt name="camera" size={56}/><span>Buka Kamera</span><ChevronRight size={20}/></motion.button>}
+                        <Button type="submit" disabled={busy || cameraOpen || !reportEvidence || reportNote.trim().length<3} loading={busy}><Check size={18}/>Simpan Laporan</Button>
+                      </form>
+                    )}</Panel> : <>{tripPicker}<Panel title={activeTrip.area} className="cv66-report-list cv69-action-panel"><ActionGrid actions={WORK_FOR_SLOT[activeSlot]} busy={busy} onAction={openReport}/></Panel></>}
               </>}
               {screen === 'riwayat' && <>
                 <Heading title="Riwayat"/>
@@ -404,7 +442,6 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
           onCapture={evidence => {
             const key = activeInspectionCamItem.key;
             setInspectionPhotos(prev => ({ ...prev, [key]: evidence }));
-            setInspectionChecks(prev => ({ ...prev, [key]: true }));
             setInspectionCameraKey(null);
             clearNotice();
           }}
@@ -435,26 +472,17 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
             {taskConfirm.kind === 'inspection' ? (
               <>
                 <div className={`cv72-check-summary ${!inspectionValidationError ? 'cv72-check-summary--ready' : ''}`}>
-                  <span>Checklist: {inspectionCheckedCount}/{VEHICLE_CHECKLIST_ITEMS.length}</span>
+                  <span>Terisi: {inspectionAnsweredCount}/{VEHICLE_CHECKLIST_ITEMS.length}</span>
                   <span>Foto bukti: {inspectionPhotoCount}/{inspectionPhotoTotal}</span>
                 </div>
                 <div className="cv72-check-list">
                   {VEHICLE_CHECKLIST_ITEMS.map(item => {
-                    const checked = Boolean(inspectionChecks[item.key]);
+                    const selectedStatus = inspectionStatuses[item.key] || '';
                     const evidence = item.requiresPhoto ? inspectionPhotos[item.key] : undefined;
-                    const itemComplete = checked && (!item.requiresPhoto || Boolean(evidence?.photo));
+                    const itemComplete = Boolean(selectedStatus) && (!item.requiresPhoto || Boolean(evidence?.photo));
                     return (
                       <div key={item.key} className={`cv72-check-card ${itemComplete ? 'cv72-check-card--done' : ''}`}>
-                        <label className="cv72-check-top">
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            disabled={busy}
-                            onChange={e => {
-                              const nextVal = e.target.checked;
-                              setInspectionChecks(prev => ({ ...prev, [item.key]: nextVal }));
-                            }}
-                          />
+                        <div className="cv72-check-top" style={{ cursor: 'default' }}>
                           <span className="cv72-check-label">{item.label}</span>
                           {item.requiresPhoto && (
                             <span className={`cv72-photo-badge ${evidence?.photo ? 'cv72-photo-badge--ok' : ''}`}>
@@ -462,7 +490,27 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
                               {evidence?.photo ? 'Foto OK' : 'Wajib Foto'}
                             </span>
                           )}
-                        </label>
+                        </div>
+                        <div className="cv72-choice-row" role="radiogroup" aria-label={item.label}>
+                          {item.options.map((opt, idx) => {
+                            const active = selectedStatus === opt;
+                            const activeClass = active ? (idx === 0 ? 'cv72-choice-btn--ok' : 'cv72-choice-btn--warn') : '';
+                            return (
+                              <button
+                                key={opt}
+                                type="button"
+                                role="radio"
+                                aria-checked={active}
+                                disabled={busy}
+                                className={`cv72-choice-btn ${activeClass}`}
+                                onClick={() => setInspectionStatuses(prev => ({ ...prev, [item.key]: opt }))}
+                              >
+                                {active && <Check size={14}/>}
+                                <span>{opt}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
                         {item.requiresPhoto && (
                           <div className="cv72-check-photo-row">
                             {evidence?.photo && (
@@ -496,9 +544,9 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
                   loading={busy}
                   onClick={saveCheck}
                 >
-                  <Check size={18}/>Simpan Checklist Armada
+                  <Check size={18}/>Simpan Cek Armada
                 </Button>
-                {!qa && <p className="cv66-meta cv66-gps">Seluruh 7 item & 4 foto bukti wajib lengkap sebelum melanjutkan ke Berangkat.</p>}
+                {!qa && <p className="cv66-meta cv66-gps">Seluruh 7 pilihan & 4 foto bukti wajib lengkap sebelum melanjutkan ke Berangkat.</p>}
               </>
             ) : (
               <>
