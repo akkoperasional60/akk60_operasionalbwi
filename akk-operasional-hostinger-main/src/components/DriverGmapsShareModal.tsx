@@ -1,0 +1,2268 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
+import {
+  X,
+  Camera,
+  MapPin,
+  AlertTriangle,
+  CheckCircle2,
+  Share2,
+  Send,
+  Truck,
+  RefreshCw,
+  CameraOff,
+  FileText,
+  Maximize2,
+  Store,
+  Fuel,
+  Upload,
+  Plus,
+  Trash2,
+  Images,
+  ChevronDown,
+  Check,
+  RotateCcw,
+  PackageMinus,
+  PackagePlus,
+  PackageX,
+  Search,
+  Package
+} from 'lucide-react';
+import { Schedule } from '../types';
+import { driverChecklistService } from '../services/driverChecklistService';
+import { driverReportService, DriverHelperReport } from '../services/driverReportService';
+import { driverWaybillService } from '../services/driverWaybillService';
+import { databaseBarangService, DatabaseBarangRecord } from '../services/databaseBarangService';
+import { logisticsStore } from '../services/store';
+import { resolvePreciseCustomerGps } from '../utils/preciseCustomerGps';
+import {
+  ExifMetadataBadge,
+  ExifTimestampMetadata,
+  createExifMetadataFromDate,
+  extractExifFromFile,
+  drawExifMetadataOnCanvas
+} from '../utils/exifMetadata';
+
+export type GmapsReportCategory =
+  | 'kendala_jalan'
+  | 'akhir_kiriman'
+  | 'istirahat'
+  | 'update_lokasi'
+  | 'isi_bbm'
+  | 'retur'
+  | 'kurang_muat'
+  | 'lebih_muat'
+  | 'salah_muat';
+
+interface DriverGmapsShareModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  deliveries: Schedule[];
+  preferredDeliveryId?: string;
+  preferredAreaName?: string;
+  reporterName?: string;
+  driverName?: string;
+  plateNumber?: string;
+  driverId?: string;
+  userJobdeskRole?: 'driver' | 'helper';
+  initialCategory?: GmapsReportCategory;
+  onReportSubmitted: (report: {
+    category: GmapsReportCategory;
+    delivery: Schedule | null;
+    notes: string;
+    photoUrl: string | null;
+    photoUrls?: string[];
+    distanceMeters: number | null;
+    isWithinRadius: boolean;
+    driverLat: number;
+    driverLng: number;
+    gmapsUrl: string;
+    plateNumber: string;
+    areaName: string;
+  }) => void;
+}
+
+export const DriverGmapsShareModal: React.FC<DriverGmapsShareModalProps> = ({
+  isOpen,
+  onClose,
+  deliveries,
+  preferredDeliveryId,
+  preferredAreaName,
+  reporterName,
+  driverName = '',
+  plateNumber = '',
+  driverId,
+  userJobdeskRole = 'driver',
+  initialCategory,
+  onReportSubmitted
+}) => {
+  const [category, setCategory] = useState<GmapsReportCategory>(initialCategory || 'isi_bbm');
+  const isItemIssueCategory =
+    category === 'retur' ||
+    category === 'kurang_muat' ||
+    category === 'lebih_muat' ||
+    category === 'salah_muat';
+  const [reportSubMode, setReportSubMode] = useState<'kendala_umum' | 'antri_customer'>('kendala_umum');
+  const [notes, setNotes] = useState<string>('');
+  const [photoList, setPhotoList] = useState<string[]>([]);
+  const [photoExifList, setPhotoExifList] = useState<ExifTimestampMetadata[]>([]);
+  const [activePhotoIndex, setActivePhotoIndex] = useState<number>(0);
+  const [isCapturing, setIsCapturing] = useState<boolean>(false);
+  const [isFullPhotoPreviewOpen, setIsFullPhotoPreviewOpen] = useState<boolean>(false);
+
+  const photoDataUrl = photoList[activePhotoIndex] || photoList[0] || null;
+  const activePhotoExif = photoExifList[activePhotoIndex] || photoExifList[0] || null;
+
+  // State Fitur Antri di Customer, Absen Pelanggan, serta Retur / Kurang Muat / Lebih Muat / Salah Muat
+  const [activeQueueReport, setActiveQueueReport] = useState<DriverHelperReport | null>(null);
+  const [customerOutletInput, setCustomerOutletInput] = useState<string>('');
+  const [customerNameInput, setCustomerNameInput] = useState<string>('');
+  const [issueItemName, setIssueItemName] = useState<string>('');
+  const [issueItemCode, setIssueItemCode] = useState<string>('');
+  const [issueItemUnit, setIssueItemUnit] = useState<string>('');
+  const [issueQty, setIssueQty] = useState<string>('');
+  const [invoiceNumber, setInvoiceNumber] = useState<string>('');
+  const [dbBarangItems, setDbBarangItems] = useState<DatabaseBarangRecord[]>(() => databaseBarangService.getAll());
+  const [isLoadingDbBarang, setIsLoadingDbBarang] = useState<boolean>(false);
+  const [isBarangDropdownOpen, setIsBarangDropdownOpen] = useState<boolean>(false);
+  const [barangSearchQuery, setBarangSearchQuery] = useState<string>('');
+  const [fuelLocation, setFuelLocation] = useState<'Farly' | 'Gajah Mada' | 'SPBU Lain (Urgent)'>('Farly');
+  const [isFuelDropdownOpen, setIsFuelDropdownOpen] = useState<boolean>(false);
+  const [fuelLiters, setFuelLiters] = useState<string>('');
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [simulatedExtraMin, setSimulatedExtraMin] = useState<number>(0);
+  const [elapsedQueueSeconds, setElapsedQueueSeconds] = useState<number>(0);
+  const [queueCompletedToast, setQueueCompletedToast] = useState<string | null>(null);
+
+  // Live Camera Stream State
+  const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
+  const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [cameraCaptureFlash, setCameraCaptureFlash] = useState<boolean>(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const isOpenRef = useRef<boolean>(isOpen);
+  const cameraSeqRef = useRef<number>(0);
+
+  useEffect(() => {
+    isOpenRef.current = isOpen;
+  }, [isOpen]);
+
+  // Otomatis terisi nomor kendaraan sesuai data checklist
+  const [autoPlateNumber, setAutoPlateNumber] = useState<string>(plateNumber);
+  const [selectedDeliveryId, setSelectedDeliveryId] = useState<string>('');
+
+  // Lookup inisial armada dari master data (hanya jika plat sudah terisi dari check-in & checklist)
+  const fleets = logisticsStore.getFleets();
+  const matchedFleet = autoPlateNumber
+    ? fleets.find(f =>
+        f.plateNumber.replace(/\s+/g, '').toUpperCase() === autoPlateNumber.replace(/\s+/g, '').toUpperCase()
+      )
+    : undefined;
+  const fleetInitial = matchedFleet?.initialCode;
+
+  // GPS Coordinates (Direkam otomatis secara real-time high-accuracy untuk validasi admin)
+  const [driverLat, setDriverLat] = useState<number>(-8.2190);
+  const [driverLng, setDriverLng] = useState<number>(114.3680);
+  const [hasLiveGpsFix, setHasLiveGpsFix] = useState<boolean>(false);
+  const gpsWatchIdRef = useRef<number | null>(null);
+
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const addPhotoToList = (stampedUrl: string, exifMeta?: ExifTimestampMetadata) => {
+    const resolvedExif = exifMeta || createExifMetadataFromDate(new Date(), 'CAMERA_CAPTURE_SENSOR');
+    setPhotoList(prev => {
+      const next = [...prev, stampedUrl];
+      setActivePhotoIndex(next.length - 1);
+      return next;
+    });
+    setPhotoExifList(prev => [...prev, resolvedExif]);
+    setValidationError(null);
+  };
+
+  const removePhotoAtIndex = (idx: number) => {
+    setPhotoList(prev => {
+      const next = prev.filter((_, i) => i !== idx);
+      setActivePhotoIndex(curr => Math.max(0, Math.min(curr, next.length - 1)));
+      return next;
+    });
+    setPhotoExifList(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  // Reset seluruh field input agar data yang sudah terkirim tidak pernah nyantol
+  const resetFormFields = () => {
+    setNotes('');
+    setPhotoList([]);
+    setPhotoExifList([]);
+    setActivePhotoIndex(0);
+    setCustomerOutletInput('');
+    setCustomerNameInput('');
+    setIssueItemName('');
+    setIssueItemCode('');
+    setIssueItemUnit('');
+    setIssueQty('');
+    setInvoiceNumber('');
+    setIsBarangDropdownOpen(false);
+    setBarangSearchQuery('');
+    setFuelLiters('');
+    setValidationError(null);
+    setCameraError(null);
+    setSimulatedExtraMin(0);
+    if (cameraInputRef.current) cameraInputRef.current.value = '';
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  // Sinkronisasi Database Barang untuk dropdown Nama Barang + fitur pencarian identik Database Barang
+  useEffect(() => {
+    if (!isOpen) return;
+    const current = databaseBarangService.getAll();
+    if (current.length > 0) {
+      setDbBarangItems(current);
+    } else {
+      setIsLoadingDbBarang(true);
+    }
+    void databaseBarangService.ensureHydrated().then(rows => {
+      setDbBarangItems(rows);
+      setIsLoadingDbBarang(false);
+    }).catch(() => {
+      setIsLoadingDbBarang(false);
+    });
+
+    const handleDbBarangUpdate = () => {
+      setDbBarangItems(databaseBarangService.getAll());
+      setIsLoadingDbBarang(false);
+    };
+    window.addEventListener('akk-database-barang-updated', handleDbBarangUpdate);
+    return () => {
+      window.removeEventListener('akk-database-barang-updated', handleDbBarangUpdate);
+    };
+  }, [isOpen]);
+
+  const filteredDbBarangItems = React.useMemo(() => {
+    const q = barangSearchQuery.trim();
+    if (!q) {
+      return dbBarangItems.slice(0, 80);
+    }
+    return dbBarangItems
+      .filter(item => databaseBarangService.matchesSearchQuery(item, q))
+      .slice(0, 80);
+  }, [dbBarangItems, barangSearchQuery]);
+
+  const normCompactStr = (v?: string) =>
+    String(v || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+
+  const actualReporterName = (reporterName || driverName || 'Kru Pengiriman').trim();
+
+  // Sinkronkan pilihan ritase default ke jadwal aktif user saat modal dibuka
+  useEffect(() => {
+    if (!isOpen) return;
+    setSelectedDeliveryId(preferredDeliveryId || '');
+  }, [isOpen, preferredDeliveryId]);
+
+  // Otomatis pilih jadwal / Surat Jalan Keluar yang paling tepat untuk kru pelapor
+  const todayStr = new Date().toISOString().split('T')[0];
+  const activeDelivery: Schedule | null = React.useMemo(() => {
+    if (!deliveries || deliveries.length === 0) return null;
+    if (selectedDeliveryId) {
+      const manuallySelected = deliveries.find(d => d.id === selectedDeliveryId);
+      if (manuallySelected) return manuallySelected;
+    }
+    if (preferredDeliveryId) {
+      const preferred = deliveries.find(d => d.id === preferredDeliveryId);
+      if (preferred) return preferred;
+    }
+    const openTrips = deliveries.filter(d => d.status !== 'delivered');
+    const candidatePool = openTrips.length > 0 ? openTrips : deliveries;
+
+    if (preferredAreaName && preferredAreaName.trim() && preferredAreaName.trim() !== '-') {
+      const prefAreaNorm = normCompactStr(preferredAreaName);
+      const areaMatch = candidatePool.find(d => {
+        const dArea = normCompactStr(d.areaName || d.store?.storeName);
+        return dArea && (dArea === prefAreaNorm || dArea.includes(prefAreaNorm) || prefAreaNorm.includes(dArea));
+      });
+      if (areaMatch) return areaMatch;
+    }
+
+    const reporterNorm = normCompactStr(actualReporterName);
+    const crewInTransitMatch = candidatePool.find(d => {
+      if (d.status !== 'in_transit' && d.status !== 'picked_up') return false;
+      if (!reporterNorm) return true;
+      return [d.crew?.name, d.crewHelper?.name, d.crewHelper2?.name, d.backupCrewName]
+        .map(normCompactStr)
+        .some(n => n && (n === reporterNorm || n.includes(reporterNorm) || reporterNorm.includes(n)));
+    });
+    if (crewInTransitMatch) return crewInTransitMatch;
+
+    const crewOpenMatch = reporterNorm
+      ? candidatePool.find(d =>
+          [d.crew?.name, d.crewHelper?.name, d.crewHelper2?.name, d.backupCrewName]
+            .map(normCompactStr)
+            .some(n => n && (n === reporterNorm || n.includes(reporterNorm) || reporterNorm.includes(n)))
+        )
+      : undefined;
+    if (crewOpenMatch) return crewOpenMatch;
+
+    const inTransit = deliveries.find(d => d.status === 'in_transit' || d.status === 'picked_up');
+    if (inTransit) return inTransit;
+    const todayMatch = deliveries.find(d => d.departureDate <= todayStr && d.status !== 'delivered');
+    if (todayMatch) return todayMatch;
+    return deliveries[0];
+  }, [deliveries, todayStr, selectedDeliveryId, preferredDeliveryId, preferredAreaName, actualReporterName]);
+
+  // Driver & Helper identitas terpisah agar nama Helper tidak menggantikan nama Driver
+  const isHelperJobdesk = userJobdeskRole === 'helper';
+  const resolvedTripDriverName = React.useMemo(() => {
+    const schedDriver = (activeDelivery?.crew?.name || '').trim();
+    if (schedDriver && schedDriver !== '-') return schedDriver;
+    const propDriver = (driverName || '').trim();
+    if (propDriver && propDriver !== '-' && (!isHelperJobdesk || normCompactStr(propDriver) !== normCompactStr(actualReporterName))) {
+      return propDriver;
+    }
+    return isHelperJobdesk ? '-' : actualReporterName;
+  }, [activeDelivery?.crew?.name, driverName, isHelperJobdesk, actualReporterName]);
+
+  const resolvedTripHelperName = React.useMemo(() => {
+    const driverNorm = normCompactStr(resolvedTripDriverName);
+    const helpers = [activeDelivery?.crewHelper?.name, activeDelivery?.crewHelper2?.name]
+      .map(s => (s || '').trim())
+      .filter(s => s && s !== '-' && (!driverNorm || normCompactStr(s) !== driverNorm));
+    if (isHelperJobdesk && actualReporterName && (!driverNorm || normCompactStr(actualReporterName) !== driverNorm)) {
+      if (!helpers.some(h => normCompactStr(h) === normCompactStr(actualReporterName))) {
+        helpers.unshift(actualReporterName);
+      }
+    }
+    return helpers.join(', ');
+  }, [activeDelivery?.crewHelper?.name, activeDelivery?.crewHelper2?.name, isHelperJobdesk, actualReporterName, resolvedTripDriverName]);
+
+  const selectableDeliveries = React.useMemo(() => {
+    const openTrips = deliveries.filter(d => d.status !== 'delivered');
+    return openTrips.length > 0 ? openTrips : deliveries;
+  }, [deliveries]);
+
+  useEffect(() => {
+    if (!isOpen || !activeDelivery) return;
+    const selectedPlate = selectedDeliveryId
+      ? (activeDelivery.fleet?.plateNumber || activeDelivery.armada || '')
+      : (plateNumber || activeDelivery.fleet?.plateNumber || activeDelivery.armada || '');
+    if (selectedPlate) setAutoPlateNumber(selectedPlate);
+  }, [isOpen, activeDelivery?.id, selectedDeliveryId, plateNumber]);
+
+  const activeWaybill = React.useMemo(() => {
+    if (!activeDelivery) return null;
+    try {
+      return driverWaybillService.getWaybillForSchedule(activeDelivery);
+    } catch {
+      return null;
+    }
+  }, [activeDelivery]);
+
+  const currentAreaName = React.useMemo(() => {
+    const cleanPair = (rawArea?: string, rawCity?: string) => {
+      const a = String(rawArea || '').trim();
+      const c = String(rawCity || '').trim();
+      if (!a && !c) return '';
+      if (!c) return a;
+      if (!a) return c;
+      const aLow = a.toLowerCase();
+      const cLow = c.toLowerCase();
+      if (aLow === cLow || aLow.includes(`(${cLow})`) || cLow.includes(aLow)) {
+        return a.length >= c.length ? a : c;
+      }
+      return `${a} (${c})`;
+    };
+    if (activeWaybill?.destination) {
+      return cleanPair(
+        activeWaybill.destination.areaName || activeWaybill.destination.storeName,
+        activeWaybill.destination.city
+      );
+    }
+    if (activeDelivery) {
+      return cleanPair(
+        activeDelivery.areaName || activeDelivery.store?.storeName || 'Area Pengiriman',
+        activeDelivery.store?.city
+      );
+    }
+    return 'Sesuai Surat Jalan Keluar Aktif';
+  }, [activeWaybill, activeDelivery]);
+
+  const currentWaybillNo = activeWaybill?.waybillNumber || activeDelivery?.trackingNumber || 'SJ-OUT/AKK/AKTIF';
+
+  // Cari antrean berdasarkan ID ritase. Kru/armada yang sama dapat memiliki
+  // beberapa jadwal area dalam sehari, jadi nama atau plat saja tidak cukup.
+  const refreshActiveQueue = () => {
+    const allReports = driverReportService.getReports();
+    const active = activeDelivery;
+    const normalizeKey = (value?: string) => (value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+    const activeCrewNames = active
+      ? [
+          active.crew?.name,
+          active.crewHelper?.name,
+          active.crewHelper2?.name,
+          active.backupCrewName,
+          active.backupTargetName
+        ].map(normalizeKey).filter(Boolean)
+      : [];
+    const activeArea = normalizeKey(active?.areaName || active?.store?.storeName || currentAreaName);
+    const activeDriverKey = normalizeKey(driverName);
+    const matchesActiveCrew = (report: DriverHelperReport) => {
+      const reportNames = [report.driverName, report.helperName].map(normalizeKey).filter(Boolean);
+      return reportNames.some(name => activeCrewNames.includes(name) || name === activeDriverKey);
+    };
+    const found = active
+      ? allReports.find(r =>
+          r.customerQueueStatus === 'sedang_mengantri' &&
+          r.deliveryId === active.id &&
+          matchesActiveCrew(r)
+        ) ||
+        allReports.find(r => {
+          if (r.customerQueueStatus !== 'sedang_mengantri' || r.deliveryId) return false;
+          const reportArea = normalizeKey(r.areaName);
+          return Boolean(
+            activeArea && (reportArea === activeArea || reportArea.startsWith(activeArea) || activeArea.startsWith(reportArea)) &&
+            matchesActiveCrew(r)
+          );
+        })
+      : undefined;
+    setActiveQueueReport(found || null);
+    if (found && found.customerOutletName) {
+      setCustomerOutletInput(found.customerOutletName);
+    }
+  };
+
+  const requestFreshGpsLocation = () => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setDriverLat(pos.coords.latitude);
+        setDriverLng(pos.coords.longitude);
+        setHasLiveGpsFix(true);
+      },
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+    );
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      resetFormFields();
+      setQueueCompletedToast(null);
+      setCategory(initialCategory || 'isi_bbm');
+      setSelectedDeliveryId('');
+      setAutoPlateNumber(plateNumber ? plateNumber.trim() : '');
+      requestFreshGpsLocation();
+
+      if (typeof navigator !== 'undefined' && navigator.geolocation) {
+        try {
+          if (gpsWatchIdRef.current !== null) {
+            navigator.geolocation.clearWatch(gpsWatchIdRef.current);
+          }
+          gpsWatchIdRef.current = navigator.geolocation.watchPosition(
+            (pos) => {
+              setDriverLat(pos.coords.latitude);
+              setDriverLng(pos.coords.longitude);
+              setHasLiveGpsFix(true);
+            },
+            () => {},
+            { enableHighAccuracy: true, maximumAge: 0, timeout: 12000 }
+          );
+        } catch {}
+      }
+    } else {
+      if (typeof navigator !== 'undefined' && navigator.geolocation && gpsWatchIdRef.current !== null) {
+        try {
+          navigator.geolocation.clearWatch(gpsWatchIdRef.current);
+        } catch {}
+        gpsWatchIdRef.current = null;
+      }
+      stopLiveCamera();
+      resetFormFields();
+    }
+    return () => {
+      if (typeof navigator !== 'undefined' && navigator.geolocation && gpsWatchIdRef.current !== null) {
+        try {
+          navigator.geolocation.clearWatch(gpsWatchIdRef.current);
+        } catch {}
+        gpsWatchIdRef.current = null;
+      }
+    };
+  }, [isOpen, driverId, plateNumber, userJobdeskRole, initialCategory]);
+
+  useEffect(() => {
+    if (isOpen) refreshActiveQueue();
+  }, [isOpen, activeDelivery?.id]);
+
+  // Timer detikan real-time selama kru sedang mengantri di customer
+  useEffect(() => {
+    if (!activeQueueReport) {
+      setElapsedQueueSeconds(0);
+      return;
+    }
+    const startMs = activeQueueReport.customerQueueStartIso
+      ? new Date(activeQueueReport.customerQueueStartIso).getTime()
+      : new Date(activeQueueReport.timestamp).getTime();
+
+    const updateTimer = () => {
+      const diffSec = Math.max(0, Math.floor((Date.now() - startMs) / 1000));
+      setElapsedQueueSeconds(diffSec);
+    };
+    updateTimer();
+    const interval = setInterval(updateTimer, 1000);
+    return () => clearInterval(interval);
+  }, [activeQueueReport]);
+
+  // Automatically attach stream to video element when camera is active
+  useEffect(() => {
+    if (isCameraActive && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+      videoRef.current.muted = true;
+      videoRef.current.play().catch(pErr => {
+        console.warn('[DriverGmaps] video.play error:', pErr);
+      });
+    }
+  }, [isCameraActive]);
+
+  const stopLiveCamera = () => {
+    cameraSeqRef.current += 1;
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => {
+        try { t.stop(); } catch {}
+      });
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      try { videoRef.current.srcObject = null; } catch {}
+    }
+    setIsCameraActive(false);
+  };
+
+  const startLiveCamera = async (mode: 'environment' | 'user' = facingMode) => {
+    stopLiveCamera();
+    const requestSeq = ++cameraSeqRef.current;
+    setCameraError(null);
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('NOT_SUPPORTED');
+      }
+
+      let stream: MediaStream | null = null;
+      let lastErr: unknown = null;
+
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: mode },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        });
+      } catch (e1) {
+        lastErr = e1;
+      }
+
+      if (!stream && isOpenRef.current && cameraSeqRef.current === requestSeq) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: mode },
+            audio: false
+          });
+        } catch (e2) {
+          lastErr = e2;
+        }
+      }
+
+      if (!stream && isOpenRef.current && cameraSeqRef.current === requestSeq) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: false
+          });
+        } catch (e3) {
+          lastErr = e3;
+        }
+      }
+
+      if (!isOpenRef.current || cameraSeqRef.current !== requestSeq) {
+        if (stream) {
+          stream.getTracks().forEach(t => {
+            try { t.stop(); } catch {}
+          });
+        }
+        return;
+      }
+
+      if (!stream) {
+        throw lastErr || new Error('Tidak dapat membuka stream video.');
+      }
+
+      streamRef.current = stream;
+      setIsCameraActive(true);
+      setCameraError(null);
+    } catch (err: unknown) {
+      if (!isOpenRef.current || cameraSeqRef.current !== requestSeq) return;
+      const errName = err instanceof Error ? err.name : '';
+      const msg = err instanceof Error ? err.message : String(err);
+
+      try {
+        logisticsStore.logActivity(
+          'Akses Kamera Ditolak',
+          driverName || 'Driver Operasional',
+          `Kendala Gmaps/Rute Kamera (${errName || 'Error'}): ${msg} [Plat: ${autoPlateNumber}]`
+        );
+      } catch {
+        // ignore
+      }
+
+      if (errName === 'NotReadableError' || errName === 'TrackStartError') {
+        setCameraError('Kamera sedang dipakai aplikasi lain. Tutup aplikasi lain atau tap "Kamera Bawaan HP" di bawah.');
+      } else if (errName === 'NotFoundError' || errName === 'DevicesNotFoundError') {
+        setCameraError('Perangkat kamera tidak ditemukan di browser. Silakan tap "Kamera Bawaan HP" di bawah.');
+      } else if (msg === 'NOT_SUPPORTED') {
+        setCameraError('Browser tidak mendukung kamera langsung. Silakan tap "Kamera Bawaan HP" di bawah untuk memotret.');
+      } else {
+        setCameraError('Akses kamera langsung browser diblokir / terkendala izin. Tap "Kamera Bawaan HP" atau izinkan kamera di browser.');
+      }
+    }
+  };
+
+  const handleFlipCamera = () => {
+    const nextMode = facingMode === 'environment' ? 'user' : 'environment';
+    setFacingMode(nextMode);
+    void startLiveCamera(nextMode);
+  };
+
+  const effectivePreciseGps = React.useMemo(() => {
+    const targetPointName =
+      category === 'istirahat' || isItemIssueCategory
+        ? customerNameInput.trim() || issueItemName.trim()
+        : category === 'isi_bbm'
+        ? `SPBU ${fuelLocation}`
+        : customerOutletInput.trim();
+    return resolvePreciseCustomerGps({
+      customerName: targetPointName,
+      areaName: currentAreaName,
+      rawLat: hasLiveGpsFix ? driverLat : null,
+      rawLng: hasLiveGpsFix ? driverLng : null
+    });
+  }, [category, isItemIssueCategory, customerNameInput, issueItemName, fuelLocation, customerOutletInput, currentAreaName, hasLiveGpsFix, driverLat, driverLng]);
+
+  // Watermark stamper helper (disertai EXIF Tag Metadata Kunci: DateTimeOriginal, DateTimeDigitized, OffsetTimeOriginal, SubSecTimeOriginal)
+  const applyWatermarkToCanvas = (canvas: HTMLCanvasElement, exifInput?: ExifTimestampMetadata): string => {
+    const exif = exifInput || createExifMetadataFromDate(new Date(), 'CAMERA_CAPTURE_SENSOR');
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return canvas.toDataURL('image/jpeg', 0.58);
+    const w = canvas.width;
+    const h = canvas.height;
+
+    drawExifMetadataOnCanvas(ctx, w, h, exif);
+
+    const bannerHeight = Math.max(85, Math.floor(h * 0.17));
+    const bannerY = h - bannerHeight;
+
+    const grad = ctx.createLinearGradient(0, bannerY, 0, h);
+    grad.addColorStop(0, 'rgba(15, 23, 42, 0.92)');
+    grad.addColorStop(1, 'rgba(15, 23, 42, 0.98)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, bannerY, w, bannerHeight);
+
+    ctx.fillStyle =
+      category === 'kendala_jalan' || category === 'salah_muat'
+        ? '#e11d48'
+        : category === 'isi_bbm' || category === 'kurang_muat'
+        ? '#d97706'
+        : category === 'lebih_muat'
+        ? '#0d9488'
+        : category === 'retur'
+        ? '#9333ea'
+        : '#2563eb';
+    ctx.fillRect(0, bannerY, w, 4);
+
+    const fontSize = Math.max(12, Math.floor(w * 0.024));
+    ctx.textBaseline = 'top';
+
+    ctx.fillStyle =
+      category === 'isi_bbm' || category === 'kurang_muat'
+        ? '#fbbf24'
+        : category === 'lebih_muat'
+        ? '#2dd4bf'
+        : category === 'retur'
+        ? '#c084fc'
+        : category === 'salah_muat'
+        ? '#fb7185'
+        : '#60a5fa';
+    ctx.font = `bold ${fontSize}px system-ui, sans-serif`;
+    const titleTag =
+      category === 'kendala_jalan' && reportSubMode === 'antri_customer'
+        ? '⏳ ANTRI DI CUSTOMER'
+        : category === 'kendala_jalan'
+        ? '⚠️ KENDALA DI JALAN'
+        : category === 'isi_bbm'
+        ? `⛽ ISI BBM (SOLAR) - ${fuelLocation.toUpperCase()}`
+        : category === 'retur'
+        ? '🔄 BARANG RETUR PELANGGAN'
+        : category === 'kurang_muat'
+        ? '📦 LAPORAN KURANG MUAT'
+        : category === 'lebih_muat'
+        ? '📦+ LAPORAN LEBIH MUAT'
+        : category === 'salah_muat'
+        ? '⚠️ LAPORAN SALAH MUAT'
+        : category === 'akhir_kiriman'
+        ? '📦 AKHIR KIRIMAN (POD)'
+        : '✅ ABSEN KIRIMAN PELANGGAN';
+    ctx.fillText(`${titleTag} • PT ANUGRAH KEMASAN KREATIF`, 16, bannerY + 10);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `bold ${fontSize - 1}px system-ui, sans-serif`;
+    const initialText = fleetInitial ? ` [${fleetInitial}]` : '';
+    const targetCustomerLabel =
+      category === 'istirahat' && customerNameInput.trim()
+        ? `Pelanggan: ${customerNameInput.trim()} (${effectivePreciseGps.subAreaLabel})`
+        : isItemIssueCategory
+        ? `${customerNameInput.trim() ? `Toko: ${customerNameInput.trim()} | ` : ''}${issueItemName.trim() || 'Barang'}${issueQty.trim() ? ` (${issueQty.trim()})` : ''}`
+        : category === 'isi_bbm'
+        ? `Lokasi BBM: ${fuelLocation}`
+        : `Area: ${currentAreaName}`;
+    const crewWatermarkText = isHelperJobdesk
+      ? `Helper: ${actualReporterName}${resolvedTripDriverName && resolvedTripDriverName !== '-' ? ` | Driver: ${resolvedTripDriverName}` : ''}`
+      : `Driver: ${resolvedTripDriverName}${resolvedTripHelperName ? ` | Helper: ${resolvedTripHelperName}` : ''}`;
+    ctx.fillText(`${targetCustomerLabel} | ${crewWatermarkText} [${autoPlateNumber}${initialText}]`, 16, bannerY + 12 + fontSize);
+
+    ctx.fillStyle = '#cbd5e1';
+    ctx.font = `bold ${fontSize - 2}px monospace`;
+    ctx.fillText(
+      `🕒 EXIF DateTimeOriginal: ${exif.DateTimeOriginal}.${exif.SubSecTimeOriginal} (${exif.OffsetTimeOriginal}) | 📍 GPS: ${effectivePreciseGps.latitude.toFixed(6)}, ${effectivePreciseGps.longitude.toFixed(6)}`,
+      16,
+      bannerY + 14 + (fontSize * 2)
+    );
+
+    const stampedUrl = canvas.toDataURL('image/jpeg', 0.58);
+    addPhotoToList(stampedUrl, exif);
+    return stampedUrl;
+  };
+
+  // Potret foto dari kamera aktif (Tetap di kamera atau bisa ambil lebih dari 1 foto)
+  const captureLivePhoto = (closeAfterCapture: boolean = false) => {
+    if (!videoRef.current) return;
+    const video = videoRef.current;
+    if (video.videoWidth === 0 || video.videoHeight === 0 || video.readyState < 2) {
+      setCameraError('Kamera masih memuat gambar. Tunggu 1 detik atau gunakan Kamera Bawaan HP.');
+      return;
+    }
+    const rawW = video.videoWidth;
+    const rawH = video.videoHeight;
+    const maxDim = 800;
+    let w = rawW;
+    let h = rawH;
+    if (w > maxDim || h > maxDim) {
+      if (w > h) {
+        h = Math.round((h * maxDim) / w);
+        w = maxDim;
+      } else {
+        w = Math.round((w * maxDim) / h);
+        h = maxDim;
+      }
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    if (facingMode === 'user') {
+      ctx.translate(w, 0);
+      ctx.scale(-1, 1);
+    }
+    ctx.drawImage(video, 0, 0, w, h);
+    if (facingMode === 'user') {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+    }
+    setCameraCaptureFlash(true);
+    setTimeout(() => setCameraCaptureFlash(false), 180);
+
+    const captureExif = createExifMetadataFromDate(new Date(), 'CAMERA_CAPTURE_SENSOR');
+    applyWatermarkToCanvas(canvas, captureExif);
+    if (closeAfterCapture) {
+      stopLiveCamera();
+    }
+  };
+
+  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setIsCapturing(true);
+    setCameraError(null);
+    const fileArray = Array.from(files);
+    let processedCount = 0;
+    const markProcessed = () => {
+      processedCount += 1;
+      if (processedCount >= fileArray.length) {
+        setIsCapturing(false);
+      }
+    };
+
+    fileArray.forEach(file => {
+      extractExifFromFile(file)
+        .catch(() => createExifMetadataFromDate(new Date(), 'CAMERA_CAPTURE_SENSOR'))
+        .then(exifMeta => {
+          const reader = new FileReader();
+          reader.onerror = () => {
+            setCameraError('Gagal membaca file foto dari perangkat.');
+            markProcessed();
+          };
+          reader.onload = () => {
+            const img = new Image();
+            img.onerror = () => {
+              setCameraError('Format gambar tidak dapat diproses oleh browser.');
+              markProcessed();
+            };
+            img.onload = () => {
+              const canvas = document.createElement('canvas');
+              const maxDim = 800;
+              let w = img.width || 800;
+              let h = img.height || 600;
+              if (w > maxDim || h > maxDim) {
+                if (w > h) {
+                  h = Math.round((h * maxDim) / w);
+                  w = maxDim;
+                } else {
+                  w = Math.round((w * maxDim) / h);
+                  h = maxDim;
+                }
+              }
+              canvas.width = w;
+              canvas.height = h;
+
+              const ctx = canvas.getContext('2d');
+              if (ctx) {
+                ctx.drawImage(img, 0, 0, w, h);
+                applyWatermarkToCanvas(canvas, exifMeta);
+              }
+              markProcessed();
+            };
+            img.src = reader.result as string;
+          };
+          reader.readAsDataURL(file);
+        });
+    });
+
+    e.target.value = '';
+  };
+
+  const gmapsLink = effectivePreciseGps.gmapsUrl;
+
+  const getWhatsAppShareText = () => {
+    const categoryLabel =
+      category === 'kendala_jalan' && reportSubMode === 'antri_customer'
+        ? '⏳ LAPORAN ANTRI DI CUSTOMER'
+        : category === 'kendala_jalan'
+        ? '🚨 LAPORAN KENDALA DI JALAN'
+        : category === 'isi_bbm'
+        ? `⛽ LAPORAN PENGISIAN BBM (SOLAR) - ${fuelLocation.toUpperCase()}`
+        : category === 'retur'
+        ? '🔄 LAPORAN BARANG RETUR'
+        : category === 'kurang_muat'
+        ? '📦 LAPORAN KURANG MUAT BARANG'
+        : category === 'lebih_muat'
+        ? '📦+ LAPORAN LEBIH MUAT BARANG'
+        : category === 'salah_muat'
+        ? '⚠️ LAPORAN SALAH MUAT BARANG'
+        : category === 'akhir_kiriman'
+        ? '📦 LAPORAN AKHIR KIRIMAN (SELESAI BONGKAR)'
+        : '✅ ABSEN KIRIMAN KE PELANGGAN';
+
+    const customerLine =
+      category === 'istirahat' && customerNameInput.trim()
+        ? `*Nama Pelanggan:* ${customerNameInput.trim()} (${effectivePreciseGps.subAreaLabel})\n`
+        : isItemIssueCategory
+        ? `${customerNameInput.trim() ? `*Nama Pelanggan / Toko:* ${customerNameInput.trim()}\n` : ''}${invoiceNumber.trim() ? `*No. Faktur / SO:* ${invoiceNumber.trim()}\n` : ''}${issueItemName.trim() ? `*Nama Barang:* ${issueItemName.trim()}${issueQty.trim() ? ` (${issueQty.trim()})` : ''}\n` : ''}`
+        : category === 'isi_bbm'
+        ? `*Lokasi SPBU:* ${fuelLocation}\n`
+        : '';
+
+    return encodeURIComponent(
+      `*${categoryLabel}*\n` +
+      (isHelperJobdesk
+        ? `*Helper (Pelapor):* ${actualReporterName}\n${resolvedTripDriverName && resolvedTripDriverName !== '-' ? `*Driver:* ${resolvedTripDriverName}\n` : ''}`
+        : `*Driver:* ${resolvedTripDriverName}\n${resolvedTripHelperName ? `*Helper:* ${resolvedTripHelperName}\n` : ''}`) +
+      `*Armada:* ${autoPlateNumber}${fleetInitial ? ` [Inisial: ${fleetInitial}]` : ''}\n` +
+      `*Area Kirim (Surat Jalan):* ${currentAreaName}\n` +
+      customerLine +
+      `*No. Surat Jalan:* ${currentWaybillNo}\n` +
+      `*Jumlah Foto Bukti:* ${photoList.length} Foto\n` +
+      (category !== 'isi_bbm' ? `*Keterangan:* ${notes || 'Dokumentasi terlampir'}\n` : '') +
+      `*Koordinat GPS Presisi:* ${effectivePreciseGps.coordsFormatted}\n` +
+      `*Titik Google Maps:* ${gmapsLink}\n` +
+      `*Waktu:* ${new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB`
+    );
+  };
+
+  const handleShareWhatsApp = () => {
+    const waUrl = `https://wa.me/?text=${getWhatsAppShareText()}`;
+    const a = document.createElement('a');
+    a.href = waUrl;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  const handleSubmit = () => {
+    setValidationError(null);
+
+    if (category === 'istirahat') {
+      if (!customerNameInput.trim()) {
+        setValidationError('Harap isi Nama Pelanggan / Toko terlebih dahulu untuk Absen Kiriman.');
+        return;
+      }
+      if (photoList.length === 0) {
+        setValidationError('Harap ambil minimal 1 Foto Bukti Kiriman ke Pelanggan terlebih dahulu.');
+        return;
+      }
+    }
+
+    if (category === 'isi_bbm') {
+      if (photoList.length === 0) {
+        setValidationError('Harap ambil atau unggah minimal 1 Foto Bukti Pengisian BBM (Solar) terlebih dahulu.');
+        return;
+      }
+    }
+
+    if (isItemIssueCategory) {
+      if (category === 'retur' && !customerNameInput.trim()) {
+        setValidationError('Harap isi Nama Pelanggan / Toko untuk laporan Barang Retur.');
+        return;
+      }
+      if (!issueItemName.trim()) {
+        setValidationError(
+          category === 'retur'
+            ? 'Harap pilih Nama Barang yang diretur dari daftar Database Barang.'
+            : category === 'kurang_muat'
+            ? 'Harap pilih Nama Barang yang kurang muat dari daftar Database Barang.'
+            : category === 'lebih_muat'
+            ? 'Harap pilih Nama Barang yang lebih muat dari daftar Database Barang.'
+            : 'Harap pilih Nama Barang yang salah muat dari daftar Database Barang.'
+        );
+        return;
+      }
+      if (photoList.length === 0) {
+        setValidationError(
+          category === 'retur'
+            ? 'Harap ambil atau unggah minimal 1 Foto Bukti Barang Retur terlebih dahulu.'
+            : category === 'kurang_muat'
+            ? 'Harap ambil atau unggah minimal 1 Foto Bukti Kurang Muat terlebih dahulu.'
+            : category === 'lebih_muat'
+            ? 'Harap ambil atau unggah minimal 1 Foto Bukti Lebih Muat terlebih dahulu.'
+            : 'Harap ambil atau unggah minimal 1 Foto Bukti Salah Muat terlebih dahulu.'
+        );
+        return;
+      }
+    }
+
+    const submittedNotes =
+      category === 'istirahat'
+        ? `[ABSEN KIRIMAN PELANGGAN: ${customerNameInput.trim()}] ${notes.trim() || 'Kiriman telah tiba dan diserahkan ke pelanggan.'}`
+        : category === 'isi_bbm'
+        ? `Pengisian BBM (Solar) di SPBU ${fuelLocation}${photoList.length > 1 ? ` (${photoList.length} Foto Bukti)` : ''}`
+        : isItemIssueCategory
+        ? notes.trim() || '-'
+        : notes.trim() || (category === 'akhir_kiriman' ? 'Selesai serah terima di area tujuan' : 'Laporan kendala pengiriman di jalan');
+
+    const submittedPhoto = photoList[0] || null;
+    const submittedPhotos = [...photoList];
+    const submittedCustomer =
+      category === 'istirahat' || isItemIssueCategory ? customerNameInput.trim() || undefined : undefined;
+    const finalLat = effectivePreciseGps.latitude;
+    const finalLng = effectivePreciseGps.longitude;
+    const finalGmapsUrl = effectivePreciseGps.gmapsUrl;
+
+    const primaryExif = photoExifList[0] || createExifMetadataFromDate();
+
+    driverReportService.addReport({
+      driverId: driverId || 'crew-driver',
+      driverName: resolvedTripDriverName,
+      helperName: resolvedTripHelperName || undefined,
+      reportedByName: actualReporterName,
+      userRole: isHelperJobdesk ? 'Helper' : 'Driver',
+      plateNumber: autoPlateNumber || '-',
+      category,
+      areaName: category === 'isi_bbm' ? `SPBU ${fuelLocation} (${currentAreaName})` : currentAreaName,
+      customerOutletName: submittedCustomer,
+      issueItemName: isItemIssueCategory ? issueItemName.trim() : undefined,
+      issueItemCode: isItemIssueCategory && issueItemCode ? issueItemCode : undefined,
+      issueItemUnit: isItemIssueCategory && issueItemUnit ? issueItemUnit : undefined,
+      issueQty: isItemIssueCategory ? issueQty.trim() || undefined : undefined,
+      invoiceNumber: isItemIssueCategory ? invoiceNumber.trim() || undefined : undefined,
+      validationDecision: isItemIssueCategory ? 'pending' : undefined,
+      gpsValidationStatus: isItemIssueCategory ? 'unchecked' : undefined,
+      fuelLocation: category === 'isi_bbm' ? fuelLocation : undefined,
+      exifMetadata: primaryExif,
+      deliveryId: activeDelivery?.id,
+      notes: submittedNotes,
+      photoUrl: submittedPhoto,
+      photoUrls: submittedPhotos,
+      latitude: finalLat,
+      longitude: finalLng,
+      gmapsUrl: finalGmapsUrl
+    });
+
+    resetFormFields();
+
+    onReportSubmitted({
+      category,
+      delivery: activeDelivery,
+      notes: submittedNotes,
+      photoUrl: submittedPhoto,
+      photoUrls: submittedPhotos,
+      distanceMeters: null,
+      isWithinRadius: true,
+      driverLat: finalLat,
+      driverLng: finalLng,
+      gmapsUrl: finalGmapsUrl,
+      plateNumber: autoPlateNumber,
+      areaName: category === 'isi_bbm' ? `SPBU ${fuelLocation}` : currentAreaName
+    });
+
+    onClose();
+  };
+
+  if (!isOpen || typeof document === 'undefined') return null;
+
+  const cameraCategoryTitle =
+    category === 'kendala_jalan' && reportSubMode === 'antri_customer'
+      ? 'ANTRI CUSTOMER'
+      : category === 'kendala_jalan'
+      ? 'KENDALA DI JALAN'
+      : category === 'isi_bbm'
+      ? `ISI BBM (${fuelLocation.toUpperCase()})`
+      : category === 'retur'
+      ? 'BARANG RETUR'
+      : category === 'kurang_muat'
+      ? 'KURANG MUAT'
+      : category === 'lebih_muat'
+      ? 'LEBIH MUAT'
+      : category === 'salah_muat'
+      ? 'SALAH MUAT'
+      : category === 'akhir_kiriman'
+      ? 'AKHIR KIRIMAN'
+      : 'ABSEN PELANGGAN';
+
+  return createPortal(
+    <>
+      {/* LIVE CAMERA OVERLAY WHEN TAKING PHOTO (High-Contrast Header & Bottom Bar + Multi-Photo Support) */}
+      {isCameraActive && (
+        <div className="fixed inset-0 z-[80] w-screen h-screen bg-slate-950 flex flex-col justify-between p-0 animate-in fade-in duration-150">
+          {/* Top Camera Bar - High Contrast & Clear Text */}
+          <div className="px-4 py-3 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shadow-md flex items-center justify-between gap-2 z-20">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                <Camera className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-black text-slate-900 dark:text-white tracking-wide">
+                    KAMERA • {cameraCategoryTitle}
+                  </span>
+                  {photoList.length > 0 && (
+                    <span className="px-2 py-0.5 rounded-full bg-emerald-600 text-white text-[10px] font-black">
+                      {photoList.length} Foto Tersimpan
+                    </span>
+                  )}
+                </div>
+                <div className="text-[11px] text-slate-600 dark:text-slate-300 font-semibold truncate">
+                  Area: {currentAreaName}{autoPlateNumber ? ` (${autoPlateNumber})` : ''}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={handleFlipCamera}
+                className="px-2.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-white border border-slate-300 dark:border-slate-700 font-bold text-[11px] flex items-center gap-1.5 cursor-pointer"
+                title="Balik Kamera"
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                <span className="hidden sm:inline">Balik</span>
+              </button>
+              <button
+                type="button"
+                onClick={stopLiveCamera}
+                className="p-2 rounded-xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-300 border border-rose-200 dark:border-rose-800 cursor-pointer"
+                title="Tutup Kamera"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Video Viewfinder */}
+          <div className="flex-1 relative w-full h-full flex items-center justify-center overflow-hidden bg-black">
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="w-full h-full object-cover"
+            />
+            {cameraCaptureFlash && (
+              <div className="absolute inset-0 bg-white/80 pointer-events-none z-30 transition-opacity duration-150" />
+            )}
+            <div className="absolute inset-5 pointer-events-none border border-white/40 rounded-2xl flex flex-col justify-between p-3">
+              <div className="flex justify-between">
+                <div className="w-6 h-6 border-t-2 border-l-2 border-blue-400" />
+                <div className="w-6 h-6 border-t-2 border-r-2 border-blue-400" />
+              </div>
+              <div className="flex justify-between">
+                <div className="w-6 h-6 border-b-2 border-l-2 border-blue-400" />
+                <div className="w-6 h-6 border-b-2 border-r-2 border-blue-400" />
+              </div>
+            </div>
+
+            {/* Thumbnail Strip of Captured Photos Inside Camera View (When > 0 photos) */}
+            {photoList.length > 0 && (
+              <div className="absolute bottom-3 left-3 right-3 z-20 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border border-slate-200 dark:border-slate-700 rounded-2xl p-2.5 shadow-xl">
+                <div className="flex items-center justify-between mb-1.5 px-1">
+                  <span className="text-[11px] font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                    <Images className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Daftar Foto Siap Dikirim ({photoList.length} Foto)</span>
+                  </span>
+                  <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                    Bisa potret lagi untuk tambah foto
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                  {photoList.map((imgUrl, idx) => (
+                    <div
+                      key={`cam-thumb-${idx}`}
+                      className="relative w-14 h-14 rounded-xl overflow-hidden border-2 border-blue-500 shrink-0 bg-black"
+                    >
+                      <img src={imgUrl} alt={`Foto ${idx + 1}`} className="w-full h-full object-cover" />
+                      <span className="absolute bottom-0.5 left-1 px-1 rounded bg-blue-600 text-white text-[8px] font-black">
+                        #{idx + 1}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removePhotoAtIndex(idx)}
+                        className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-rose-600 text-white flex items-center justify-center cursor-pointer"
+                        title="Hapus Foto Ini"
+                      >
+                        <X className="w-2.5 h-2.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Bottom Shutter Bar: Kiri Bawah = Tambah Foto | Tengah = Tombol Kamera | Kanan = Lanjut Kirim / Batal */}
+          <div className="px-4 py-4 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 shadow-2xl flex items-center justify-between gap-3 z-20">
+            {/* Sebelah Kiri Bawah: Fitur Tambah Foto */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  if (photoList.length === 0) {
+                    captureLivePhoto(false);
+                  } else {
+                    fileInputRef.current?.click();
+                  }
+                }}
+                className="px-3 py-2.5 rounded-xl bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 border border-blue-300 dark:border-blue-700 font-extrabold text-xs flex items-center gap-1.5 transition active:scale-95 cursor-pointer shadow-2xs"
+                title="Tambah Foto"
+              >
+                <Plus className="w-4 h-4 shrink-0" />
+                <span>Tambah Foto</span>
+                {photoList.length > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-blue-600 text-white text-[10px] font-black">
+                    {photoList.length}
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {/* Tengah: Tombol Potret Kamera */}
+            <button
+              type="button"
+              onClick={() => captureLivePhoto(false)}
+              className="w-16 h-16 sm:w-18 sm:h-18 rounded-full border-4 border-blue-600 dark:border-blue-400 p-1 flex items-center justify-center shadow-lg active:scale-90 transition cursor-pointer shrink-0 bg-white dark:bg-slate-900"
+              title="Potret Foto"
+            >
+              <div className="w-full h-full rounded-full bg-blue-600 hover:bg-blue-500 flex items-center justify-center text-white">
+                <Camera className="w-7 h-7" />
+              </div>
+            </button>
+
+            {/* Sebelah Kanan Bawah: Tombol Kirim / Gunakan (jika sudah ada foto) atau Batal */}
+            <div className="flex items-center gap-2">
+              {photoList.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={stopLiveCamera}
+                  className="px-3.5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center gap-1.5 shadow-md transition active:scale-95 cursor-pointer"
+                >
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <span>Gunakan ({photoList.length} Foto)</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={stopLiveCamera}
+                  className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-extrabold border border-slate-300 dark:border-slate-700 cursor-pointer"
+                >
+                  Batal
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PHOTO PREVIEW MODAL (Mendukung Multi-Foto) */}
+      {isFullPhotoPreviewOpen && photoDataUrl && (
+        <div
+          className="fixed inset-0 z-[85] w-screen h-screen bg-black/95 flex flex-col justify-between p-4 animate-in fade-in duration-150"
+          onClick={() => setIsFullPhotoPreviewOpen(false)}
+        >
+          <div className="flex items-center justify-between" onClick={e => e.stopPropagation()}>
+            <span className="text-xs font-bold text-slate-900 dark:text-white bg-white dark:bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700">
+              Pratinjau Foto Bukti ({activePhotoIndex + 1} / {photoList.length})
+            </span>
+            <button
+              type="button"
+              onClick={() => setIsFullPhotoPreviewOpen(false)}
+              className="p-2.5 rounded-full bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-bold cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <div className="flex-1 flex items-center justify-center overflow-hidden my-2">
+            <img
+              src={photoDataUrl}
+              alt="Bukti"
+              className="w-full h-full object-contain"
+            />
+          </div>
+          {photoList.length > 1 && (
+            <div className="flex items-center justify-center gap-2 pb-2" onClick={e => e.stopPropagation()}>
+              {photoList.map((u, idx) => (
+                <button
+                  key={`full-prev-${idx}`}
+                  type="button"
+                  onClick={() => setActivePhotoIndex(idx)}
+                  className={`w-12 h-12 rounded-xl overflow-hidden border-2 cursor-pointer ${
+                    idx === activePhotoIndex ? 'border-blue-500 scale-105' : 'border-white/30 opacity-70'
+                  }`}
+                >
+                  <img src={u} alt={`Thumb ${idx + 1}`} className="w-full h-full object-cover" />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
+        <div className="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-2xl flex flex-col max-h-[92vh] shadow-2xl overflow-hidden">
+          
+          {/* Header - Clean Cohesive Design */}
+          <div className="p-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-sm font-black shrink-0">
+                <Share2 className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-sm font-black text-white">
+                    Laporan BBM, Kendala, Absen &amp; Barang
+                  </h3>
+                </div>
+                <p className="text-[11px] text-slate-400 font-medium">
+                  Unggah foto bukti pengisian BBM, kendala rute, absen pelanggan, retur, kurang muat, lebih muat, atau salah muat
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={() => {
+                resetFormFields();
+                onClose();
+              }}
+              className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* Scrollable Body */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
+            
+            {/* Category Selector Tabs */}
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                Pilih Kategori:
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetFormFields();
+                    setCategory('isi_bbm');
+                    setReportSubMode('kendala_umum');
+                  }}
+                  className={`py-2.5 px-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                    category === 'isi_bbm'
+                      ? 'bg-amber-600 border-amber-500 text-white shadow-xs'
+                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Fuel className="w-3.5 h-3.5 shrink-0" />
+                  <span>Isi BBM</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetFormFields();
+                    setCategory('kendala_jalan');
+                    setReportSubMode('kendala_umum');
+                  }}
+                  className={`py-2.5 px-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                    category === 'kendala_jalan'
+                      ? 'bg-rose-600 border-rose-500 text-white shadow-xs'
+                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                  <span>Kendala</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    resetFormFields();
+                    setCategory('istirahat');
+                    setReportSubMode('kendala_umum');
+                  }}
+                  className={`py-2.5 px-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                    category === 'istirahat' || category === 'update_lokasi'
+                      ? 'bg-blue-600 border-blue-500 text-white shadow-xs'
+                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Store className="w-3.5 h-3.5 shrink-0" />
+                  <span>Absen Pelanggan</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!isItemIssueCategory) {
+                      resetFormFields();
+                      setCategory('retur');
+                      setReportSubMode('kendala_umum');
+                    }
+                  }}
+                  className={`py-2.5 px-2.5 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                    isItemIssueCategory
+                      ? 'bg-indigo-600 border-indigo-500 text-white shadow-xs'
+                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <PackageX className="w-3.5 h-3.5 shrink-0" />
+                  <span>Upload Kesalahan</span>
+                </button>
+              </div>
+            </div>
+
+            {validationError && (
+              <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/40 text-rose-300 text-xs font-bold flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>{validationError}</span>
+              </div>
+            )}
+
+            {/* ⛽ FITUR ISI BBM (SOLAR) DI FARLY / GAJAH MADA */}
+            {category === 'isi_bbm' && (
+              <div className="p-3.5 rounded-2xl border bg-slate-950 border-amber-500/30 space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0">
+                    <Fuel className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="font-black text-white text-xs">
+                      Pengisian BBM (Solar) Armada
+                    </div>
+                    <p className="text-[10px] text-slate-400">
+                      Pilih lokasi pengisian BBM (Farly / Gajah Mada / SPBU Lain) dan unggah foto bukti pengisian solar
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5 relative">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300 block">
+                    Pilih Lokasi Pengisian BBM (Solar) *
+                  </label>
+
+                  {/* Custom Styled Dropdown Trigger */}
+                  <button
+                    type="button"
+                    onClick={() => setIsFuelDropdownOpen(prev => !prev)}
+                    className={`w-full rounded-xl bg-slate-900 border px-3.5 py-2.5 text-xs font-bold text-white flex items-center justify-between gap-2 transition cursor-pointer shadow-xs ${
+                      isFuelDropdownOpen
+                        ? 'border-amber-400 ring-2 ring-amber-500/20'
+                        : 'border-amber-500/40 hover:border-amber-400/80'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div
+                        className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 border ${
+                          fuelLocation === 'Farly'
+                            ? 'bg-amber-500/15 border-amber-500/40 text-amber-400'
+                            : fuelLocation === 'Gajah Mada'
+                            ? 'bg-blue-500/15 border-blue-500/40 text-blue-400'
+                            : 'bg-rose-500/15 border-rose-500/40 text-rose-400'
+                        }`}
+                      >
+                        <Fuel className="w-3.5 h-3.5" />
+                      </div>
+                      <div className="text-left min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-black text-white truncate">
+                            {fuelLocation}
+                          </span>
+                          {fuelLocation !== 'Farly' && fuelLocation !== 'Gajah Mada' && (
+                            <span className="px-1.5 py-0.2 rounded text-[9px] font-bold border bg-rose-500/20 text-rose-300 border-rose-500/30">
+                              Kondisi Urgent
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-normal truncate">
+                          {fuelLocation === 'Farly'
+                            ? 'Pos Pengisian Solar Reguler Farly • Banyuwangi'
+                            : fuelLocation === 'Gajah Mada'
+                            ? 'Pos Pengisian Solar Gajah Mada • Banyuwangi'
+                            : 'Pengisian Darurat Rute Luar Kota / Lintas Pulau'}
+                        </div>
+                      </div>
+                    </div>
+                    <ChevronDown
+                      className={`w-4 h-4 text-amber-400 shrink-0 transition-transform duration-200 ${
+                        isFuelDropdownOpen ? 'rotate-180' : ''
+                      }`}
+                    />
+                  </button>
+
+                  {/* Custom Dropdown List Menu */}
+                  {isFuelDropdownOpen && (
+                    <div className="mt-1.5 rounded-xl bg-slate-900 border border-slate-700/90 shadow-2xl overflow-hidden divide-y divide-slate-800/80 animate-in fade-in zoom-in-95 duration-150">
+                      {([
+                        {
+                          value: 'Farly' as const,
+                          title: 'Farly',
+                          badge: '',
+                          subtitle: 'Pos Pengisian Solar Reguler Farly • Banyuwangi',
+                          iconBg: 'bg-amber-500/15 border-amber-500/40 text-amber-400',
+                          badgeCls: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+                          activeBg: 'bg-amber-500/10'
+                        },
+                        {
+                          value: 'Gajah Mada' as const,
+                          title: 'Gajah Mada',
+                          badge: '',
+                          subtitle: 'Pos Pengisian Solar Gajah Mada • Banyuwangi',
+                          iconBg: 'bg-blue-500/15 border-blue-500/40 text-blue-400',
+                          badgeCls: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
+                          activeBg: 'bg-blue-500/10'
+                        },
+                        {
+                          value: 'SPBU Lain (Urgent)' as const,
+                          title: 'SPBU Lain (Urgent)',
+                          badge: 'Darurat / Urgent',
+                          subtitle: 'Pengisian BBM Solar Darurat di Rute Perjalanan',
+                          iconBg: 'bg-rose-500/15 border-rose-500/40 text-rose-400',
+                          badgeCls: 'bg-rose-500/20 text-rose-300 border-rose-500/30',
+                          activeBg: 'bg-rose-500/10'
+                        }
+                      ]).map(opt => {
+                        const isSelected = fuelLocation === opt.value;
+                        return (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            onClick={() => {
+                              setFuelLocation(opt.value);
+                              setIsFuelDropdownOpen(false);
+                            }}
+                            className={`w-full px-3.5 py-2.5 text-left flex items-center justify-between gap-2.5 transition cursor-pointer ${
+                              isSelected ? opt.activeBg : 'hover:bg-slate-800/80'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 border ${opt.iconBg}`}>
+                                <MapPin className="w-3.5 h-3.5" />
+                              </div>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className={`text-xs font-black ${isSelected ? 'text-white' : 'text-slate-200'}`}>
+                                    {opt.title}
+                                  </span>
+                                  {opt.badge && (
+                                    <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold border ${opt.badgeCls}`}>
+                                      {opt.badge}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[10px] text-slate-400 truncate mt-0.5">
+                                  {opt.subtitle}
+                                </div>
+                              </div>
+                            </div>
+                            <div
+                              className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 border ${
+                                isSelected
+                                  ? 'bg-amber-500 border-amber-400 text-slate-950'
+                                  : 'border-slate-700 bg-slate-950 text-transparent'
+                              }`}
+                            >
+                              <Check className="w-3 h-3 stroke-[3]" />
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* 📦 FITUR ABSEN SETIAP KIRIMAN KE PELANGGAN */}
+            {category === 'istirahat' && (
+              <div className="p-3.5 rounded-2xl border bg-slate-950 border-slate-800 space-y-2.5">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-blue-500/15 border border-blue-500/30 text-blue-400 flex items-center justify-center shrink-0">
+                    <Store className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="font-black text-white text-xs">
+                      Absen Setiap Kiriman ke Pelanggan
+                    </div>
+                    <p className="text-[10px] text-slate-400">
+                      Isi nama pelanggan/toko yang dikirimi barang beserta foto bukti penyerahan kiriman
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300">
+                    Nama Pelanggan / Toko Tujuan Kiriman *
+                  </label>
+                  <input
+                    type="text"
+                    value={customerNameInput}
+                    onChange={(e) => {
+                      setCustomerNameInput(e.target.value);
+                      if (validationError) setValidationError(null);
+                    }}
+                    placeholder="Contoh: KDS / Muzaki / Toko Aza / Toko Grosir Makmur"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white font-semibold focus:outline-none focus:border-blue-500 placeholder-slate-500"
+                  />
+                </div>
+
+              </div>
+            )}
+
+            {/* 🔄📦⚠️ FITUR UPLOAD KESALAHAN (RETUR, KURANG MUAT, LEBIH MUAT & SALAH MUAT) */}
+            {isItemIssueCategory && (
+              <div className={`p-3.5 rounded-2xl border bg-slate-950 space-y-3 ${
+                category === 'retur'
+                  ? 'border-purple-500/35'
+                  : category === 'kurang_muat'
+                  ? 'border-orange-500/35'
+                  : category === 'lebih_muat'
+                  ? 'border-teal-500/35'
+                  : 'border-red-500/35'
+              }`}>
+                <div className="flex items-center gap-2.5">
+                  <div className={`w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 ${
+                    category === 'retur'
+                      ? 'bg-purple-500/15 border-purple-500/30 text-purple-400'
+                      : category === 'kurang_muat'
+                      ? 'bg-orange-500/15 border-orange-500/30 text-orange-400'
+                      : category === 'lebih_muat'
+                      ? 'bg-teal-500/15 border-teal-500/30 text-teal-400'
+                      : 'bg-red-500/15 border-red-500/30 text-red-400'
+                  }`}>
+                    {category === 'retur' ? (
+                      <RotateCcw className="w-4 h-4" />
+                    ) : category === 'kurang_muat' ? (
+                      <PackageMinus className="w-4 h-4" />
+                    ) : category === 'lebih_muat' ? (
+                      <PackagePlus className="w-4 h-4" />
+                    ) : (
+                      <PackageX className="w-4 h-4" />
+                    )}
+                  </div>
+                  <div>
+                    <div className="font-black text-white text-xs">
+                      Upload Kesalahan Barang ({category === 'retur'
+                        ? 'Retur'
+                        : category === 'kurang_muat'
+                        ? 'Kurang Muat'
+                        : category === 'lebih_muat'
+                        ? 'Lebih Muat'
+                        : 'Salah Muat'})
+                    </div>
+                    <p className="text-[10px] text-slate-400">
+                      Pilih kategori kesalahan di bawah dan lampirkan foto bukti untuk divalidasi Admin Penjualan &amp; SPV Logistik.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Dropdown Pilihan Kategori Upload Kesalahan */}
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300">
+                    Pilih Jenis Kesalahan *
+                  </label>
+                  <select
+                    value={category}
+                    onChange={(e) => {
+                      setCategory(e.target.value as GmapsReportCategory);
+                      if (validationError) setValidationError(null);
+                    }}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs text-white font-bold focus:outline-none focus:border-indigo-500 cursor-pointer"
+                  >
+                    <option value="retur">Retur</option>
+                    <option value="kurang_muat">Kurang Muat</option>
+                    <option value="lebih_muat">Lebih Muat</option>
+                    <option value="salah_muat">Salah Muat</option>
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300">
+                      Nama Pelanggan / Toko {category === 'retur' ? '*' : '(Opsional)'}
+                    </label>
+                    <input
+                      type="text"
+                      value={customerNameInput}
+                      onChange={(e) => {
+                        setCustomerNameInput(e.target.value);
+                        if (validationError) setValidationError(null);
+                      }}
+                      placeholder="Contoh: Toko Sumber Makmur / KDS"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-semibold focus:outline-none focus:border-blue-500 placeholder-slate-500"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300">
+                      No. Faktur / SO (Opsional)
+                    </label>
+                    <input
+                      type="text"
+                      value={invoiceNumber}
+                      onChange={(e) => setInvoiceNumber(e.target.value)}
+                      placeholder="Contoh: FJ02-1126-0615"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-semibold focus:outline-none focus:border-blue-500 placeholder-slate-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2.5">
+                  <div className="space-y-1 relative">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300 block">
+                      Nama Barang / Item Bermasalah *
+                    </label>
+
+                    {/* Dropdown Trigger untuk Nama Barang */}
+                    <button
+                      type="button"
+                      onClick={() => setIsBarangDropdownOpen(prev => !prev)}
+                      className={`w-full bg-slate-900 border rounded-xl px-3 py-2 text-xs text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                        isBarangDropdownOpen
+                          ? 'border-blue-500 ring-2 ring-blue-500/20'
+                          : 'border-slate-700 hover:border-slate-500'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <Package className={`w-3.5 h-3.5 shrink-0 ${issueItemName ? 'text-blue-400' : 'text-slate-500'}`} />
+                        {issueItemName ? (
+                          <span className="text-white font-bold truncate">
+                            {issueItemName}
+                          </span>
+                        ) : (
+                          <span className="text-slate-500 font-medium truncate">
+                            Pilih atau cari nama barang...
+                          </span>
+                        )}
+                      </div>
+                      <ChevronDown
+                        className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-150 ${
+                          isBarangDropdownOpen ? 'rotate-180 text-blue-400' : ''
+                        }`}
+                      />
+                    </button>
+
+                    {/* Dropdown Panel Nama Barang Full-Width */}
+                    {isBarangDropdownOpen && (
+                      <div className="mt-1.5 w-full rounded-xl bg-slate-900 border border-slate-700 shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 z-30">
+                        <div className="p-2 bg-slate-950 border-b border-slate-800">
+                          <div className="relative flex items-center">
+                            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 pointer-events-none" />
+                            <input
+                              type="text"
+                              value={barangSearchQuery}
+                              onChange={(e) => setBarangSearchQuery(e.target.value)}
+                              placeholder="Cari nama barang..."
+                              autoFocus
+                              className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-8 pr-8 py-1.5 text-xs text-white font-semibold focus:outline-none focus:border-blue-500 placeholder-slate-500"
+                            />
+                            {barangSearchQuery && (
+                              <button
+                                type="button"
+                                onClick={() => setBarangSearchQuery('')}
+                                className="absolute right-2.5 text-slate-400 hover:text-white cursor-pointer"
+                                title="Bersihkan pencarian"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                          {(isLoadingDbBarang || barangSearchQuery.trim() || issueItemName) && (
+                            <div className="mt-1.5 flex items-center justify-between text-[10px] text-slate-400 px-1">
+                              <span>
+                                {isLoadingDbBarang
+                                  ? 'Memuat daftar barang...'
+                                  : barangSearchQuery.trim()
+                                  ? `Ditemukan ${filteredDbBarangItems.length} barang sesuai pencarian`
+                                  : ''}
+                              </span>
+                              {issueItemName && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setIssueItemName('');
+                                    setIssueItemCode('');
+                                    setIssueItemUnit('');
+                                  }}
+                                  className="text-rose-400 hover:underline font-bold cursor-pointer"
+                                >
+                                  Reset Pilihan
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* List Keterangan Item Barang Saja */}
+                        <div className="max-h-56 overflow-y-auto divide-y divide-slate-800/80">
+                          {filteredDbBarangItems.length > 0 ? (
+                            filteredDbBarangItems.map((item) => {
+                              const formattedLabel = `${item.deskripsiBarang}`;
+                              const isSelected =
+                                (issueItemCode && issueItemCode === item.noBarang) ||
+                                issueItemName === formattedLabel ||
+                                issueItemName === `${item.deskripsiBarang} [${item.noBarang}]`;
+                              const unitLabel = item.unit1 || item.satuan || 'Pcs';
+                              return (
+                                <button
+                                  key={item.id || item.noBarang}
+                                  type="button"
+                                  onClick={() => {
+                                    setIssueItemName(formattedLabel);
+                                    setIssueItemCode(item.noBarang);
+                                    setIssueItemUnit(unitLabel);
+                                    setIsBarangDropdownOpen(false);
+                                    if (validationError) setValidationError(null);
+                                  }}
+                                  className={`w-full px-3 py-2.5 text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                                    isSelected
+                                      ? 'bg-blue-600/15 text-blue-300 font-bold'
+                                      : 'hover:bg-slate-800/80 text-white font-medium'
+                                  }`}
+                                >
+                                  <span className="text-xs leading-snug break-words flex-1">
+                                    {item.deskripsiBarang}
+                                  </span>
+                                  {isSelected && (
+                                    <Check className="w-3.5 h-3.5 text-blue-400 shrink-0 stroke-[2.5]" />
+                                  )}
+                                </button>
+                              );
+                            })
+                          ) : (
+                            <div className="p-4 text-center text-slate-400 space-y-1">
+                              <div className="text-xs font-bold text-slate-300">
+                                {isLoadingDbBarang
+                                  ? 'Sedang memuat daftar barang...'
+                                  : 'Barang tidak ditemukan'}
+                              </div>
+                              <p className="text-[10px] text-slate-500">
+                                Ketik nama barang di kolom pencarian di atas atau gunakan tombol di bawah.
+                              </p>
+                            </div>
+                          )}
+
+                          {/* Opsi Gunakan Kata Kunci Pencarian Manual jika item khusus */}
+                          {barangSearchQuery.trim() && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIssueItemName(barangSearchQuery.trim());
+                                setIssueItemCode('');
+                                setIssueItemUnit('');
+                                setIsBarangDropdownOpen(false);
+                                if (validationError) setValidationError(null);
+                              }}
+                              className="w-full px-3 py-2.5 bg-slate-950 hover:bg-slate-800 text-left flex items-center justify-between gap-2 text-blue-300 font-bold text-xs cursor-pointer"
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <Plus className="w-3.5 h-3.5 shrink-0 text-blue-400" />
+                                <span className="truncate">
+                                  Gunakan nama barang: &ldquo;{barangSearchQuery.trim()}&rdquo;
+                                </span>
+                              </div>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 border border-blue-500/30 shrink-0">
+                                Pilih Manual
+                              </span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-slate-300 block">
+                      Jumlah / Qty
+                    </label>
+                    <input
+                      type="text"
+                      value={issueQty}
+                      onChange={(e) => setIssueQty(e.target.value)}
+                      placeholder={issueItemUnit ? `Cth: 2 ${issueItemUnit}` : 'Cth: 2 Bal / 5 Pcs'}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-semibold focus:outline-none focus:border-blue-500 placeholder-slate-500"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Nomor Kendaraan Armada */}
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
+                <span>Nomor Kendaraan Armada:</span>
+                {autoPlateNumber && (
+                  <span className="text-[10px] text-slate-400 font-semibold">✓ Sesuai Check-In</span>
+                )}
+              </label>
+              <div className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <Truck className={`w-4 h-4 ${autoPlateNumber ? 'text-blue-400' : 'text-slate-500'}`} />
+                  {autoPlateNumber ? (
+                    <>
+                      <span className="font-mono font-bold text-white text-sm">{autoPlateNumber}</span>
+                      {fleetInitial && (
+                        <span className="px-2 py-0.5 rounded-lg bg-slate-800 text-slate-200 border border-slate-700 text-[11px] font-bold">
+                          Inisial: {fleetInitial}
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-slate-400 font-medium">
+                      Belum terisi (lakukan Check-In &amp; Checklist dulu)
+                    </span>
+                  )}
+                </div>
+                {autoPlateNumber && (
+                  <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 border border-slate-700 text-[10px] font-semibold">
+                    Terkunci Otomatis
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {selectableDeliveries.length > 0 && (
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  Ritase / Area Kirim yang Dilaporkan
+                </label>
+                <select
+                  value={activeDelivery?.id || ''}
+                  onChange={e => setSelectedDeliveryId(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-xs font-bold text-white focus:outline-none focus:border-blue-500 cursor-pointer"
+                >
+                  {selectableDeliveries.map(delivery => (
+                    <option key={delivery.id} value={delivery.id}>
+                      {(delivery.areaName || delivery.store?.storeName || delivery.trackingNumber)} • {(delivery.fleet?.plateNumber || delivery.armada || '-')}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-slate-500">
+                  Pastikan area kiriman sesuai jadwal Anda (Driver: {resolvedTripDriverName}{resolvedTripHelperName ? ` • Helper: ${resolvedTripHelperName}` : ''}).
+                </p>
+              </div>
+            )}
+
+            {/* NAMA AREA KIRIM */}
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
+                <span>Nama Area Kirim:</span>
+                <span className="text-[10px] text-slate-400 font-semibold">✓ Sesuai Surat Jalan</span>
+              </label>
+              <div className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <MapPin className="w-4 h-4 text-blue-400 shrink-0" />
+                  <div className="min-w-0">
+                    <div className="font-bold text-white text-xs truncate">
+                      {currentAreaName}
+                    </div>
+                    <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1 mt-0.5">
+                      <FileText className="w-3 h-3 text-slate-400 shrink-0" />
+                      <span>No. SJ: {currentWaybillNo}</span>
+                    </div>
+                  </div>
+                </div>
+                <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 border border-slate-700 text-[10px] font-semibold shrink-0">
+                  Terkunci Otomatis
+                </span>
+              </div>
+            </div>
+
+            {/* Photo Capture & Multi-Photo Upload Section */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                  <span>
+                    {category === 'istirahat'
+                      ? 'Foto Bukti Kiriman ke Pelanggan (Kamera) *:'
+                      : category === 'retur'
+                      ? 'Foto Bukti Barang Retur (Kamera / Upload) *:'
+                      : category === 'kurang_muat'
+                      ? 'Foto Bukti Kurang Muat (Kamera / Upload) *:'
+                      : category === 'lebih_muat'
+                      ? 'Foto Bukti Lebih Muat (Kamera / Upload) *:'
+                      : category === 'salah_muat'
+                      ? 'Foto Bukti Salah Muat (Kamera / Upload) *:'
+                      : 'Unggah Foto Bukti (Kamera):'}
+                  </span>
+                  {photoList.length > 0 && (
+                    <span className="px-2 py-0.5 rounded-full bg-blue-600 text-white text-[9px] font-black">
+                      {photoList.length} Foto Siap Kirim
+                    </span>
+                  )}
+                </label>
+                {photoList.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPhotoList([]);
+                      setActivePhotoIndex(0);
+                    }}
+                    className="text-[10px] text-rose-400 font-bold hover:underline cursor-pointer flex items-center gap-1"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    <span>Hapus Semua ({photoList.length})</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Accessible Native Device Camera Trigger */}
+              <input
+                id="gmaps-native-camera-input"
+                type="file"
+                ref={cameraInputRef}
+                accept="image/*"
+                capture="environment"
+                onChange={handlePhotoUpload}
+                className="sr-only"
+              />
+
+              {/* Accessible Gallery / File Picker (Multiple Supported) */}
+              <input
+                id="gmaps-gallery-input"
+                type="file"
+                ref={fileInputRef}
+                accept="image/*"
+                multiple
+                onChange={handlePhotoUpload}
+                className="sr-only"
+              />
+
+              {/* ERROR ALERT IF CAMERA PERMISSION DENIED */}
+              {cameraError && !isCameraActive && (
+                <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 text-slate-300 space-y-2">
+                  <div className="flex items-start gap-2">
+                    <CameraOff className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <div className="text-[11px] leading-relaxed flex-1">
+                      <span className="font-bold text-white block">Akses Kamera Perangkat Terkendala</span>
+                      {cameraError}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-800">
+                    <label
+                      htmlFor="gmaps-native-camera-input"
+                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] flex items-center gap-1.5 cursor-pointer active:scale-95 transition"
+                    >
+                      <Camera className="w-3.5 h-3.5" />
+                      <span>Kamera Bawaan HP</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => startLiveCamera()}
+                      className="px-3 py-1.5 rounded-lg bg-blue-600 text-white font-bold text-[11px] flex items-center gap-1.5 cursor-pointer hover:bg-blue-500 active:scale-95 transition"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      <span>Coba Live Camera</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {photoList.length > 0 ? (
+                <div className="rounded-2xl overflow-hidden border border-slate-700 bg-slate-950 shadow-sm space-y-2.5 p-2.5">
+                  {/* Pratinjau Foto Utama */}
+                  <div className="relative rounded-xl overflow-hidden bg-black border border-slate-800">
+                    <img
+                      src={photoDataUrl || photoList[0]}
+                      alt={`Foto Bukti ${activePhotoIndex + 1}`}
+                      onClick={() => setIsFullPhotoPreviewOpen(true)}
+                      className="w-full max-h-60 object-contain bg-black cursor-pointer"
+                    />
+                    <div className="absolute top-2 left-2 bg-white/95 dark:bg-slate-900/95 px-2.5 py-1 rounded-lg text-[10px] text-emerald-700 dark:text-emerald-400 font-black flex items-center gap-1 border border-emerald-500/40 shadow-sm">
+                      <CheckCircle2 className="w-3 h-3" />
+                      <span>
+                        Foto #{activePhotoIndex + 1} dari {photoList.length} • Siap Kirim
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsFullPhotoPreviewOpen(true)}
+                      className="absolute top-2 right-2 bg-white/95 dark:bg-slate-900/95 text-slate-900 dark:text-white px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 border border-slate-300 dark:border-slate-700 cursor-pointer shadow-sm"
+                    >
+                      <Maximize2 className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+                      <span>Perbesar</span>
+                    </button>
+                  </div>
+
+                  {/* EXIF Tag Metadata Kunci (Tanggal & Waktu) */}
+                  <ExifMetadataBadge exif={activePhotoExif} />
+
+                  {/* Galeri Thumbnail Semua Foto (Menampilkan 1 atau Lebih dari 1 Foto) */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-[10px] text-slate-400 px-0.5">
+                      <span className="font-bold">
+                        Daftar Foto Lampiran ({photoList.length} Foto):
+                      </span>
+                      <span>Ketuk foto untuk memilih / perbesar</span>
+                    </div>
+                    <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                      {photoList.map((imgUrl, idx) => (
+                        <div
+                          key={`preview-thumb-${idx}`}
+                          onClick={() => setActivePhotoIndex(idx)}
+                          className={`relative w-16 h-16 rounded-xl overflow-hidden border-2 shrink-0 cursor-pointer transition ${
+                            idx === activePhotoIndex
+                              ? 'border-blue-500 ring-2 ring-blue-500/30'
+                              : 'border-slate-700 opacity-80 hover:opacity-100'
+                          }`}
+                        >
+                          <img src={imgUrl} alt={`Lampiran ${idx + 1}`} className="w-full h-full object-cover" />
+                          <span className="absolute bottom-0.5 left-1 px-1 rounded bg-blue-600 text-white text-[8px] font-black">
+                            #{idx + 1}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removePhotoAtIndex(idx);
+                            }}
+                            className="absolute top-0.5 right-0.5 w-4 h-4 rounded-full bg-rose-600 text-white flex items-center justify-center cursor-pointer shadow"
+                            title="Hapus Foto Ini"
+                          >
+                            <X className="w-2.5 h-2.5" />
+                          </button>
+                        </div>
+                      ))}
+
+                      {/* Tombol Cepat + Ambil Foto di dalam Galeri */}
+                      <label
+                        htmlFor="gmaps-native-camera-input"
+                        className="w-16 h-16 rounded-xl border-2 border-dashed border-blue-500/50 hover:border-blue-500 bg-blue-500/10 text-blue-500 flex flex-col items-center justify-center gap-0.5 shrink-0 cursor-pointer transition"
+                        title="Ambil Foto"
+                      >
+                        <Camera className="w-4 h-4" />
+                        <span className="text-[9px] font-black text-center leading-tight">Ambil Foto</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Baris Bawah Kiri: Tombol Tambah Foto (Upload Foto / Ambil Foto) */}
+                  <div className="pt-2 border-t border-slate-800 flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <label
+                        htmlFor="gmaps-gallery-input"
+                        className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-[11px] flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                      >
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>Upload Foto</span>
+                      </label>
+                      <label
+                        htmlFor="gmaps-native-camera-input"
+                        className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-400 font-bold text-[11px] border border-slate-700 flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Camera className="w-3.5 h-3.5" />
+                        <span>Ambil Foto</span>
+                      </label>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => removePhotoAtIndex(activePhotoIndex)}
+                      className="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-rose-400 font-bold text-[10px] border border-slate-700 cursor-pointer"
+                    >
+                      Hapus Foto #{activePhotoIndex + 1}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <label
+                    htmlFor="gmaps-gallery-input"
+                    className="w-full p-4 rounded-2xl border-2 border-dashed border-slate-700 hover:border-blue-500 bg-slate-950 hover:bg-slate-900 flex items-center justify-center gap-3 cursor-pointer transition text-center group active:scale-95"
+                  >
+                    <div className="w-11 h-11 rounded-full bg-blue-600/15 border border-blue-500/30 flex items-center justify-center text-blue-400 group-hover:scale-105 transition shrink-0">
+                      <Upload className="w-5 h-5" />
+                    </div>
+                    <div className="text-left">
+                      <div className="font-black text-white text-sm">
+                        Upload Foto
+                      </div>
+                      <div className="text-[11px] text-slate-400 font-medium mt-0.5">
+                        Pilih 1 atau beberapa foto galeri
+                      </div>
+                    </div>
+                  </label>
+
+                  <label
+                    htmlFor="gmaps-native-camera-input"
+                    className="w-full p-4 rounded-2xl border-2 border-dashed border-slate-700 hover:border-amber-500 bg-slate-950 hover:bg-slate-900 flex items-center justify-center gap-3 cursor-pointer transition text-center group active:scale-95"
+                  >
+                    <div className="w-11 h-11 rounded-full bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 group-hover:scale-105 transition shrink-0">
+                      <Camera className="w-5 h-5" />
+                    </div>
+                    <div className="text-left">
+                      <div className="font-black text-white text-sm">
+                        Ambil Foto
+                      </div>
+                      <div className="text-[11px] text-slate-400 font-medium mt-0.5">
+                        {category === 'istirahat'
+                          ? 'Foto penyerahan kiriman (bisa >1 foto)'
+                          : category === 'isi_bbm'
+                          ? `Foto isi BBM (${fuelLocation})`
+                          : category === 'retur'
+                          ? 'Foto bukti barang retur (bisa >1 foto)'
+                          : category === 'kurang_muat'
+                          ? 'Foto bukti kurang muat (bisa >1 foto)'
+                          : category === 'lebih_muat'
+                          ? 'Foto bukti lebih muat (bisa >1 foto)'
+                          : category === 'salah_muat'
+                          ? 'Foto bukti salah muat (bisa >1 foto)'
+                          : 'Ambil foto bukti kamera (bisa >1 foto)'}
+                      </div>
+                    </div>
+                  </label>
+                </div>
+              )}
+            </div>
+
+            {/* Notes Input (Hidden for Isi BBM per user request) */}
+            {category !== 'isi_bbm' && (
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                  {category === 'istirahat'
+                    ? 'Catatan Kiriman Pelanggan (Opsional):'
+                    : isItemIssueCategory
+                    ? 'Kronologi / Keterangan Tambahan (Opsional):'
+                    : 'Keterangan / Catatan Laporan:'}
+                </label>
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder={
+                    category === 'kendala_jalan' && reportSubMode === 'antri_customer'
+                      ? 'Contoh: Sedang mengantri bongkar di gudang customer karena ada 2 armada di depan...'
+                      : category === 'kendala_jalan'
+                      ? 'Contoh: Macet perbaikan jalan di jalur Rogojampi, perkiraan keterlambatan 25 menit...'
+                      : category === 'retur'
+                      ? 'Contoh: Barang dikembalikan toko karena kemasan penyok / salah ukuran...'
+                      : category === 'kurang_muat'
+                      ? 'Contoh: Di faktur tertulis 10 bal, fisik yang termuat di armada hanya 8 bal...'
+                      : category === 'lebih_muat'
+                      ? 'Contoh: Di faktur tertulis 10 bal, fisik yang termuat di armada ada 12 bal (lebih 2 bal)...'
+                      : category === 'salah_muat'
+                      ? 'Contoh: Tertukar item dus ukuran 30x20 seharusnya 40x30...'
+                      : category === 'akhir_kiriman'
+                      ? 'Contoh: Muatan diterima lengkap di gudang toko dalam keadaan baik...'
+                      : 'Contoh: Barang diterima lengkap oleh PIC toko dalam kondisi baik...'
+                  }
+                  rows={3}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-slate-200 focus:outline-none focus:border-blue-500 placeholder-slate-500"
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Footer Buttons */}
+          <div className="p-4 bg-slate-950 border-t border-slate-800 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleShareWhatsApp}
+              className="flex-1 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95 border border-slate-700 cursor-pointer"
+              title="Bagikan format laporan & link koordinat ke grup WhatsApp"
+            >
+              <Share2 className="w-4 h-4" />
+              <span>Bagikan WA</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleSubmit}
+              className="flex-1 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-black text-xs flex items-center justify-center gap-2 transition active:scale-95 shadow-sm cursor-pointer"
+            >
+              <Send className="w-4 h-4" />
+              <span>
+                {category === 'istirahat'
+                  ? `Simpan Absen${photoList.length > 1 ? ` (${photoList.length} Foto)` : ''}`
+                  : category === 'isi_bbm'
+                  ? `Simpan Laporan BBM${photoList.length > 1 ? ` (${photoList.length} Foto)` : ''}`
+                  : category === 'retur'
+                  ? `Simpan Retur${photoList.length > 1 ? ` (${photoList.length} Foto)` : ''}`
+                  : category === 'kurang_muat'
+                  ? `Simpan Kurang Muat${photoList.length > 1 ? ` (${photoList.length} Foto)` : ''}`
+                  : category === 'lebih_muat'
+                  ? `Simpan Lebih Muat${photoList.length > 1 ? ` (${photoList.length} Foto)` : ''}`
+                  : category === 'salah_muat'
+                  ? `Simpan Salah Muat${photoList.length > 1 ? ` (${photoList.length} Foto)` : ''}`
+                  : `Simpan Laporan${photoList.length > 1 ? ` (${photoList.length} Foto)` : ''}`}
+              </span>
+            </button>
+          </div>
+
+        </div>
+      </div>
+    </>,
+    document.body
+  );
+};
