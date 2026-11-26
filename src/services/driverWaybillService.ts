@@ -1,0 +1,389 @@
+import {
+  Schedule,
+  OutboundWaybill,
+  OutboundWaybillStatus,
+  OutboundWaybillCargoItem
+} from '../types';
+import { logisticsStore } from './store';
+
+const STORAGE_KEY = 'akk_driver_outbound_waybills_v3';
+
+class DriverWaybillService {
+  private memoryWaybills: Record<string, OutboundWaybill> = {};
+  private isSyncing = false;
+  private lastSyncAt = 0;
+
+  constructor() {
+    if (typeof window !== 'undefined') {
+      try {
+        if (typeof localStorage !== 'undefined') {
+          const legacyRaw = localStorage.getItem(STORAGE_KEY);
+          if (legacyRaw) {
+            const parsed = JSON.parse(legacyRaw);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+              this.memoryWaybills = parsed;
+            }
+            localStorage.removeItem(STORAGE_KEY);
+          }
+        }
+      } catch {}
+      setTimeout(() => {
+        void this.syncFromServer();
+      }, 200);
+    }
+  }
+
+  private getAuthHeaders(): Record<string, string> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    try {
+      const token =
+        (typeof localStorage !== 'undefined'
+          ? localStorage.getItem('akk_session_token') || localStorage.getItem('session_token')
+          : null) ||
+        (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('akk_session_token') : null) ||
+        '';
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+        headers['x-akk-session-token'] = token;
+      }
+    } catch {}
+    return headers;
+  }
+
+  public async syncFromServer(force = false): Promise<Record<string, OutboundWaybill>> {
+    if (typeof window === 'undefined' || typeof fetch === 'undefined') return this.memoryWaybills;
+    if (this.isSyncing) return this.memoryWaybills;
+    const now = Date.now();
+    if (!force && this.lastSyncAt > 0 && now - this.lastSyncAt < 8000) return this.memoryWaybills;
+    this.isSyncing = true;
+    this.lastSyncAt = now;
+    try {
+      const res = await fetch('/api/driver-waybills', {
+        credentials: 'same-origin',
+        headers: this.getAuthHeaders()
+      });
+      if (!res.ok) return this.memoryWaybills;
+      const json = await res.json();
+      if (json?.waybills && typeof json.waybills === 'object' && !Array.isArray(json.waybills)) {
+        this.memoryWaybills = { ...this.memoryWaybills, ...json.waybills };
+        window.dispatchEvent(new CustomEvent('driver-waybill-updated'));
+      }
+    } catch {} finally {
+      this.isSyncing = false;
+    }
+    return this.memoryWaybills;
+  }
+
+  private pushWaybillToServer(waybill: OutboundWaybill) {
+    if (typeof window === 'undefined' || typeof fetch === 'undefined') return;
+    void fetch('/api/driver-waybills', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: this.getAuthHeaders(),
+      body: JSON.stringify({ waybill })
+    }).catch(() => {});
+  }
+
+  /**
+   * Derive a structured Outbound Waybill (Surat Jalan Keluar) from a delivery Schedule
+   */
+  public generateWaybillFromSchedule(schedule: Schedule): OutboundWaybill {
+    const rawDate = schedule.departureDate || new Date().toISOString().split('T')[0];
+    const dateFormatted = rawDate.replace(/-/g, '/');
+    const cleanNum = schedule.id.replace(/\D/g, '').slice(-4) || '1024';
+    const waybillNumber = `SJ-OUT/AKK/${dateFormatted.slice(0, 7)}/${cleanNum}`;
+
+    // Calculate box quantities based on ton capacity or description
+    const weightTon = schedule.cargoWeightTon || 2.5;
+    const totalWeightKg = Math.round(weightTon * 1000);
+    const estKoli = Math.round(totalWeightKg / 14); // Average ~14kg per corrugated carton box
+
+    const cargoItems: OutboundWaybillCargoItem[] = [
+      {
+        id: `cargo-${schedule.id}-1`,
+        itemCode: 'BOX-CB-A1',
+        description: `${schedule.cargoDescription || 'Karton Box Corrugated'} (Standar Industri PT AKK)`,
+        boxDimensions: '40 x 30 x 28 cm',
+        quantity: Math.round(estKoli * 0.65),
+        unit: 'Koli',
+        weightKg: Math.round(totalWeightKg * 0.65),
+        notes: 'Double Wall (K200/M150/K200)'
+      },
+      {
+        id: `cargo-${schedule.id}-2`,
+        itemCode: 'BOX-CB-B2',
+        description: 'Karton Box Custom Cetak Logo (Die-Cut Inner Box)',
+        boxDimensions: '32 x 22 x 18 cm',
+        quantity: Math.round(estKoli * 0.35),
+        unit: 'Koli',
+        weightKg: Math.round(totalWeightKg * 0.35),
+        notes: 'Single Wall High Density'
+      }
+    ];
+
+    const sealNumber = `SEAL-AKK-${cleanNum.padStart(4, '0')}`;
+
+    // Map schedule status to waybill status
+    let status: OutboundWaybillStatus = 'checker_verified';
+    if (schedule.status === 'scheduled') {
+      status = 'checker_verified';
+    } else if (schedule.status === 'picked_up' || schedule.status === 'in_transit' || schedule.status === 'delayed') {
+      status = 'in_transit';
+    } else if (schedule.status === 'delivered') {
+      status = 'delivered';
+    }
+
+    const statusLabels: Record<OutboundWaybillStatus, string> = {
+      draft: 'Draft Manifest',
+      loading: 'Proses Pemuatan (Loading Bay)',
+      sealed: 'Segel Terpasang',
+      checker_verified: 'Siap Out (Persiapan Keluar)',
+      gate_out: 'Di Jalan (Keluar Gudang)',
+      in_transit: 'Di Jalan (Keluar Gudang)',
+      delivered: 'Selesai (Tiba di Gudang)'
+    };
+
+    const crewName = schedule.crew?.name || '-';
+    const crewPhone = schedule.crew?.phone || '-';
+    const fleetPlate = schedule.fleet?.plateNumber || '-';
+    const fleetType = schedule.fleet?.vehicleType || '-';
+
+    return {
+      id: `WB-${schedule.id}`,
+      waybillNumber,
+      scheduleId: schedule.id,
+      trackingNumber: schedule.trackingNumber,
+      poNumber: `PO-AKK-${cleanNum}`,
+      date: rawDate,
+      gateOutTime: '-',
+      estimatedArrival: schedule.estimatedArrival || '-',
+      originWarehouse: {
+        name: 'Distribution Center (DC) PT Anugrah Kemasan Kreatif',
+        address: 'Jl. Argopuro No.60, Lingkungan Sukowidi, Klatak, Kec. Kalipuro, Kab. Banyuwangi, Jawa Timur 68421',
+        phone: '-',
+        gateNumber: 'Gate Keluar Outbound DC'
+      },
+      destination: {
+        storeName: schedule.store?.storeName || schedule.areaName || '-',
+        areaName: schedule.areaName || schedule.store?.city || '-',
+        city: schedule.store?.city || '-',
+        province: schedule.store?.province || '-',
+        address: schedule.store?.address || '-',
+        contactPerson: schedule.store?.contactPerson || '-',
+        phone: schedule.store?.phone || '-'
+      },
+      fleet: {
+        id: schedule.fleetId,
+        plateNumber: fleetPlate,
+        vehicleType: fleetType,
+        initialCode: schedule.fleet?.initialCode || '-'
+      },
+      crew: {
+        driverId: schedule.crewId,
+        driverName: crewName,
+        driverPhone: crewPhone,
+        licenseType: schedule.crew?.licenseType || '-',
+        helperName: schedule.crewHelper?.name || '-',
+        helper2Name: schedule.crewHelper2?.name
+      },
+      cargoItems,
+      totalKoli: estKoli,
+      totalWeightKg,
+      securitySealNumber: sealNumber,
+      status,
+      statusLabel: statusLabels[status],
+      checkerName: 'Rahmat Hidayat (Checker Outbound DC)',
+      checkerNotes: 'Karton box kering, kondisi segel utuh, muatan disusun stabil sesuai SOP distribusi PT AKK.',
+      driverNotes: schedule.notes || '',
+      signedByDriver: false,
+      signedByDriverAt: '',
+      signedByChecker: false,
+      signedByCheckerAt: '',
+      preparedByName: logisticsStore.getLogisticsCoordinator({
+        scheduleId: schedule.id,
+        areaName: schedule.areaName || schedule.store?.storeName,
+        fleetId: schedule.fleetId,
+        plateNumber: fleetPlate,
+        initialCode: schedule.fleet?.initialCode,
+        driverId: schedule.crewId,
+        driverName: crewName
+      }),
+      preparedBySigned: false,
+      preparedBySignedAt: '',
+      acknowledgedByName: 'Bayu Novianto Dimas Permana',
+      acknowledgedBySigned: false,
+      acknowledgedBySignedAt: '',
+      securityOfficerName: 'Hairul Rozikin',
+      securitySigned: false,
+      securitySignedAt: '',
+      driverSigned: false,
+      driverSignedAt: '',
+      qrCodeData: `PT_AKK|${waybillNumber}|${fleetPlate}|${sealNumber}|${rawDate}`,
+      synced: true,
+      createdAt: schedule.createdAt || new Date().toISOString()
+    };
+  }
+
+  public getStoredWaybills(): Record<string, OutboundWaybill> {
+    return this.memoryWaybills;
+  }
+
+  public saveWaybill(waybill: OutboundWaybill): void {
+    this.memoryWaybills[waybill.id] = waybill;
+    if (typeof localStorage !== 'undefined') {
+      try { localStorage.removeItem(STORAGE_KEY); } catch {}
+    }
+    this.pushWaybillToServer(waybill);
+  }
+
+  public getWaybillForSchedule(schedule: Schedule): OutboundWaybill {
+    const stored = this.getStoredWaybills();
+    const key = `WB-${schedule.id}`;
+    if (stored[key]) {
+      const existing = stored[key];
+      let changed = false;
+      if (
+        (schedule.fleet?.plateNumber && existing.fleet.plateNumber !== schedule.fleet.plateNumber) ||
+        (schedule.fleet?.initialCode && existing.fleet.initialCode !== schedule.fleet.initialCode)
+      ) {
+        existing.fleet = {
+          id: schedule.fleetId,
+          plateNumber: schedule.fleet.plateNumber,
+          vehicleType: schedule.fleet.vehicleType,
+          initialCode: schedule.fleet.initialCode || existing.fleet.initialCode
+        };
+        changed = true;
+      }
+      if (!existing.preparedBySigned) {
+        const liveSpvName = logisticsStore.getLogisticsCoordinator({
+          scheduleId: schedule.id,
+          areaName: schedule.areaName || schedule.store?.storeName || existing.destination?.areaName,
+          fleetId: schedule.fleetId || existing.fleet?.id,
+          plateNumber: schedule.fleet?.plateNumber || existing.fleet?.plateNumber,
+          initialCode: schedule.fleet?.initialCode || existing.fleet?.initialCode,
+          driverId: schedule.crewId || existing.crew?.driverId,
+          driverName: schedule.crew?.name || existing.crew?.driverName
+        });
+        if (liveSpvName && existing.preparedByName !== liveSpvName) {
+          existing.preparedByName = liveSpvName;
+          changed = true;
+        }
+      }
+      if (schedule.crew?.name && existing.crew.driverName !== schedule.crew.name) {
+        existing.crew.driverId = schedule.crewId;
+        existing.crew.driverName = schedule.crew.name;
+        if (schedule.crew.phone) existing.crew.driverPhone = schedule.crew.phone;
+        changed = true;
+      }
+      const nextHelper1 = schedule.crewHelper?.name || '-';
+      if (existing.crew.helperName !== nextHelper1) {
+        existing.crew.helperName = nextHelper1;
+        changed = true;
+      }
+      const nextHelper2 = schedule.crewHelper2?.name;
+      if (existing.crew.helper2Name !== nextHelper2) {
+        existing.crew.helper2Name = nextHelper2;
+        changed = true;
+      }
+      const nextStoreName = schedule.store?.storeName || schedule.areaName || existing.destination.storeName;
+      const nextAreaName = schedule.areaName || schedule.store?.city || existing.destination.areaName;
+      if (existing.destination.storeName !== nextStoreName || existing.destination.areaName !== nextAreaName) {
+        existing.destination = {
+          ...existing.destination,
+          storeName: nextStoreName,
+          areaName: nextAreaName,
+          address: schedule.store?.address || `Area Pengiriman Distribusi ${nextAreaName}`
+        };
+        changed = true;
+      }
+      if (schedule.status === 'delivered') {
+        if (existing.status !== 'delivered' || existing.statusLabel !== 'Selesai (Tiba di Gudang)') {
+          existing.status = 'delivered';
+          existing.statusLabel = 'Selesai (Tiba di Gudang)';
+          changed = true;
+        }
+      } else if (
+        schedule.status === 'in_transit' ||
+        schedule.status === 'picked_up' ||
+        schedule.status === 'delayed'
+      ) {
+        if (existing.status !== 'in_transit' || existing.statusLabel !== 'Di Jalan (Keluar Gudang)') {
+          existing.status = 'in_transit';
+          existing.statusLabel = 'Di Jalan (Keluar Gudang)';
+          changed = true;
+        }
+      } else if (schedule.status === 'scheduled') {
+        if (existing.status !== 'checker_verified' || existing.statusLabel !== 'Siap Out (Persiapan Keluar)') {
+          existing.status = 'checker_verified';
+          existing.statusLabel = 'Siap Out (Persiapan Keluar)';
+          changed = true;
+        }
+      }
+      if (changed) {
+        this.saveWaybill(existing);
+      }
+      return existing;
+    }
+    const generated = this.generateWaybillFromSchedule(schedule);
+    stored[key] = generated;
+    this.saveWaybill(generated);
+    return generated;
+  }
+
+  public getWaybillsForDriver(_driverId: string, schedules: Schedule[]): OutboundWaybill[] {
+    return schedules.map(sch => this.getWaybillForSchedule(sch));
+  }
+
+  public updateWaybillStatus(
+    waybillId: string,
+    status: OutboundWaybillStatus,
+    notes?: string
+  ): boolean {
+    try {
+      const stored = this.getStoredWaybills();
+      if (!stored[waybillId]) return false;
+
+      const statusLabels: Record<OutboundWaybillStatus, string> = {
+        draft: 'Draft Manifest',
+        loading: 'Proses Pemuatan (Loading Bay)',
+        sealed: 'Segel Terpasang',
+        checker_verified: 'Siap Out (Persiapan Keluar)',
+        gate_out: 'Di Jalan (Keluar Gudang)',
+        in_transit: 'Di Jalan (Keluar Gudang)',
+        delivered: 'Selesai (Tiba di Gudang)'
+      };
+
+      const normalizedStatus: OutboundWaybillStatus = status === 'gate_out' ? 'in_transit' : status;
+      stored[waybillId].status = normalizedStatus;
+      stored[waybillId].statusLabel = statusLabels[normalizedStatus];
+      if (notes) {
+        stored[waybillId].driverNotes = notes;
+      }
+      if (status === 'gate_out' || status === 'in_transit') {
+        const now = new Date();
+        stored[waybillId].gateOutTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')} WIB`;
+        try {
+          const wb = stored[waybillId];
+          logisticsStore.recordGateOut(
+            wb.scheduleId,
+            wb.fleet.plateNumber,
+            wb.crew.driverName,
+            wb.destination.storeName || wb.destination.areaName,
+            wb.fleet.initialCode
+          );
+        } catch (err) {
+          console.warn('[WaybillService] Failed to record gate out to security:', err);
+        }
+      }
+      this.saveWaybill(stored[waybillId]);
+      try {
+        window.dispatchEvent(new CustomEvent('driver-waybill-updated', { detail: stored[waybillId] }));
+      } catch {}
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+export const driverWaybillService = new DriverWaybillService();

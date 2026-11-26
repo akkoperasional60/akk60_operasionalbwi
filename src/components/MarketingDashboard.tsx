@@ -1,0 +1,3594 @@
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import * as XLSX from 'xlsx';
+import { logisticsStore } from '../services/store';
+import {
+  Globe,
+  Megaphone,
+  Plus,
+  Search,
+  TrendingUp,
+  DollarSign,
+  User,
+  MapPin,
+  Calendar,
+  CheckCircle2,
+  Sparkles,
+  BarChart3,
+  FileText,
+  ShoppingBag,
+  Download,
+  Upload,
+  Trash2,
+  X,
+  ClipboardCheck,
+  ChevronLeft,
+  ChevronRight
+} from 'lucide-react';
+import { branchStore, BranchRecord } from '../services/branchStore';
+import {
+  CustomerUnpaidInvoice,
+  loadSharedCustomerInvoices,
+  saveSharedCustomerInvoices,
+  hydrateSharedCustomerInvoicesFromServer,
+  FINANCE_INVOICES_EVENT,
+  computeInvoiceAgingDays,
+  getInvoiceStatus
+} from './DepartmentDashboard';
+import {
+  MarketingInvoiceValidationView,
+  MarketingSalesMappingView
+} from './marketing/MarketingInvoiceValidationView';
+
+// ============================================================
+// TYPES
+// ============================================================
+export interface OnlineLead {
+  id: string;
+  clientName: string;
+  city: string;
+  productType: string;
+  estVolumePcs: number;
+  budgetIDR: number;
+  channel: 'Google Search' | 'WhatsApp Ads' | 'Instagram DM' | 'TikTok Business' | 'Website Form';
+  date: string;
+  status: 'Lead Baru' | 'Follow Up' | 'Negosiasi' | 'Deal / SPK' | 'Batal';
+  notes: string;
+}
+
+export interface OfflineVisitReport {
+  id: string;
+  tanggal: string;
+  salesName: string;
+  storeName: string;
+  contactPerson: string;
+  region: string;
+  purpose: string;
+  outcome: string;
+  followUpDate: string;
+  status: 'Selesai & Order' | 'Menunggu Follow-Up' | 'Kunjungan Rutin' | 'Belum Order';
+}
+
+export interface OfflineSalesReport {
+  id: string;
+  noNota: string;
+  tanggal: string;
+  salesName: string;
+  storeName: string;
+  region: string;
+  kategoriBarang: string;
+  namaBarang: string;
+  qty: number;
+  satuan: string;
+  diskon: number;
+  hargaSatuan: number;
+  totalPenjualan: number;
+  statusPembayaran: 'Lunas' | 'Tempo 14 Hari' | 'Tempo 30 Hari' | 'DP / Cicilan';
+  catatan: string;
+}
+
+export interface ToVoRoRecord {
+  id: string;
+  periode: string;
+  cabang: string;
+  salesName: string;
+  wilayah: string;
+  totalTokoAktif: number;
+  targetVisit: number;
+  realisasiVisitVo: number;
+  takeOrderTo: number;
+  repeatOrderRo: number;
+  nilaiOmsetIdr: number;
+  catatan: string;
+}
+
+interface MarketingDashboardProps {
+  activeTab:
+    | 'marketing_online'
+    | 'marketing_offline'
+    | 'marketing_to_vo_ro'
+    | 'marketing_invoice_validation'
+    | 'marketing_sales_mapping';
+  onNavigateTab?: (tab: string) => void;
+}
+
+const INITIAL_TO_VO_RO_DATA: ToVoRoRecord[] = [
+  {
+    id: 'TVR-001',
+    periode: '2026-11',
+    cabang: 'Banyuwangi',
+    salesName: 'Rendra Saputra',
+    wilayah: 'Banyuwangi Kota & Rogojampi',
+    totalTokoAktif: 60,
+    targetVisit: 120,
+    realisasiVisitVo: 108,
+    takeOrderTo: 86,
+    repeatOrderRo: 51,
+    nilaiOmsetIdr: 148500000,
+    catatan: 'Repeat order karton box dan cup plastik tinggi di area retail'
+  },
+  {
+    id: 'TVR-002',
+    periode: '2026-11',
+    cabang: 'Banyuwangi',
+    salesName: 'Dina Mariana',
+    wilayah: 'Genteng, Srono & Muncar',
+    totalTokoAktif: 55,
+    targetVisit: 110,
+    realisasiVisitVo: 98,
+    takeOrderTo: 79,
+    repeatOrderRo: 46,
+    nilaiOmsetIdr: 132400000,
+    catatan: 'Penetrasi kemasan food grade & lunch box meningkat'
+  },
+  {
+    id: 'TVR-003',
+    periode: '2026-11',
+    cabang: 'Jember',
+    salesName: 'Bagus Setiawan',
+    wilayah: 'Jember Kota, Ambulu & Tanggul',
+    totalTokoAktif: 48,
+    targetVisit: 100,
+    realisasiVisitVo: 88,
+    takeOrderTo: 68,
+    repeatOrderRo: 39,
+    nilaiOmsetIdr: 115800000,
+    catatan: 'Kunjungan toko grosir plastik & lakban rutin mingguan'
+  },
+  {
+    id: 'TVR-004',
+    periode: '2026-11',
+    cabang: 'Sidoarjo',
+    salesName: 'Hendra Wijaya',
+    wilayah: 'Sidoarjo, Waru & Krian',
+    totalTokoAktif: 65,
+    targetVisit: 130,
+    realisasiVisitVo: 119,
+    takeOrderTo: 95,
+    repeatOrderRo: 56,
+    nilaiOmsetIdr: 184200000,
+    catatan: 'Repeat order industri karton box B-Flute & CB-Flute stabil'
+  },
+  {
+    id: 'TVR-005',
+    periode: '2026-11',
+    cabang: 'Bali',
+    salesName: 'I Made Suartana',
+    wilayah: 'Denpasar, Badung & Gianyar',
+    totalTokoAktif: 52,
+    targetVisit: 104,
+    realisasiVisitVo: 94,
+    takeOrderTo: 76,
+    repeatOrderRo: 44,
+    nilaiOmsetIdr: 162900000,
+    catatan: 'Demand paper cup & kemasan horeca Bali sangat kuat'
+  }
+];
+
+const LEGACY_LS_KEY_TO_VO_RO = 'akk_marketing_to_vo_ro_v1';
+
+// ============================================================
+// INITIAL DATA
+// ============================================================
+const initialOnlineLeads: OnlineLead[] = [
+  {
+    id: 'OL-001',
+    clientName: 'CV Sinar Mandiri',
+    city: 'Surabaya',
+    productType: 'Karton Box Corrugated (A1)',
+    estVolumePcs: 50000,
+    budgetIDR: 120000000,
+    channel: 'WhatsApp Ads',
+    date: '2026-10-20',
+    status: 'Lead Baru',
+    notes: 'Tertarik dengan box ukuran custom untuk mie instan.'
+  },
+  {
+    id: 'OL-002',
+    clientName: 'PT Jaya Selalu',
+    city: 'Sidoarjo',
+    productType: 'Die-Cut Box E-Commerce',
+    estVolumePcs: 15000,
+    budgetIDR: 45000000,
+    channel: 'Website Form',
+    date: '2026-10-18',
+    status: 'Negosiasi',
+    notes: 'Nego harga per pcs, minta diskon 5% untuk kontrak 6 bulan.'
+  },
+  {
+    id: 'OL-003',
+    clientName: 'Kopi Nusantara',
+    city: 'Malang',
+    productType: 'Offset Printing Packaging',
+    estVolumePcs: 10000,
+    budgetIDR: 35000000,
+    channel: 'Instagram DM',
+    date: '2026-10-15',
+    status: 'Deal / SPK',
+    notes: 'SPK ditandatangani, pembayaran DP 50% sudah diterima.'
+  },
+  {
+    id: 'OL-004',
+    clientName: 'Bakery Kita',
+    city: 'Banyuwangi',
+    productType: 'Heavy Duty Box',
+    estVolumePcs: 5000,
+    budgetIDR: 18000000,
+    channel: 'Google Search',
+    date: '2026-10-21',
+    status: 'Batal',
+    notes: 'Spesifikasi karton terlalu tebal untuk kebutuhan mereka.'
+  }
+];
+
+const initialVisitReports: OfflineVisitReport[] = [
+  {
+    id: 'KV-001',
+    tanggal: '2026-10-28',
+    salesName: 'Rendra Saputra',
+    storeName: 'TK ANUGRAH SEKAR WANGI',
+    contactPerson: 'Bpk. Hendra (0812-3456-7811)',
+    region: 'Banyuwangi Kota',
+    purpose: 'Pengecekan stok kemasan plastik HD/PE & penawaran Karton Box B-Flute',
+    outcome: 'Repeat order 1.500 Pcs Karton Box 60x40x40 cm & 40 Ball Plastik HD',
+    followUpDate: '2026-11-04',
+    status: 'Selesai & Order'
+  },
+  {
+    id: 'KV-002',
+    tanggal: '2026-10-27',
+    salesName: 'Dina Mariana',
+    storeName: 'TK LIMA SEPULUH',
+    contactPerson: 'Ibu Lilik (0813-5521-9088)',
+    region: 'Genteng - Banyuwangi',
+    purpose: 'Presentasi sampel Paper Bowl Kraft 650ml & Lunch Box Eco Size L',
+    outcome: 'Pemilik toko cocok dengan kualitas food grade, langsung buka PO perdana',
+    followUpDate: '2026-11-03',
+    status: 'Selesai & Order'
+  },
+  {
+    id: 'KV-003',
+    tanggal: '2026-10-26',
+    salesName: 'Rendra Saputra',
+    storeName: 'TK PRATAMA SRONO',
+    contactPerson: 'Bpk. Wahyu (0852-3310-4412)',
+    region: 'Srono - Banyuwangi',
+    purpose: 'Kunjungan rutin evaluasi penjualan kemasan & negosiasi kuota bulanan',
+    outcome: 'Menunggu persetujuan harga grosir untuk pengambilan 5.000 Pcs Box Pizza',
+    followUpDate: '2026-10-31',
+    status: 'Menunggu Follow-Up'
+  },
+  {
+    id: 'KV-004',
+    tanggal: '2026-10-25',
+    salesName: 'Bagus Setiawan',
+    storeName: 'UD SUMBER REJEKI JEMBER',
+    contactPerson: 'Bpk. H. Sulaiman (0811-3490-221)',
+    region: 'Jember',
+    purpose: 'Penawaran kontrak suplai Stretch Film Pallet Wrap & Lakban OPP Coklat',
+    outcome: 'Order 30 Roll Stretch Film & 20 Karton Lakban OPP Heavy Duty',
+    followUpDate: '2026-11-08',
+    status: 'Selesai & Order'
+  },
+  {
+    id: 'KV-005',
+    tanggal: '2026-10-24',
+    salesName: 'Dina Mariana',
+    storeName: 'TOKO BERKAH JAYA ROGOJAMPI',
+    contactPerson: 'Ibu Sari (0821-4409-1182)',
+    region: 'Rogojampi - Banyuwangi',
+    purpose: 'Kunjungan pengenalan katalog kemasan baru & cek display toko',
+    outcome: 'Stok lama di gudang toko masih cukup untuk 1 minggu ke depan',
+    followUpDate: '2026-11-01',
+    status: 'Kunjungan Rutin'
+  }
+];
+
+const initialSalesReports: OfflineSalesReport[] = [
+  {
+    id: 'SR-001',
+    noNota: 'SO-AKK-2610-081',
+    tanggal: '2026-10-28',
+    salesName: 'Rendra Saputra',
+    storeName: 'TK ANUGRAH SEKAR WANGI',
+    region: 'Banyuwangi Kota',
+    kategoriBarang: 'Karton Box Corrugated',
+    namaBarang: 'Karton Box Corrugated B-Flute 60x40x40 cm (Polos)',
+    qty: 1500,
+    satuan: 'Pcs',
+    diskon: 300000,
+    hargaSatuan: 6800,
+    totalPenjualan: 9900000,
+    statusPembayaran: 'Lunas',
+    catatan: 'Pengiriman terjadwal armada DC Banyuwangi'
+  },
+  {
+    id: 'SR-002',
+    noNota: 'SO-AKK-2610-082',
+    tanggal: '2026-10-27',
+    salesName: 'Dina Mariana',
+    storeName: 'TK LIMA SEPULUH',
+    region: 'Genteng - Banyuwangi',
+    kategoriBarang: 'Paper Cup & Food Pack',
+    namaBarang: 'Lunch Box Paper Eco Kraft Size L (Isi 500 Pcs)',
+    qty: 25,
+    satuan: 'Karton',
+    diskon: 250000,
+    hargaSatuan: 485000,
+    totalPenjualan: 11875000,
+    statusPembayaran: 'Tempo 14 Hari',
+    catatan: 'Order hasil kunjungan sampel food grade'
+  },
+  {
+    id: 'SR-003',
+    noNota: 'SO-AKK-2610-083',
+    tanggal: '2026-10-25',
+    salesName: 'Bagus Setiawan',
+    storeName: 'UD SUMBER REJEKI JEMBER',
+    region: 'Jember',
+    kategoriBarang: 'Plastik & Stretch Film',
+    namaBarang: 'Stretch Film Pallet Wrap 50cm x 300m (17 Micron)',
+    qty: 30,
+    satuan: 'Roll',
+    diskon: 150000,
+    hargaSatuan: 195000,
+    totalPenjualan: 5700000,
+    statusPembayaran: 'Lunas',
+    catatan: 'Pembayaran transfer BCA lunas sebelum muat'
+  },
+  {
+    id: 'SR-004',
+    noNota: 'SO-AKK-2610-084',
+    tanggal: '2026-10-25',
+    salesName: 'Bagus Setiawan',
+    storeName: 'UD SUMBER REJEKI JEMBER',
+    region: 'Jember',
+    kategoriBarang: 'Lakban & Strapping Band',
+    namaBarang: 'Lakban OPP Coklat Heavy Duty 48mm x 90 Yard',
+    qty: 20,
+    satuan: 'Karton',
+    diskon: 400000,
+    hargaSatuan: 640000,
+    totalPenjualan: 12400000,
+    statusPembayaran: 'Tempo 30 Hari',
+    catatan: 'Kontrak suplai rutin bulanan area Jember'
+  },
+  {
+    id: 'SR-005',
+    noNota: 'SO-AKK-2610-085',
+    tanggal: '2026-10-24',
+    salesName: 'Rendra Saputra',
+    storeName: 'MITRA KEMASAN MUNCAR',
+    region: 'Muncar - Banyuwangi',
+    kategoriBarang: 'Karton Box Double Wall',
+    namaBarang: 'Karton Box Ekspor Waxed Tahan Lembab Cold Storage',
+    qty: 2000,
+    satuan: 'Pcs',
+    diskon: 500000,
+    hargaSatuan: 14500,
+    totalPenjualan: 28500000,
+    statusPembayaran: 'DP / Cicilan',
+    catatan: 'DP 50% masuk, pelunasan saat barang tiba di gudang cold storage'
+  }
+];
+
+const LEGACY_LS_KEY_ONLINE_LEADS = 'akk_marketing_online_leads_v2';
+const LEGACY_LS_KEY_VISIT_REPORTS = 'akk_marketing_offline_visit_reports_v2';
+const LEGACY_LS_KEY_SALES_REPORTS = 'akk_marketing_offline_sales_reports_v2';
+
+export const MarketingDashboard: React.FC<MarketingDashboardProps> = ({ activeTab, onNavigateTab }) => {
+  // --- Sub-tab for Marketing Offline: 'kunjungan' | 'penjualan' | 'tagihan' ---
+  const [offlineSubTab, setOfflineSubTab] = useState<'kunjungan' | 'penjualan' | 'tagihan'>('kunjungan');
+
+  // --- Shared Customer Billing State (Integrated with Finance & Aplikasi Penagihan Pelanggan) ---
+  const [customerInvoices, setCustomerInvoicesState] = useState<CustomerUnpaidInvoice[]>(() =>
+    loadSharedCustomerInvoices()
+  );
+  const [billingSearch, setBillingSearch] = useState('');
+  const [billingStatusFilter, setBillingStatusFilter] = useState<string>('UNPAID_ONLY');
+  const [showAddBillingModal, setShowAddBillingModal] = useState(false);
+  const [billingPayModalInvoice, setBillingPayModalInvoice] = useState<CustomerUnpaidInvoice | null>(null);
+  const [billingPayNominal, setBillingPayNominal] = useState<number>(0);
+  const [billingPayNotes, setBillingPayNotes] = useState<string>('');
+
+  const updateCustomerInvoices = (
+    updater: CustomerUnpaidInvoice[] | ((prev: CustomerUnpaidInvoice[]) => CustomerUnpaidInvoice[])
+  ) => {
+    setCustomerInvoicesState(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      saveSharedCustomerInvoices(next);
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    const syncBilling = () => {
+      setCustomerInvoicesState(loadSharedCustomerInvoices());
+    };
+    window.addEventListener(FINANCE_INVOICES_EVENT, syncBilling);
+    void hydrateSharedCustomerInvoicesFromServer();
+    return () => {
+      window.removeEventListener(FINANCE_INVOICES_EVENT, syncBilling);
+    };
+  }, []);
+
+  const [billingTeamTab, setBillingTeamTab] = useState<'ALL' | 'SALES' | 'FINANCE'>('SALES');
+
+  const [billingForm, setBillingForm] = useState({
+    noInvoice: `INV/AKK/2026/11/${String(customerInvoices.length + 220).padStart(4, '0')}`,
+    noSuratJalan: `SJ-AKK-2611-${String(customerInvoices.length + 165)}`,
+    customerName: '',
+    contactPhone: '',
+    region: 'Banyuwangi Kota',
+    invoiceDate: new Date().toISOString().split('T')[0],
+    dueDate: new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0],
+    itemSummary: '',
+    totalTagihan: 15000000,
+    jumlahTerbayar: 0,
+    billingTeam: 'SALES' as 'FINANCE' | 'SALES',
+    salesPersonName: 'Rendra Saputra',
+    notes: ''
+  });
+
+  // --- Popup notification modal (supports Enter key) ---
+  const [popupModal, setPopupModal] = useState<{ title: string; message: string } | null>(null);
+
+  useEffect(() => {
+    if (!popupModal) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === 'Escape') {
+        e.preventDefault();
+        setPopupModal(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [popupModal]);
+
+  // --- Persistent Online Leads State (Hostinger MySQL /api/marketing/state) ---
+  const [onlineLeads, setOnlineLeads] = useState<OnlineLead[]>(initialOnlineLeads);
+
+  // --- Persistent Offline Visit Reports State (Hostinger MySQL /api/marketing/state) ---
+  const [visitReports, setVisitReports] = useState<OfflineVisitReport[]>(initialVisitReports);
+
+  // --- Persistent Offline Sales Reports State (Hostinger MySQL /api/marketing/state) ---
+  const [salesReports, setSalesReports] = useState<OfflineSalesReport[]>(initialSalesReports);
+
+  // --- Persistent TO, VO & RO State (Hostinger MySQL /api/marketing/state) ---
+  const [toVoRoList, setToVoRoList] = useState<ToVoRoRecord[]>(INITIAL_TO_VO_RO_DATA);
+
+  const hasHydratedMarketingDbRef = useRef(false);
+  const suppressNextMarketingSaveRef = useRef(false);
+
+  useEffect(() => {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(LEGACY_LS_KEY_ONLINE_LEADS);
+        localStorage.removeItem(LEGACY_LS_KEY_VISIT_REPORTS);
+        localStorage.removeItem(LEGACY_LS_KEY_SALES_REPORTS);
+        localStorage.removeItem(LEGACY_LS_KEY_TO_VO_RO);
+      }
+    } catch {}
+
+    let active = true;
+    (async () => {
+      try {
+        const res = await fetch('/api/marketing/state', {
+          method: 'GET',
+          credentials: 'same-origin',
+          cache: 'no-store',
+          headers: logisticsStore.buildSessionAuthHeaders({ Accept: 'application/json' })
+        });
+        if (res.ok && active) {
+          const json = await res.json();
+          const remote = json?.data;
+          if (remote && typeof remote === 'object') {
+            suppressNextMarketingSaveRef.current = true;
+            if (Array.isArray(remote.onlineLeads)) setOnlineLeads(remote.onlineLeads);
+            if (Array.isArray(remote.visitReports)) setVisitReports(remote.visitReports);
+            if (Array.isArray(remote.salesReports)) setSalesReports(remote.salesReports);
+            if (Array.isArray(remote.toVoRoList) && remote.toVoRoList.length > 0) {
+              setToVoRoList(remote.toVoRoList);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[Hostinger Marketing] Gagal memuat state marketing dari MySQL:', err);
+      } finally {
+        if (active) {
+          hasHydratedMarketingDbRef.current = true;
+        }
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hasHydratedMarketingDbRef.current) return;
+    if (suppressNextMarketingSaveRef.current) {
+      suppressNextMarketingSaveRef.current = false;
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      fetch('/api/marketing/state', {
+        method: 'PUT',
+        credentials: 'same-origin',
+        headers: logisticsStore.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          onlineLeads,
+          visitReports,
+          salesReports,
+          toVoRoList
+        })
+      }).catch(err => console.warn('[Hostinger Marketing] Gagal menyimpan state marketing ke MySQL:', err));
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [onlineLeads, visitReports, salesReports, toVoRoList]);
+
+  const [branches, setBranches] = useState<BranchRecord[]>(() => branchStore.getBranches());
+  useEffect(() => {
+    const syncBranches = () => setBranches(branchStore.getBranches());
+    const unsub = branchStore.subscribe(syncBranches);
+    window.addEventListener('akk-branch-updated', syncBranches);
+    return () => {
+      unsub();
+      window.removeEventListener('akk-branch-updated', syncBranches);
+    };
+  }, []);
+
+  const [tvrSearch, setTvrSearch] = useState('');
+  const [tvrBranchFilter, setTvrBranchFilter] = useState('ALL');
+  const [showAddTvrModal, setShowAddTvrModal] = useState(false);
+  const [tvrForm, setTvrForm] = useState({
+    periode: '2026-11',
+    cabang: branchStore.getBranches()[0]?.name || 'Nusantara',
+    salesName: '',
+    wilayah: '',
+    totalTokoAktif: 50,
+    targetVisit: 100,
+    realisasiVisitVo: 85,
+    takeOrderTo: 70,
+    repeatOrderRo: 42,
+    nilaiOmsetIdr: 95000000,
+    catatan: ''
+  });
+
+  // --- Online Filters ---
+  const [onlineSearch, setOnlineSearch] = useState('');
+  const [onlineFilterStatus, setOnlineFilterStatus] = useState<string>('all');
+  const [onlineFilterChannel, setOnlineFilterChannel] = useState<string>('all');
+
+  // --- Offline Visit Filters & Pagination ---
+  const [visitSearch, setVisitSearch] = useState('');
+  const [visitStatusFilter, setVisitStatusFilter] = useState<string>('ALL');
+  const [visitRegionFilter, setVisitRegionFilter] = useState<string>('ALL');
+  const [visitPage, setVisitPage] = useState(1);
+  const [visitPageSize, setVisitPageSize] = useState(10);
+
+  // --- Offline Sales Filters & Pagination ---
+  const [salesSearch, setSalesSearch] = useState('');
+  const [salesDateFilter, setSalesDateFilter] = useState<string>('ALL');
+  const [salesPersonFilter, setSalesPersonFilter] = useState<string>('ALL');
+  const [salesPaymentFilter, setSalesPaymentFilter] = useState<string>('ALL');
+  const [salesKategoriFilter, setSalesKategoriFilter] = useState<string>('ALL');
+  const [salesPage, setSalesPage] = useState(1);
+  const [salesPageSize, setSalesPageSize] = useState(10);
+
+  // --- Modals ---
+  const [showAddLeadModal, setShowAddLeadModal] = useState(false);
+  const [showAddVisitModal, setShowAddVisitModal] = useState(false);
+  const [showAddSalesModal, setShowAddSalesModal] = useState(false);
+
+  // --- New Lead Form Fields ---
+  const [newLeadName, setNewLeadName] = useState('');
+  const [newLeadCity, setNewLeadCity] = useState('');
+  const [newLeadProduct, setNewLeadProduct] = useState('Karton Box Corrugated (A1)');
+  const [newLeadVolume, setNewLeadVolume] = useState<number>(10000);
+  const [newLeadBudget, setNewLeadBudget] = useState<number>(25000000);
+  const [newLeadChannel, setNewLeadChannel] = useState<'Google Search' | 'WhatsApp Ads' | 'Instagram DM' | 'TikTok Business' | 'Website Form'>('Website Form');
+  const [newLeadNotes, setNewLeadNotes] = useState('');
+
+  // --- New Visit Form Fields ---
+  const [visitForm, setVisitForm] = useState<{
+    tanggal: string;
+    salesName: string;
+    storeName: string;
+    contactPerson: string;
+    region: string;
+    purpose: string;
+    outcome: string;
+    followUpDate: string;
+    status: OfflineVisitReport['status'];
+  }>({
+    tanggal: new Date().toISOString().split('T')[0],
+    salesName: 'Rendra Saputra',
+    storeName: '',
+    contactPerson: '',
+    region: 'Banyuwangi Kota',
+    purpose: '',
+    outcome: '',
+    followUpDate: new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
+    status: 'Selesai & Order'
+  });
+
+  // --- New Sales Form Fields ---
+  const [salesForm, setSalesForm] = useState<{
+    noNota: string;
+    tanggal: string;
+    salesName: string;
+    storeName: string;
+    region: string;
+    kategoriBarang: string;
+    namaBarang: string;
+    qty: number;
+    satuan: string;
+    diskon: number;
+    hargaSatuan: number;
+    statusPembayaran: OfflineSalesReport['statusPembayaran'];
+    catatan: string;
+  }>({
+    noNota: `SO-AKK-2610-${String(initialSalesReports.length + 85).padStart(3, '0')}`,
+    tanggal: new Date().toISOString().split('T')[0],
+    salesName: 'Rendra Saputra',
+    storeName: '',
+    region: 'Banyuwangi Kota',
+    kategoriBarang: 'Karton Box Corrugated',
+    namaBarang: 'Karton Box Corrugated B-Flute 60x40x40 cm (Polos)',
+    qty: 500,
+    satuan: 'Pcs',
+    diskon: 0,
+    hargaSatuan: 6800,
+    statusPembayaran: 'Lunas',
+    catatan: ''
+  });
+
+  // --- Online Actions ---
+  const handleAddOnlineLead = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newLeadName || !newLeadCity) return;
+
+    const newLead: OnlineLead = {
+      id: `OL-${String(onlineLeads.length + 1).padStart(3, '0')}`,
+      clientName: newLeadName,
+      city: newLeadCity,
+      productType: newLeadProduct,
+      estVolumePcs: newLeadVolume,
+      budgetIDR: newLeadBudget,
+      channel: newLeadChannel,
+      date: new Date().toISOString().split('T')[0],
+      status: 'Lead Baru',
+      notes: newLeadNotes
+    };
+
+    setOnlineLeads([newLead, ...onlineLeads]);
+    setShowAddLeadModal(false);
+    setNewLeadName('');
+    setNewLeadCity('');
+    setNewLeadProduct('Karton Box Corrugated (A1)');
+    setNewLeadVolume(10000);
+    setNewLeadBudget(25000000);
+    setNewLeadChannel('Website Form');
+    setNewLeadNotes('');
+    setPopupModal({
+      title: 'Prospek Online Disimpan',
+      message: `Data prospek "${newLead.clientName}" berhasil disimpan ke sistem.`
+    });
+  };
+
+  const updateLeadStatus = (id: string, newStatus: OnlineLead['status']) => {
+    setOnlineLeads(prev =>
+      prev.map(lead => (lead.id === id ? { ...lead, status: newStatus } : lead))
+    );
+  };
+
+  // --- Offline Visit Actions ---
+  const handleAddVisitReport = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!visitForm.storeName.trim() || !visitForm.salesName.trim()) return;
+
+    const newVisit: OfflineVisitReport = {
+      id: `KV-${String(visitReports.length + 1).padStart(3, '0')}`,
+      tanggal: visitForm.tanggal,
+      salesName: visitForm.salesName.trim(),
+      storeName: visitForm.storeName.trim().toUpperCase(),
+      contactPerson: visitForm.contactPerson.trim() || '-',
+      region: visitForm.region.trim() || 'Banyuwangi',
+      purpose: visitForm.purpose.trim() || 'Kunjungan Sales & Cek Stok',
+      outcome: visitForm.outcome.trim() || 'Tercatat di laporan kunjungan',
+      followUpDate: visitForm.followUpDate,
+      status: visitForm.status
+    };
+
+    setVisitReports([newVisit, ...visitReports]);
+    setShowAddVisitModal(false);
+    setVisitForm({
+      ...visitForm,
+      storeName: '',
+      contactPerson: '',
+      purpose: '',
+      outcome: ''
+    });
+    setPopupModal({
+      title: 'Laporan Kunjungan Disimpan',
+      message: `Laporan kunjungan ke "${newVisit.storeName}" oleh ${newVisit.salesName} berhasil disimpan.`
+    });
+  };
+
+  const handleUpdateVisitStatus = (id: string, status: OfflineVisitReport['status']) => {
+    setVisitReports(prev => prev.map(v => (v.id === id ? { ...v, status } : v)));
+  };
+
+  const handleDeleteVisit = (id: string) => {
+    setVisitReports(prev => prev.filter(v => v.id !== id));
+  };
+
+  const handleExportVisitExcel = () => {
+    const rows = filteredVisits.map((v, i) => ({
+      No: i + 1,
+      'Kode Kunjungan': v.id,
+      'Tanggal Kunjungan': v.tanggal,
+      'Sales / Marketing': v.salesName,
+      'Nama Toko / Pelanggan': v.storeName,
+      'PIC / Kontak': v.contactPerson,
+      Wilayah: v.region,
+      'Tujuan Kunjungan': v.purpose,
+      'Hasil Kunjungan': v.outcome,
+      'Tgl Follow-Up': v.followUpDate,
+      'Status Kunjungan': v.status
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Laporan_Kunjungan');
+    XLSX.writeFile(wb, `Laporan_Kunjungan_Marketing_AKK_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  // --- Offline Sales Actions ---
+  const handleAddSalesReport = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!salesForm.storeName.trim() || !salesForm.namaBarang.trim()) return;
+
+    const gross = Math.max(0, Number(salesForm.qty) * Number(salesForm.hargaSatuan));
+    const diskonNominal = Math.max(0, Number(salesForm.diskon) || 0);
+    const total = Math.max(0, gross - diskonNominal);
+    const newSale: OfflineSalesReport = {
+      id: `SR-${String(salesReports.length + 1).padStart(3, '0')}`,
+      noNota: salesForm.noNota.trim() || `SO-AKK-2610-${String(salesReports.length + 85).padStart(3, '0')}`,
+      tanggal: salesForm.tanggal,
+      salesName: salesForm.salesName.trim(),
+      storeName: salesForm.storeName.trim().toUpperCase(),
+      region: salesForm.region.trim() || 'Banyuwangi',
+      kategoriBarang: salesForm.kategoriBarang,
+      namaBarang: salesForm.namaBarang.trim(),
+      qty: Number(salesForm.qty) || 1,
+      satuan: salesForm.satuan,
+      diskon: diskonNominal,
+      hargaSatuan: Number(salesForm.hargaSatuan) || 0,
+      totalPenjualan: total,
+      statusPembayaran: salesForm.statusPembayaran,
+      catatan: salesForm.catatan.trim()
+    };
+
+    setSalesReports([newSale, ...salesReports]);
+
+    // Otomatis integrasikan ke Tagihan Pelanggan (Finance & Aplikasi Penagihan) bila Tempo / DP
+    if (newSale.statusPembayaran !== 'Lunas') {
+      const daysTempo = newSale.statusPembayaran === 'Tempo 30 Hari' ? 30 : 14;
+      const baseDate = new Date(`${newSale.tanggal}T00:00:00`);
+      const dueStr = isNaN(baseDate.getTime())
+        ? new Date(Date.now() + daysTempo * 86400000).toISOString().split('T')[0]
+        : new Date(baseDate.getTime() + daysTempo * 86400000).toISOString().split('T')[0];
+      const matchedVisit = visitReports.find(
+        v => v.storeName.toLowerCase() === newSale.storeName.toLowerCase()
+      );
+      const dpPaid = newSale.statusPembayaran === 'DP / Cicilan' ? Math.round(total * 0.5) : 0;
+
+      const autoInvoice: CustomerUnpaidInvoice = {
+        id: `INV-${Date.now()}`,
+        noInvoice: newSale.noNota.startsWith('INV')
+          ? newSale.noNota
+          : `INV/AKK/2026/11/${String(customerInvoices.length + 225).padStart(4, '0')}`,
+        noSuratJalan: newSale.noNota,
+        customerName: newSale.storeName,
+        contactPhone: matchedVisit?.contactPerson || '-',
+        region: newSale.region,
+        invoiceDate: newSale.tanggal,
+        dueDate: dueStr,
+        itemSummary: `${newSale.namaBarang} (${newSale.qty.toLocaleString('id-ID')} ${newSale.satuan})`,
+        totalTagihan: total,
+        jumlahTerbayar: dpPaid,
+        billingTeam: 'SALES',
+        salesPersonName: newSale.salesName,
+        notes: `[Marketing Offline - ${newSale.salesName}] ${newSale.statusPembayaran}${newSale.catatan ? ` • ${newSale.catatan}` : ''}`
+      };
+      updateCustomerInvoices(prev => [autoInvoice, ...prev]);
+    }
+
+    setShowAddSalesModal(false);
+    setSalesForm({
+      ...salesForm,
+      noNota: `SO-AKK-2610-${String(salesReports.length + 86).padStart(3, '0')}`,
+      storeName: '',
+      diskon: 0,
+      catatan: ''
+    });
+    setPopupModal({
+      title: 'Laporan Penjualan Disimpan',
+      message:
+        newSale.statusPembayaran !== 'Lunas'
+          ? `Penjualan ${newSale.noNota} untuk "${newSale.storeName}" senilai Rp ${total.toLocaleString('id-ID')} berhasil disimpan dan otomatis terintegrasi ke Daftar Tagihan Finance & Aplikasi Penagihan Pelanggan.`
+          : `Penjualan ${newSale.noNota} untuk "${newSale.storeName}" senilai Rp ${total.toLocaleString('id-ID')} berhasil disimpan.`
+    });
+  };
+
+  const handleAddBillingInvoice = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!billingForm.customerName.trim() || !billingForm.noInvoice.trim()) return;
+
+    const newItem: CustomerUnpaidInvoice = {
+      id: `INV-${Date.now()}`,
+      noInvoice: billingForm.noInvoice.trim().toUpperCase(),
+      noSuratJalan: billingForm.noSuratJalan.trim().toUpperCase() || '-',
+      customerName: billingForm.customerName.trim().toUpperCase(),
+      contactPhone: billingForm.contactPhone.trim() || '-',
+      region: billingForm.region.trim() || 'Banyuwangi',
+      invoiceDate: billingForm.invoiceDate,
+      dueDate: billingForm.dueDate,
+      itemSummary: billingForm.itemSummary.trim() || 'Pesanan Kemasan Karton Box AKK',
+      totalTagihan: Math.max(0, Number(billingForm.totalTagihan) || 0),
+      jumlahTerbayar: Math.max(0, Number(billingForm.jumlahTerbayar) || 0),
+      billingTeam: billingForm.billingTeam,
+      salesPersonName: billingForm.billingTeam === 'SALES' ? billingForm.salesPersonName.trim() || 'Sales AKK' : undefined,
+      notes: billingForm.notes.trim() || 'Diinput dari Marketing Offline (Terintegrasi Finance)'
+    };
+
+    updateCustomerInvoices(prev => [newItem, ...prev]);
+    setShowAddBillingModal(false);
+    setOfflineSubTab('tagihan');
+    setBillingForm({
+      ...billingForm,
+      noInvoice: `INV/AKK/2026/11/${String(customerInvoices.length + 226).padStart(4, '0')}`,
+      noSuratJalan: `SJ-AKK-2611-${String(customerInvoices.length + 170)}`,
+      customerName: '',
+      contactPhone: '',
+      itemSummary: '',
+      notes: ''
+    });
+    setPopupModal({
+      title: 'Tagihan Pelanggan Terintegrasi Disimpan',
+      message: `Tagihan ${newItem.noInvoice} untuk "${newItem.customerName}" berhasil disimpan dan otomatis sinkron ke Finance & Aplikasi Penagihan Pelanggan.`
+    });
+  };
+
+  const handleSaveBillingPayment = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!billingPayModalInvoice) return;
+    const bayar = Math.max(0, Number(billingPayNominal) || 0);
+    const updatedTerbayar = Math.min(
+      billingPayModalInvoice.totalTagihan,
+      billingPayModalInvoice.jumlahTerbayar + bayar
+    );
+    const sisaBaru = Math.max(0, billingPayModalInvoice.totalTagihan - updatedTerbayar);
+
+    updateCustomerInvoices(prev =>
+      prev.map(item =>
+        item.id === billingPayModalInvoice.id
+          ? {
+              ...item,
+              jumlahTerbayar: updatedTerbayar,
+              lastPaymentDate: new Date().toISOString().slice(0, 10),
+              notes:
+                billingPayNotes.trim() ||
+                (sisaBaru === 0
+                  ? 'Telah dilunasi penuh (Marketing Offline / Finance)'
+                  : `Pembayaran cicilan masuk Rp ${bayar.toLocaleString('id-ID')}`)
+            }
+          : item
+      )
+    );
+
+    const custName = billingPayModalInvoice.customerName;
+    const invNo = billingPayModalInvoice.noInvoice;
+    setBillingPayModalInvoice(null);
+    setPopupModal({
+      title: sisaBaru === 0 ? 'Tagihan Pelanggan Lunas' : 'Pembayaran Cicilan Dicatat',
+      message:
+        sisaBaru === 0
+          ? `Tagihan ${invNo} untuk "${custName}" telah dinyatakan LUNAS dan tersinkron ke Finance.`
+          : `Pembayaran Rp ${bayar.toLocaleString('id-ID')} untuk ${invNo} (${custName}) berhasil disimpan. Sisa tagihan: Rp ${sisaBaru.toLocaleString('id-ID')}.`
+    });
+  };
+
+  const handleDeleteBillingInvoice = (id: string) => {
+    updateCustomerInvoices(prev => prev.filter(item => item.id !== id));
+  };
+
+  const handleExportSalesExcel = () => {
+    const rows = filteredSales.map(s => ({
+      'No Nota/Faktur & Tanggal': `${s.noNota} (${s.tanggal})`,
+      'Nama Toko/Pelanggan': s.storeName,
+      'Kategori Barang': s.kategoriBarang,
+      Qty: s.qty,
+      Satuan: s.satuan,
+      Diskon: s.diskon || 0,
+      Harga: s.totalPenjualan
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Laporan_Penjualan');
+    XLSX.writeFile(wb, `Laporan_Penjualan_Marketing_AKK_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  // --- Filtered Lists ---
+  const filteredOnlineLeads = onlineLeads.filter(lead => {
+    const matchesSearch =
+      lead.clientName.toLowerCase().includes(onlineSearch.toLowerCase()) ||
+      lead.city.toLowerCase().includes(onlineSearch.toLowerCase()) ||
+      lead.productType.toLowerCase().includes(onlineSearch.toLowerCase());
+    const matchesStatus = onlineFilterStatus === 'all' || lead.status === onlineFilterStatus;
+    const matchesChannel = onlineFilterChannel === 'all' || lead.channel === onlineFilterChannel;
+    return matchesSearch && matchesStatus && matchesChannel;
+  });
+
+  const availableVisitRegions = useMemo(() => {
+    const set = new Set<string>();
+    visitReports.forEach(v => {
+      if (v.region) set.add(v.region);
+    });
+    return Array.from(set);
+  }, [visitReports]);
+
+  const filteredVisits = useMemo(() => {
+    const q = visitSearch.trim().toLowerCase();
+    return visitReports.filter(v => {
+      const matchSearch =
+        !q ||
+        v.storeName.toLowerCase().includes(q) ||
+        v.salesName.toLowerCase().includes(q) ||
+        v.region.toLowerCase().includes(q) ||
+        v.purpose.toLowerCase().includes(q) ||
+        v.outcome.toLowerCase().includes(q) ||
+        v.id.toLowerCase().includes(q);
+      const matchStatus = visitStatusFilter === 'ALL' || v.status === visitStatusFilter;
+      const matchRegion = visitRegionFilter === 'ALL' || v.region === visitRegionFilter;
+      return matchSearch && matchStatus && matchRegion;
+    });
+  }, [visitReports, visitSearch, visitStatusFilter, visitRegionFilter]);
+
+  const totalVisitPages = Math.max(1, Math.ceil(filteredVisits.length / visitPageSize));
+  const currentVisitPage = Math.min(visitPage, totalVisitPages);
+  const paginatedVisits = filteredVisits.slice(
+    (currentVisitPage - 1) * visitPageSize,
+    currentVisitPage * visitPageSize
+  );
+
+  const availableSalesKategori = useMemo(() => {
+    const set = new Set<string>();
+    salesReports.forEach(s => {
+      if (s.kategoriBarang) set.add(s.kategoriBarang);
+    });
+    return Array.from(set);
+  }, [salesReports]);
+
+  const availableSalesPersons = useMemo(() => {
+    const set = new Set<string>(['Rendra Saputra', 'Dina Mariana', 'Bagus Setiawan']);
+    salesReports.forEach(s => {
+      if (s.salesName) set.add(s.salesName);
+    });
+    visitReports.forEach(v => {
+      if (v.salesName) set.add(v.salesName);
+    });
+    return Array.from(set);
+  }, [salesReports, visitReports]);
+
+  const dailyCalendarDates = useMemo(() => {
+    const dateSet = new Set<string>();
+    salesReports.forEach(s => {
+      if (s.tanggal) dateSet.add(s.tanggal);
+    });
+    // Also add 7 recent days up to 2026-10-29 so daily calendar strip always has rich daily dates
+    const baseDates = [
+      '2026-10-23',
+      '2026-10-24',
+      '2026-10-25',
+      '2026-10-26',
+      '2026-10-27',
+      '2026-10-28',
+      '2026-10-29'
+    ];
+    baseDates.forEach(d => dateSet.add(d));
+    if (salesDateFilter !== 'ALL' && salesDateFilter) {
+      dateSet.add(salesDateFilter);
+    }
+    return Array.from(dateSet).sort((a, b) => a.localeCompare(b));
+  }, [salesReports, salesDateFilter]);
+
+  const filteredSales = useMemo(() => {
+    const q = salesSearch.trim().toLowerCase();
+    return salesReports.filter(s => {
+      const matchSearch =
+        !q ||
+        s.noNota.toLowerCase().includes(q) ||
+        s.storeName.toLowerCase().includes(q) ||
+        s.salesName.toLowerCase().includes(q) ||
+        s.kategoriBarang.toLowerCase().includes(q) ||
+        s.namaBarang.toLowerCase().includes(q) ||
+        s.region.toLowerCase().includes(q);
+      const matchDate = salesDateFilter === 'ALL' || s.tanggal === salesDateFilter;
+      const matchSalesPerson = salesPersonFilter === 'ALL' || s.salesName === salesPersonFilter;
+      const matchPayment = salesPaymentFilter === 'ALL' || s.statusPembayaran === salesPaymentFilter;
+      const matchKat = salesKategoriFilter === 'ALL' || s.kategoriBarang === salesKategoriFilter;
+      return matchSearch && matchDate && matchSalesPerson && matchPayment && matchKat;
+    });
+  }, [salesReports, salesSearch, salesDateFilter, salesPersonFilter, salesPaymentFilter, salesKategoriFilter]);
+
+  const totalSalesPages = Math.max(1, Math.ceil(filteredSales.length / salesPageSize));
+  const currentSalesPage = Math.min(salesPage, totalSalesPages);
+  const paginatedSales = filteredSales.slice(
+    (currentSalesPage - 1) * salesPageSize,
+    currentSalesPage * salesPageSize
+  );
+
+  // --- Real-time Metrics ---
+  const totalLeadBudget = onlineLeads.reduce((acc, lead) => acc + (lead.status !== 'Batal' ? lead.budgetIDR : 0), 0);
+  const totalDealsValue = onlineLeads
+    .filter(l => l.status === 'Deal / SPK')
+    .reduce((acc, l) => acc + l.budgetIDR, 0);
+  const totalLeadsCount = onlineLeads.length;
+  const dealLeadsCount = onlineLeads.filter(l => l.status === 'Deal / SPK').length;
+  const conversionRate = totalLeadsCount > 0 ? ((dealLeadsCount / totalLeadsCount) * 100).toFixed(1) : '0';
+
+  const totalVisitsCount = visitReports.length;
+  const orderVisitsCount = visitReports.filter(v => v.status === 'Selesai & Order').length;
+  const visitOrderRate = totalVisitsCount > 0 ? ((orderVisitsCount / totalVisitsCount) * 100).toFixed(1) : '0';
+  const totalOfflineSalesOmset = salesReports.reduce((sum, s) => sum + s.totalPenjualan, 0);
+  const totalFilteredSalesOmset = filteredSales.reduce((sum, s) => sum + s.totalPenjualan, 0);
+
+  if (activeTab === 'marketing_invoice_validation') {
+    return <MarketingInvoiceValidationView onNavigateTab={onNavigateTab} />;
+  }
+
+  if (activeTab === 'marketing_sales_mapping') {
+    return <MarketingSalesMappingView onNavigateTab={onNavigateTab} />;
+  }
+
+  // ============================================================
+  // RENDER: PROSENTASE TO, VO & RO (TAKE ORDER, VISIT ORDER, REPEAT ORDER)
+  // ============================================================
+  if (activeTab === 'marketing_to_vo_ro') {
+    const filteredTvr = toVoRoList.filter(item => {
+      const q = tvrSearch.trim().toLowerCase();
+      const matchQ =
+        !q ||
+        item.salesName.toLowerCase().includes(q) ||
+        item.wilayah.toLowerCase().includes(q) ||
+        item.cabang.toLowerCase().includes(q);
+      const selectedMasterBranch = branches.find(
+        b => b.name.toLowerCase() === tvrBranchFilter.toLowerCase() || b.slug.toLowerCase() === tvrBranchFilter.toLowerCase()
+      );
+      const matchBranch =
+        tvrBranchFilter === 'ALL' ||
+        item.cabang.toLowerCase() === tvrBranchFilter.toLowerCase() ||
+        Boolean(
+          selectedMasterBranch &&
+            (item.cabang.toLowerCase() === selectedMasterBranch.name.toLowerCase() ||
+              item.cabang.toLowerCase() === selectedMasterBranch.slug.toLowerCase() ||
+              item.cabang.toLowerCase() === (selectedMasterBranch.city || '').toLowerCase() ||
+              item.wilayah.toLowerCase().includes(selectedMasterBranch.slug.toLowerCase()))
+        );
+      return matchQ && matchBranch;
+    });
+
+    const totalTargetVisit = filteredTvr.reduce((s, r) => s + r.targetVisit, 0);
+    const totalRealisasiVo = filteredTvr.reduce((s, r) => s + r.realisasiVisitVo, 0);
+    const totalTakeOrderTo = filteredTvr.reduce((s, r) => s + r.takeOrderTo, 0);
+    const totalRepeatOrderRo = filteredTvr.reduce((s, r) => s + r.repeatOrderRo, 0);
+    const totalTokoAktifSum = filteredTvr.reduce((s, r) => s + r.totalTokoAktif, 0);
+    const totalOmsetTvr = filteredTvr.reduce((s, r) => s + r.nilaiOmsetIdr, 0);
+
+    const avgVoPct = totalTargetVisit > 0 ? ((totalRealisasiVo / totalTargetVisit) * 100).toFixed(1) : '0.0';
+    const avgToPct = totalRealisasiVo > 0 ? ((totalTakeOrderTo / totalRealisasiVo) * 100).toFixed(1) : '0.0';
+    const avgRoPct = totalTokoAktifSum > 0 ? ((totalRepeatOrderRo / totalTokoAktifSum) * 100).toFixed(1) : '0.0';
+
+    const handleExportTvrExcel = () => {
+      const rows = filteredTvr.map((r, i) => {
+        const voPct = r.targetVisit > 0 ? Math.round((r.realisasiVisitVo / r.targetVisit) * 1000) / 10 : 0;
+        const toPct = r.realisasiVisitVo > 0 ? Math.round((r.takeOrderTo / r.realisasiVisitVo) * 1000) / 10 : 0;
+        const roPct = r.totalTokoAktif > 0 ? Math.round((r.repeatOrderRo / r.totalTokoAktif) * 1000) / 10 : 0;
+        return {
+          No: i + 1,
+          Periode: r.periode,
+          Cabang: r.cabang,
+          'Nama Sales / Marketing': r.salesName,
+          'Wilayah / Area': r.wilayah,
+          'Toko Aktif': r.totalTokoAktif,
+          'Target Kunjungan': r.targetVisit,
+          'Realisasi Visit (VO)': r.realisasiVisitVo,
+          'Take Order (TO)': r.takeOrderTo,
+          'Repeat Order (RO)': r.repeatOrderRo,
+          '% VO': `${voPct}%`,
+          '% TO': `${toPct}%`,
+          '% RO': `${roPct}%`,
+          'Realisasi Omset (Rp)': r.nilaiOmsetIdr,
+          Catatan: r.catatan
+        };
+      });
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Prosentase_TO_VO_RO');
+      XLSX.writeFile(wb, `Rekap_Prosentase_TO_VO_RO_Marketing_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    };
+
+    return (
+      <div className="space-y-5" id="marketing_to_vo_ro_hub">
+        {/* Header */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="px-2.5 py-0.5 rounded-lg bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-[10px] font-black uppercase tracking-wider">
+                Marketing Analytics &bull; Indikator TO, VO &amp; RO
+              </span>
+            </div>
+            <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
+              Analisa Prosentase TO (Take Order), VO (Visit Order) &amp; RO (Repeat Order)
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Monitoring efektivitas kunjungan sales lapangan (VO), tingkat konversi order masuk (TO), dan loyalitas pembelian berulang toko mitra (RO) di setiap cabang.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleExportTvrExcel}
+              className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Ekspor Excel TO/VO/RO</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowAddTvrModal(true)}
+              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Input Data TO / VO / RO</span>
+            </button>
+          </div>
+        </div>
+
+        {/* KPI Cards TO / VO / RO */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] font-black uppercase text-slate-500">Prosentase VO (Visit Order)</span>
+              <MapPin className="w-4 h-4 text-sky-500" />
+            </div>
+            <div className="text-2xl font-black text-sky-600 dark:text-sky-400 font-mono">{avgVoPct}%</div>
+            <p className="text-[11px] text-slate-500 mt-1">
+              Realisasi {totalRealisasiVo} dari {totalTargetVisit} target kunjungan
+            </p>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] font-black uppercase text-slate-500">Prosentase TO (Take Order)</span>
+              <ShoppingBag className="w-4 h-4 text-indigo-500" />
+            </div>
+            <div className="text-2xl font-black text-indigo-600 dark:text-indigo-400 font-mono">{avgToPct}%</div>
+            <p className="text-[11px] text-slate-500 mt-1">
+              {totalTakeOrderTo} toko melakukan order dari {totalRealisasiVo} visit
+            </p>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] font-black uppercase text-slate-500">Prosentase RO (Repeat Order)</span>
+              <TrendingUp className="w-4 h-4 text-emerald-500" />
+            </div>
+            <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 font-mono">{avgRoPct}%</div>
+            <p className="text-[11px] text-slate-500 mt-1">
+              {totalRepeatOrderRo} toko repeat order dari {totalTokoAktifSum} toko aktif
+            </p>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] font-black uppercase text-slate-500">Total Realisasi Omset</span>
+              <DollarSign className="w-4 h-4 text-amber-500" />
+            </div>
+            <div className="text-xl font-black text-slate-900 dark:text-white font-mono">
+              Rp {totalOmsetTvr.toLocaleString('id-ID')}
+            </div>
+            <p className="text-[11px] text-slate-500 mt-1">
+              Akumulasi transaksi TO, VO &amp; RO seluruh tim
+            </p>
+          </div>
+        </div>
+
+        {/* Filter & Search Bar */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={tvrSearch}
+              onChange={e => setTvrSearch(e.target.value)}
+              placeholder="Cari Nama Sales, Wilayah, atau Cabang..."
+              className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-slate-500">Pilih Cabang (Master Cabang):</span>
+            <select
+              value={tvrBranchFilter}
+              onChange={e => setTvrBranchFilter(e.target.value)}
+              className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer"
+            >
+              <option value="ALL">Semua Cabang ({branches.length} Cabang)</option>
+              {branches.map(b => (
+                <option key={b.id} value={b.name}>
+                  Cabang {b.name} ({b.city || b.slug})
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Table TO, VO & RO */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
+          <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                Tabel Performa Prosentase TO, VO &amp; RO per Sales &amp; Wilayah
+              </h3>
+              <p className="text-xs text-slate-500">
+                VO = Kunjungan Terlaksana vs Target &bull; TO = Order Masuk vs Kunjungan &bull; RO = Toko Repeat Order vs Total Toko Aktif
+              </p>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left">
+              <thead className="bg-slate-50 dark:bg-slate-950 text-slate-500 uppercase font-bold text-[10px] border-b border-slate-200 dark:border-slate-800">
+                <tr>
+                  <th className="py-3 px-4">Sales &amp; Wilayah</th>
+                  <th className="py-3 px-4">Cabang</th>
+                  <th className="py-3 px-4 text-center">Toko Aktif</th>
+                  <th className="py-3 px-4 text-center">Target Visit</th>
+                  <th className="py-3 px-4 text-center">Visit (VO)</th>
+                  <th className="py-3 px-4 text-center">Take Order (TO)</th>
+                  <th className="py-3 px-4 text-center">Repeat Order (RO)</th>
+                  <th className="py-3 px-4 text-center">% VO</th>
+                  <th className="py-3 px-4 text-center">% TO</th>
+                  <th className="py-3 px-4 text-center">% RO</th>
+                  <th className="py-3 px-4 text-right">Omset (Rp)</th>
+                  <th className="py-3 px-4 text-center">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-800 dark:text-slate-200">
+                {filteredTvr.map(row => {
+                  const voPct = row.targetVisit > 0 ? Math.round((row.realisasiVisitVo / row.targetVisit) * 1000) / 10 : 0;
+                  const toPct = row.realisasiVisitVo > 0 ? Math.round((row.takeOrderTo / row.realisasiVisitVo) * 1000) / 10 : 0;
+                  const roPct = row.totalTokoAktif > 0 ? Math.round((row.repeatOrderRo / row.totalTokoAktif) * 1000) / 10 : 0;
+                  return (
+                    <tr key={row.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
+                      <td className="py-3 px-4">
+                        <div className="font-bold text-slate-900 dark:text-white">{row.salesName}</div>
+                        <div className="text-[11px] text-slate-500">{row.wilayah}</div>
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-[10px]">
+                          {row.cabang}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-center font-mono font-bold">{row.totalTokoAktif}</td>
+                      <td className="py-3 px-4 text-center font-mono">{row.targetVisit}</td>
+                      <td className="py-3 px-4 text-center font-mono font-bold text-sky-600 dark:text-sky-400">
+                        {row.realisasiVisitVo}
+                      </td>
+                      <td className="py-3 px-4 text-center font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                        {row.takeOrderTo}
+                      </td>
+                      <td className="py-3 px-4 text-center font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                        {row.repeatOrderRo}
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        <span className="px-2 py-0.5 rounded-lg bg-sky-50 dark:bg-sky-500/15 text-sky-700 dark:text-sky-300 font-mono font-black text-[11px]">
+                          {voPct}%
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        <span className="px-2 py-0.5 rounded-lg bg-indigo-50 dark:bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 font-mono font-black text-[11px]">
+                          {toPct}%
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        <span className="px-2 py-0.5 rounded-lg bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-mono font-black text-[11px]">
+                          {roPct}%
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-right font-mono font-bold text-slate-900 dark:text-white">
+                        Rp {row.nilaiOmsetIdr.toLocaleString('id-ID')}
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        <button
+                          type="button"
+                          onClick={() => setToVoRoList(prev => prev.filter(item => item.id !== row.id))}
+                          className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-500/10 cursor-pointer"
+                          title="Hapus Data"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Modal Tambah Data TO / VO / RO */}
+        {showAddTvrModal && (
+          <div className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-lg p-5 space-y-4 shadow-2xl">
+              <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+                <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                  Input Data Prosentase TO, VO &amp; RO
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setShowAddTvrModal(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <form
+                onSubmit={e => {
+                  e.preventDefault();
+                  if (!tvrForm.salesName.trim()) return;
+                  const newItem: ToVoRoRecord = {
+                    id: `TVR-${Date.now()}`,
+                    periode: tvrForm.periode,
+                    cabang: tvrForm.cabang,
+                    salesName: tvrForm.salesName.trim(),
+                    wilayah: tvrForm.wilayah.trim() || tvrForm.cabang,
+                    totalTokoAktif: Math.max(1, Number(tvrForm.totalTokoAktif) || 1),
+                    targetVisit: Math.max(1, Number(tvrForm.targetVisit) || 1),
+                    realisasiVisitVo: Math.max(0, Number(tvrForm.realisasiVisitVo) || 0),
+                    takeOrderTo: Math.max(0, Number(tvrForm.takeOrderTo) || 0),
+                    repeatOrderRo: Math.max(0, Number(tvrForm.repeatOrderRo) || 0),
+                    nilaiOmsetIdr: Math.max(0, Number(tvrForm.nilaiOmsetIdr) || 0),
+                    catatan: tvrForm.catatan.trim()
+                  };
+                  setToVoRoList(prev => [newItem, ...prev]);
+                  setShowAddTvrModal(false);
+                }}
+                className="space-y-3 text-xs"
+              >
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Cabang (Master Cabang)</label>
+                    <select
+                      value={tvrForm.cabang}
+                      onChange={e => setTvrForm({ ...tvrForm, cabang: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                    >
+                      {branches.map(b => (
+                        <option key={b.id} value={b.name}>
+                          Cabang {b.name} ({b.city || b.slug})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Nama Sales</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Contoh: Rendra Saputra"
+                      value={tvrForm.salesName}
+                      onChange={e => setTvrForm({ ...tvrForm, salesName: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Wilayah / Rute Kunjungan</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Contoh: Genteng, Srono & Muncar"
+                    value={tvrForm.wilayah}
+                    onChange={e => setTvrForm({ ...tvrForm, wilayah: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                  />
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  <div>
+                    <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Toko Aktif</label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={tvrForm.totalTokoAktif}
+                      onChange={e => setTvrForm({ ...tvrForm, totalTokoAktif: Number(e.target.value) })}
+                      className="w-full px-2.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Target Visit</label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={tvrForm.targetVisit}
+                      onChange={e => setTvrForm({ ...tvrForm, targetVisit: Number(e.target.value) })}
+                      className="w-full px-2.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Visit (VO)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={tvrForm.realisasiVisitVo}
+                      onChange={e => setTvrForm({ ...tvrForm, realisasiVisitVo: Number(e.target.value) })}
+                      className="w-full px-2.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Take Order (TO)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={tvrForm.takeOrderTo}
+                      onChange={e => setTvrForm({ ...tvrForm, takeOrderTo: Number(e.target.value) })}
+                      className="w-full px-2.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Repeat Order (RO)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={tvrForm.repeatOrderRo}
+                      onChange={e => setTvrForm({ ...tvrForm, repeatOrderRo: Number(e.target.value) })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-bold text-slate-600 dark:text-slate-300 block mb-1">Nilai Omset (Rp)</label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={tvrForm.nilaiOmsetIdr}
+                      onChange={e => setTvrForm({ ...tvrForm, nilaiOmsetIdr: Number(e.target.value) })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono"
+                    />
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddTvrModal(false)}
+                    className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold cursor-pointer"
+                  >
+                    Simpan Data TO/VO/RO
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ============================================================
+  // RENDER: MARKETING OFFLINE (LAPORAN KUNJUNGAN & LAPORAN PENJUALAN)
+  // ============================================================
+  if (activeTab === 'marketing_offline') {
+    return (
+      <div className="space-y-5" id="marketing_offline_hub">
+        {/* TOP HEADER BANNER */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+          <div className="flex items-start gap-3.5">
+            <div className="w-11 h-11 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
+              <Megaphone className="w-5 h-5" />
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-black uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
+                  DEPARTEMEN MARKETING OFFLINE AKK
+                </span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30">
+                  Aktif Terintegrasi
+                </span>
+              </div>
+              <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white tracking-tight">
+                Laporan Kunjungan &amp; Laporan Penjualan Marketing Offline
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Pencatatan terpadu kunjungan sales lapangan ke toko/pelanggan serta rekapitulasi realisasi penjualan kemasan PT Anugrah Kemasan Kreatif.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setShowAddVisitModal(true)}
+              className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Input Laporan Kunjungan</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowAddSalesModal(true)}
+              className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Input Laporan Penjualan</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowAddBillingModal(true)}
+              className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Input Tagihan</span>
+            </button>
+          </div>
+        </div>
+
+        {/* KPI SUMMARY CARDS */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Total Laporan Kunjungan
+              </span>
+              <MapPin className="w-4 h-4 text-emerald-500" />
+            </div>
+            <div className="text-xl font-black text-slate-900 dark:text-white font-mono">
+              {totalVisitsCount} Kunjungan
+            </div>
+            <p className="text-[11px] text-slate-500 mt-1">
+              {orderVisitsCount} kunjungan menghasilkan order langsung ({visitOrderRate}%)
+            </p>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Total Penjualan Offline
+              </span>
+              <ShoppingBag className="w-4 h-4 text-indigo-500" />
+            </div>
+            <div className="text-xl font-black text-emerald-600 dark:text-emerald-400 font-mono">
+              Rp {totalOfflineSalesOmset.toLocaleString('id-ID')}
+            </div>
+            <p className="text-[11px] text-slate-500 mt-1">
+              Dari {salesReports.length} nota transaksi penjualan toko/mitra
+            </p>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Nota Penjualan Lunas
+              </span>
+              <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+            </div>
+            <div className="text-xl font-black text-slate-900 dark:text-white font-mono">
+              {salesReports.filter(s => s.statusPembayaran === 'Lunas').length} / {salesReports.length} Nota
+            </div>
+            <p className="text-[11px] text-slate-500 mt-1">
+              Sisanya pembayaran tempo / bertahap
+            </p>
+          </div>
+
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 rounded-2xl shadow-xs">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Tagihan Pelanggan (Finance)
+              </span>
+              <DollarSign className="w-4 h-4 text-amber-500" />
+            </div>
+            <div className="text-xl font-black text-amber-600 dark:text-amber-400 font-mono">
+              {customerInvoices.filter(i => i.totalTagihan - i.jumlahTerbayar > 0).length} Tagihan Aktif
+            </div>
+            <p className="text-[11px] text-slate-500 mt-1">
+              Terintegrasi langsung dengan Finance &amp; Aplikasi Penagihan
+            </p>
+          </div>
+        </div>
+
+        {/* SUB-NAVIGATION SWITCHER: LAPORAN KUNJUNGAN VS LAPORAN PENJUALAN VS TAGIHAN PELANGGAN */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-2 flex flex-wrap items-center justify-between gap-3 shadow-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setOfflineSubTab('kunjungan')}
+              className={`px-4 py-2.5 rounded-xl text-xs font-black flex items-center gap-2 transition cursor-pointer ${
+                offlineSubTab === 'kunjungan'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              <ClipboardCheck className="w-4 h-4" />
+              <span>1. Laporan Kunjungan ({visitReports.length})</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setOfflineSubTab('penjualan')}
+              className={`px-4 py-2.5 rounded-xl text-xs font-black flex items-center gap-2 transition cursor-pointer ${
+                offlineSubTab === 'penjualan'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              <ShoppingBag className="w-4 h-4" />
+              <span>2. Laporan Penjualan ({salesReports.length})</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setOfflineSubTab('tagihan')}
+              className={`px-4 py-2.5 rounded-xl text-xs font-black flex items-center gap-2 transition cursor-pointer ${
+                offlineSubTab === 'tagihan'
+                  ? 'bg-amber-600 text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              <DollarSign className="w-4 h-4" />
+              <span>
+                3. Tagihan Pelanggan ({customerInvoices.filter(i => i.totalTagihan - i.jumlahTerbayar > 0).length})
+              </span>
+            </button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 pr-1">
+            {onNavigateTab && (
+              <button
+                type="button"
+                onClick={() => onNavigateTab('marketing_billing_app')}
+                className="px-3.5 py-2 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-700 dark:text-amber-300 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <DollarSign className="w-3.5 h-3.5" />
+                <span>Aplikasi Penagihan Pelanggan</span>
+              </button>
+            )}
+            {offlineSubTab === 'kunjungan' ? (
+              <button
+                type="button"
+                onClick={handleExportVisitExcel}
+                className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Ekspor Excel Kunjungan</span>
+              </button>
+            ) : offlineSubTab === 'penjualan' ? (
+              <button
+                type="button"
+                onClick={handleExportSalesExcel}
+                className="px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Ekspor Excel Penjualan</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShowAddBillingModal(true)}
+                className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Tambah Tagihan</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* ============================================================ */}
+        {/* SUB-TAB 1: LAPORAN KUNJUNGAN                                 */}
+        {/* ============================================================ */}
+        {offlineSubTab === 'kunjungan' && (
+          <div className="space-y-4">
+            {/* Search & Filter Bar */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={visitSearch}
+                  onChange={e => {
+                    setVisitSearch(e.target.value);
+                    setVisitPage(1);
+                  }}
+                  placeholder="Cari Nama Toko, Sales Marketing, Wilayah, atau Catatan Kunjungan..."
+                  className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500"
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={visitRegionFilter}
+                  onChange={e => {
+                    setVisitRegionFilter(e.target.value);
+                    setVisitPage(1);
+                  }}
+                  className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer"
+                >
+                  <option value="ALL">Semua Wilayah ({availableVisitRegions.length})</option>
+                  {availableVisitRegions.map(reg => (
+                    <option key={reg} value={reg}>
+                      {reg}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  value={visitStatusFilter}
+                  onChange={e => {
+                    setVisitStatusFilter(e.target.value);
+                    setVisitPage(1);
+                  }}
+                  className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer"
+                >
+                  <option value="ALL">Semua Status Hasil</option>
+                  <option value="Selesai & Order">Selesai &amp; Order</option>
+                  <option value="Menunggu Follow-Up">Menunggu Follow-Up</option>
+                  <option value="Kunjungan Rutin">Kunjungan Rutin</option>
+                  <option value="Belum Order">Belum Order</option>
+                </select>
+
+                <select
+                  value={visitPageSize}
+                  onChange={e => {
+                    setVisitPageSize(Number(e.target.value));
+                    setVisitPage(1);
+                  }}
+                  className="px-2.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer"
+                >
+                  <option value={5}>5 / Hal</option>
+                  <option value={10}>10 / Hal</option>
+                  <option value={20}>20 / Hal</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Table Laporan Kunjungan */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
+              <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                    Daftar Laporan Kunjungan Sales &amp; Marketing Offline
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Rekapitulasi aktivitas kunjungan tatap muka ke toko ritel, mitra grosir, dan pabrik pelanggan.
+                  </p>
+                </div>
+                <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                  Total: {filteredVisits.length} Kunjungan
+                </span>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 uppercase font-bold text-[10px] border-b border-slate-200 dark:border-slate-800">
+                    <tr>
+                      <th className="py-3 px-4">Kode &amp; Tanggal</th>
+                      <th className="py-3 px-4">Sales / Marketing</th>
+                      <th className="py-3 px-4">Nama Toko / Pelanggan</th>
+                      <th className="py-3 px-4">Tujuan &amp; Agenda Kunjungan</th>
+                      <th className="py-3 px-4">Hasil Kunjungan / Catatan</th>
+                      <th className="py-3 px-4">Jadwal Follow-Up</th>
+                      <th className="py-3 px-4">Status Kunjungan</th>
+                      <th className="py-3 px-4 text-right">Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-800 dark:text-slate-200">
+                    {paginatedVisits.length > 0 ? (
+                      paginatedVisits.map(visit => (
+                        <tr key={visit.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
+                          <td className="py-3 px-4">
+                            <div className="font-mono font-bold text-emerald-600 dark:text-emerald-400">{visit.id}</div>
+                            <div className="text-[11px] text-slate-500 font-mono mt-0.5">{visit.tanggal}</div>
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                              <User className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                              <span>{visit.salesName}</span>
+                            </div>
+                            <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
+                              <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                              <span>{visit.region}</span>
+                            </div>
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="font-bold text-slate-900 dark:text-white">{visit.storeName}</div>
+                            <div className="text-[11px] text-slate-500 mt-0.5">{visit.contactPerson}</div>
+                          </td>
+                          <td className="py-3 px-4 max-w-[220px]">
+                            <div className="text-slate-700 dark:text-slate-300 leading-relaxed">{visit.purpose}</div>
+                          </td>
+                          <td className="py-3 px-4 max-w-[240px]">
+                            <div className="font-medium text-slate-800 dark:text-slate-200 leading-relaxed">
+                              {visit.outcome}
+                            </div>
+                          </td>
+                          <td className="py-3 px-4 font-mono text-[11px] font-semibold text-amber-600 dark:text-amber-400">
+                            {visit.followUpDate || '-'}
+                          </td>
+                          <td className="py-3 px-4">
+                            <select
+                              value={visit.status}
+                              onChange={e => handleUpdateVisitStatus(visit.id, e.target.value as OfflineVisitReport['status'])}
+                              className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border cursor-pointer focus:outline-none ${
+                                visit.status === 'Selesai & Order'
+                                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                                  : visit.status === 'Menunggu Follow-Up'
+                                  ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                                  : visit.status === 'Kunjungan Rutin'
+                                  ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30'
+                                  : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'
+                              }`}
+                            >
+                              <option value="Selesai & Order">Selesai &amp; Order</option>
+                              <option value="Menunggu Follow-Up">Menunggu Follow-Up</option>
+                              <option value="Kunjungan Rutin">Kunjungan Rutin</option>
+                              <option value="Belum Order">Belum Order</option>
+                            </select>
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteVisit(visit.id)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 transition cursor-pointer"
+                              title="Hapus Laporan Kunjungan"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={8} className="py-8 text-center text-slate-400 text-xs">
+                          Tidak ada data laporan kunjungan yang sesuai dengan pencarian.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Pagination */}
+              <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div className="text-slate-500 dark:text-slate-400">
+                  Menampilkan{' '}
+                  <strong className="text-slate-900 dark:text-white">
+                    {filteredVisits.length === 0 ? 0 : (currentVisitPage - 1) * visitPageSize + 1}
+                  </strong>{' '}
+                  &ndash;{' '}
+                  <strong className="text-slate-900 dark:text-white">
+                    {Math.min(currentVisitPage * visitPageSize, filteredVisits.length)}
+                  </strong>{' '}
+                  dari <strong className="text-slate-900 dark:text-white">{filteredVisits.length}</strong> laporan kunjungan
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={currentVisitPage <= 1}
+                    onClick={() => setVisitPage(p => Math.max(1, p - 1))}
+                    className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 font-bold disabled:opacity-40 cursor-pointer flex items-center gap-1"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                    <span>Sebelumnya</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={currentVisitPage >= totalVisitPages}
+                    onClick={() => setVisitPage(p => Math.min(totalVisitPages, p + 1))}
+                    className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 font-bold disabled:opacity-40 cursor-pointer flex items-center gap-1"
+                  >
+                    <span>Selanjutnya</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ============================================================ */}
+        {/* SUB-TAB 2: LAPORAN PENJUALAN                                 */}
+        {/* ============================================================ */}
+        {offlineSubTab === 'penjualan' && (
+          <div className="space-y-4">
+            {/* KALENDER HARIAN TANGGAL & PILIHAN DROPDOWN NAMA SALES */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs space-y-4">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3.5">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0">
+                    <Calendar className="w-4.5 h-4.5" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider">
+                      Kalender Harian Tanggal &amp; Filter Sales
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Pilih tanggal harian pada kalender atau pilih nama sales untuk memfilter nota penjualan
+                    </p>
+                  </div>
+                </div>
+
+                {/* Pilihan Dropdown Nama Sales + Input Kalender Tanggal */}
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-1.5">
+                    <User className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                    <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">Nama Sales:</span>
+                    <select
+                      value={salesPersonFilter}
+                      onChange={e => {
+                        setSalesPersonFilter(e.target.value);
+                        setSalesPage(1);
+                      }}
+                      className="bg-transparent text-xs font-black text-slate-900 dark:text-white focus:outline-none cursor-pointer pr-1"
+                    >
+                      <option value="ALL">Semua Sales ({availableSalesPersons.length})</option>
+                      {availableSalesPersons.map(person => (
+                        <option key={person} value={person}>
+                          {person}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                    <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">Pilih Tanggal:</span>
+                    <input
+                      type="date"
+                      value={salesDateFilter === 'ALL' ? '' : salesDateFilter}
+                      onChange={e => {
+                        setSalesDateFilter(e.target.value ? e.target.value : 'ALL');
+                        setSalesPage(1);
+                      }}
+                      className="bg-transparent text-xs font-mono font-bold text-slate-900 dark:text-white focus:outline-none cursor-pointer"
+                    />
+                    {salesDateFilter !== 'ALL' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSalesDateFilter('ALL');
+                          setSalesPage(1);
+                        }}
+                        className="text-[10px] font-bold text-rose-500 hover:underline ml-1 cursor-pointer"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Strip Kalender Harian Tanggal */}
+              <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSalesDateFilter('ALL');
+                    setSalesPage(1);
+                  }}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-black shrink-0 border transition cursor-pointer flex flex-col items-center justify-center min-w-[96px] ${
+                    salesDateFilter === 'ALL'
+                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                      : 'bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-indigo-400'
+                  }`}
+                >
+                  <span className="text-[10px] uppercase tracking-wider opacity-80">Kalender</span>
+                  <span>Semua Tanggal</span>
+                  <span className="text-[10px] font-mono mt-0.5 opacity-90">{salesReports.length} Nota</span>
+                </button>
+
+                {dailyCalendarDates.map(dateStr => {
+                  const countForDate = salesReports.filter(
+                    s => s.tanggal === dateStr && (salesPersonFilter === 'ALL' || s.salesName === salesPersonFilter)
+                  ).length;
+                  const parsed = new Date(`${dateStr}T00:00:00`);
+                  const dayName = isNaN(parsed.getTime())
+                    ? 'Harian'
+                    : parsed.toLocaleDateString('id-ID', { weekday: 'short' });
+                  const dayNumMonth = isNaN(parsed.getTime())
+                    ? dateStr
+                    : parsed.toLocaleDateString('id-ID', { day: '2-digit', month: 'short' });
+                  const isSelected = salesDateFilter === dateStr;
+
+                  return (
+                    <button
+                      key={dateStr}
+                      type="button"
+                      onClick={() => {
+                        setSalesDateFilter(isSelected ? 'ALL' : dateStr);
+                        setSalesPage(1);
+                      }}
+                      className={`px-3.5 py-2 rounded-xl text-xs shrink-0 border transition cursor-pointer flex flex-col items-center justify-center min-w-[88px] ${
+                        isSelected
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs font-black'
+                          : countForDate > 0
+                          ? 'bg-indigo-50/60 dark:bg-indigo-950/30 text-slate-900 dark:text-white border-indigo-200 dark:border-indigo-800/60 hover:border-indigo-400 font-bold'
+                          : 'bg-slate-50 dark:bg-slate-950 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-800 hover:border-slate-400'
+                      }`}
+                    >
+                      <span className="text-[10px] uppercase tracking-wider opacity-75">{dayName}</span>
+                      <span className="font-mono text-xs font-black">{dayNumMonth}</span>
+                      <span
+                        className={`text-[10px] font-mono mt-0.5 ${
+                          isSelected
+                            ? 'text-indigo-100'
+                            : countForDate > 0
+                            ? 'text-indigo-600 dark:text-indigo-400 font-bold'
+                            : 'text-slate-400'
+                        }`}
+                      >
+                        {countForDate} Nota
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Search & Kategori Bar */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-1">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={salesSearch}
+                    onChange={e => {
+                      setSalesSearch(e.target.value);
+                      setSalesPage(1);
+                    }}
+                    placeholder="Cari No. Nota / Faktur, Nama Toko / Pelanggan, atau Kategori Barang..."
+                    className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={salesKategoriFilter}
+                    onChange={e => {
+                      setSalesKategoriFilter(e.target.value);
+                      setSalesPage(1);
+                    }}
+                    className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer"
+                  >
+                    <option value="ALL">Semua Kategori Barang</option>
+                    {availableSalesKategori.map(kat => (
+                      <option key={kat} value={kat}>
+                        {kat}
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={salesPageSize}
+                    onChange={e => {
+                      setSalesPageSize(Number(e.target.value));
+                      setSalesPage(1);
+                    }}
+                    className="px-2.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer"
+                  >
+                    <option value={5}>5 / Hal</option>
+                    <option value={10}>10 / Hal</option>
+                    <option value={20}>20 / Hal</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Table Laporan Penjualan (7 Kolom Sesuai Spesifikasi) */}
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
+              <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                    Tabel Laporan Penjualan Marketing Offline
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Menampilkan No Nota/Faktur &amp; Tanggal, Nama Toko/Pelanggan, Kategori Barang, Qty, Satuan, Diskon, dan Harga.
+                    {salesPersonFilter !== 'ALL' && (
+                      <span className="ml-1.5 font-bold text-indigo-600 dark:text-indigo-400">
+                        &bull; Sales: {salesPersonFilter}
+                      </span>
+                    )}
+                    {salesDateFilter !== 'ALL' && (
+                      <span className="ml-1.5 font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                        &bull; Tanggal: {salesDateFilter}
+                      </span>
+                    )}
+                  </p>
+                </div>
+                <div className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                  Total Harga Penjualan:{' '}
+                  <span className="font-mono text-emerald-600 dark:text-emerald-400 font-black">
+                    Rp {totalFilteredSalesOmset.toLocaleString('id-ID')}
+                  </span>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 uppercase font-bold text-[10px] border-b border-slate-200 dark:border-slate-800">
+                    <tr>
+                      <th className="py-3.5 px-4">No Nota/Faktur &amp; Tanggal</th>
+                      <th className="py-3.5 px-4">Nama Toko/Pelanggan</th>
+                      <th className="py-3.5 px-4">Kategori Barang</th>
+                      <th className="py-3.5 px-4 text-right">Qty</th>
+                      <th className="py-3.5 px-4 text-center">Satuan</th>
+                      <th className="py-3.5 px-4 text-right">Diskon</th>
+                      <th className="py-3.5 px-4 text-right">Harga</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-800 dark:text-slate-200">
+                    {paginatedSales.length > 0 ? (
+                      paginatedSales.map(sale => (
+                        <tr key={sale.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
+                          <td className="py-3.5 px-4">
+                            <div className="font-mono font-bold text-indigo-600 dark:text-indigo-400">{sale.noNota}</div>
+                            <div className="text-[11px] text-slate-500 font-mono mt-0.5">{sale.tanggal}</div>
+                          </td>
+                          <td className="py-3.5 px-4">
+                            <div className="font-bold text-slate-900 dark:text-white">{sale.storeName}</div>
+                            <div className="text-[11px] text-slate-500 mt-0.5">
+                              Sales: <span className="font-semibold text-slate-700 dark:text-slate-300">{sale.salesName}</span>
+                            </div>
+                          </td>
+                          <td className="py-3.5 px-4">
+                            <span className="px-2.5 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 font-bold text-[11px] inline-block">
+                              {sale.kategoriBarang}
+                            </span>
+                          </td>
+                          <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-900 dark:text-white">
+                            {sale.qty.toLocaleString('id-ID')}
+                          </td>
+                          <td className="py-3.5 px-4 text-center font-semibold text-slate-700 dark:text-slate-300">
+                            {sale.satuan}
+                          </td>
+                          <td className="py-3.5 px-4 text-right font-mono font-semibold text-amber-600 dark:text-amber-400">
+                            Rp {(sale.diskon || 0).toLocaleString('id-ID')}
+                          </td>
+                          <td className="py-3.5 px-4 text-right font-mono font-black text-emerald-600 dark:text-emerald-400">
+                            Rp {sale.totalPenjualan.toLocaleString('id-ID')}
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={7} className="py-8 text-center text-slate-400 text-xs">
+                          Tidak ada data laporan penjualan pada tanggal / sales yang dipilih.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Pagination */}
+              <div className="p-4 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div className="text-slate-500 dark:text-slate-400">
+                  Menampilkan{' '}
+                  <strong className="text-slate-900 dark:text-white">
+                    {filteredSales.length === 0 ? 0 : (currentSalesPage - 1) * salesPageSize + 1}
+                  </strong>{' '}
+                  &ndash;{' '}
+                  <strong className="text-slate-900 dark:text-white">
+                    {Math.min(currentSalesPage * salesPageSize, filteredSales.length)}
+                  </strong>{' '}
+                  dari <strong className="text-slate-900 dark:text-white">{filteredSales.length}</strong> laporan penjualan
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={currentSalesPage <= 1}
+                    onClick={() => setSalesPage(p => Math.max(1, p - 1))}
+                    className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 font-bold disabled:opacity-40 cursor-pointer flex items-center gap-1"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                    <span>Sebelumnya</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={currentSalesPage >= totalSalesPages}
+                    onClick={() => setSalesPage(p => Math.min(totalSalesPages, p + 1))}
+                    className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 font-bold disabled:opacity-40 cursor-pointer flex items-center gap-1"
+                  >
+                    <span>Selanjutnya</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ============================================================ */}
+        {/* SUB-TAB 3: TAGIHAN PELANGGAN (TERINTEGRASI FINANCE)          */}
+        {/* ============================================================ */}
+        {offlineSubTab === 'tagihan' && (() => {
+          const q = billingSearch.trim().toLowerCase();
+          const filteredBillingList = customerInvoices.filter(inv => {
+            const sisa = Math.max(0, inv.totalTagihan - inv.jumlahTerbayar);
+            const st = getInvoiceStatus(inv);
+            const invTeam = inv.billingTeam || 'FINANCE';
+            const matchTeam = billingTeamTab === 'ALL' || invTeam === billingTeamTab;
+            const matchSearch =
+              !q ||
+              inv.noInvoice.toLowerCase().includes(q) ||
+              inv.noSuratJalan.toLowerCase().includes(q) ||
+              inv.customerName.toLowerCase().includes(q) ||
+              inv.region.toLowerCase().includes(q) ||
+              inv.itemSummary.toLowerCase().includes(q);
+            let matchStatus = true;
+            if (billingStatusFilter === 'UNPAID_ONLY') {
+              matchStatus = sisa > 0;
+            } else if (billingStatusFilter !== 'ALL') {
+              matchStatus = st === billingStatusFilter;
+            }
+            return matchTeam && matchSearch && matchStatus;
+          });
+          const totalSisaFiltered = filteredBillingList.reduce(
+            (acc, inv) => acc + Math.max(0, inv.totalTagihan - inv.jumlahTerbayar),
+            0
+          );
+
+          return (
+            <div className="space-y-4">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={billingSearch}
+                    onChange={e => setBillingSearch(e.target.value)}
+                    placeholder="Cari No. Invoice, Nama Pelanggan / Toko, Wilayah, atau Item Pesanan..."
+                    className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={billingStatusFilter}
+                    onChange={e => setBillingStatusFilter(e.target.value)}
+                    className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 cursor-pointer"
+                  >
+                    <option value="UNPAID_ONLY">
+                      Semua Belum Terlunasi ({customerInvoices.filter(i => i.totalTagihan - i.jumlahTerbayar > 0).length})
+                    </option>
+                    <option value="Jatuh Tempo (Overdue)">Jatuh Tempo (Overdue)</option>
+                    <option value="Cicilan / Sebagian">Cicilan / Sebagian</option>
+                    <option value="Belum Jatuh Tempo">Belum Jatuh Tempo</option>
+                    <option value="Lunas">Sudah Lunas</option>
+                    <option value="ALL">Tampilkan Semua Faktur ({customerInvoices.length})</option>
+                  </select>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowAddBillingModal(true)}
+                    className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Input Tagihan Baru</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
+                <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                      Daftar Tagihan Pelanggan (Terintegrasi Finance &amp; Aplikasi Penagihan)
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Setiap tagihan yang diinput dari Marketing Offline otomatis tersinkron dengan Finance &amp; Aplikasi Penagihan Pelanggan.
+                    </p>
+                  </div>
+                  <div className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                    Sisa Piutang Terfilter:{' '}
+                    <span className="font-mono font-black text-rose-600 dark:text-rose-400">
+                      Rp {totalSisaFiltered.toLocaleString('id-ID')}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 uppercase font-bold text-[10px] border-b border-slate-200 dark:border-slate-800">
+                      <tr>
+                        <th className="py-3 px-4">No. Invoice &amp; SJ</th>
+                        <th className="py-3 px-4">Nama Pelanggan / Toko</th>
+                        <th className="py-3 px-4">Rincian Pesanan</th>
+                        <th className="py-3 px-4">Jatuh Tempo &amp; Umur</th>
+                        <th className="py-3 px-4 text-right">Total Tagihan</th>
+                        <th className="py-3 px-4 text-right">Sudah Dibayar</th>
+                        <th className="py-3 px-4 text-right">Sisa Belum Lunas</th>
+                        <th className="py-3 px-4">Status Tagihan</th>
+                        <th className="py-3 px-4 text-right">Aksi Penagihan</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-slate-800 dark:text-slate-200">
+                      {filteredBillingList.length > 0 ? (
+                        filteredBillingList.map(inv => {
+                          const sisa = Math.max(0, inv.totalTagihan - inv.jumlahTerbayar);
+                          const st = getInvoiceStatus(inv);
+                          const agingDays = computeInvoiceAgingDays(inv.dueDate);
+                          return (
+                            <tr key={inv.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition">
+                              <td className="py-3 px-4">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                                    {inv.noInvoice}
+                                  </span>
+                                  <span
+                                    className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase ${
+                                      inv.billingTeam === 'SALES'
+                                        ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                                        : 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300'
+                                    }`}
+                                  >
+                                    {inv.billingTeam === 'SALES' ? 'Khusus Sales' : 'Tim Finance'}
+                                  </span>
+                                </div>
+                                <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                                  SJ: {inv.noSuratJalan} &bull; Tgl: {inv.invoiceDate}
+                                </div>
+                              </td>
+                              <td className="py-3 px-4">
+                                <div className="font-bold text-slate-900 dark:text-white">{inv.customerName}</div>
+                                <div className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5">
+                                  <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                                  <span>{inv.region} &bull; {inv.contactPhone}</span>
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 max-w-[230px]">
+                                <div className="font-medium text-slate-800 dark:text-slate-200 leading-snug">
+                                  {inv.itemSummary}
+                                </div>
+                                {inv.notes && (
+                                  <div className="text-[10px] text-slate-500 italic mt-0.5 line-clamp-2" title={inv.notes}>
+                                    {inv.notes}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="py-3 px-4">
+                                <div className="font-mono font-bold text-slate-900 dark:text-white">{inv.dueDate}</div>
+                                {sisa > 0 ? (
+                                  agingDays > 0 ? (
+                                    <span className="inline-block mt-0.5 px-2 py-0.5 rounded bg-rose-500/15 text-rose-600 dark:text-rose-400 font-mono font-black text-[10px]">
+                                      Lewat {agingDays} Hari
+                                    </span>
+                                  ) : (
+                                    <span className="inline-block mt-0.5 px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono font-bold text-[10px]">
+                                      {Math.abs(agingDays)} Hari Lagi
+                                    </span>
+                                  )
+                                ) : (
+                                  <span className="text-[10px] text-emerald-500 font-bold">Selesai</span>
+                                )}
+                              </td>
+                              <td className="py-3 px-4 text-right font-mono font-bold text-slate-700 dark:text-slate-300">
+                                Rp {inv.totalTagihan.toLocaleString('id-ID')}
+                              </td>
+                              <td className="py-3 px-4 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                                Rp {inv.jumlahTerbayar.toLocaleString('id-ID')}
+                              </td>
+                              <td className="py-3 px-4 text-right font-mono font-black">
+                                {sisa > 0 ? (
+                                  <span className="text-rose-600 dark:text-rose-400">
+                                    Rp {sisa.toLocaleString('id-ID')}
+                                  </span>
+                                ) : (
+                                  <span className="text-emerald-600 dark:text-emerald-400">Rp 0</span>
+                                )}
+                              </td>
+                              <td className="py-3 px-4">
+                                <span
+                                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold inline-block border ${
+                                    st === 'Lunas'
+                                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                                      : st === 'Jatuh Tempo (Overdue)'
+                                      ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30'
+                                      : st === 'Cicilan / Sebagian'
+                                      ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30'
+                                      : 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30'
+                                  }`}
+                                >
+                                  {st}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4 text-right">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  {sisa > 0 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setBillingPayModalInvoice(inv);
+                                        setBillingPayNominal(sisa);
+                                        setBillingPayNotes(inv.notes || '');
+                                      }}
+                                      className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] transition cursor-pointer shadow-xs whitespace-nowrap"
+                                    >
+                                      Catat Bayar / Cicil
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteBillingInvoice(inv.id)}
+                                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-500/10 transition cursor-pointer"
+                                    title="Hapus Data Tagihan"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      ) : (
+                        <tr>
+                          <td colSpan={9} className="py-8 text-center text-slate-400 text-xs">
+                            Tidak ada data tagihan pelanggan yang sesuai dengan filter pencarian.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ============================================================ */}
+        {/* MODAL: INPUT LAPORAN KUNJUNGAN BARU                          */}
+        {/* ============================================================ */}
+        {showAddVisitModal && (
+          <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl">
+              <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+                <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                  Input Laporan Kunjungan Marketing Offline
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setShowAddVisitModal(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-900 dark:hover:text-white cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <form onSubmit={handleAddVisitReport} className="space-y-3 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Tanggal Kunjungan *
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={visitForm.tanggal}
+                      onChange={e => setVisitForm({ ...visitForm, tanggal: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Nama Sales / Marketing *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Contoh: Rendra Saputra"
+                      value={visitForm.salesName}
+                      onChange={e => setVisitForm({ ...visitForm, salesName: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Nama Toko / Pelanggan *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Contoh: TK ANUGRAH SEKAR WANGI"
+                      value={visitForm.storeName}
+                      onChange={e => setVisitForm({ ...visitForm, storeName: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Wilayah / Area *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Contoh: Genteng - Banyuwangi"
+                      value={visitForm.region}
+                      onChange={e => setVisitForm({ ...visitForm, region: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      PIC / Kontak Toko
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Contoh: Bpk. Hendra (0812-...)"
+                      value={visitForm.contactPerson}
+                      onChange={e => setVisitForm({ ...visitForm, contactPerson: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Tanggal Follow-Up Berikutnya
+                    </label>
+                    <input
+                      type="date"
+                      value={visitForm.followUpDate}
+                      onChange={e => setVisitForm({ ...visitForm, followUpDate: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                    Tujuan &amp; Agenda Kunjungan *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Contoh: Presentasi sampel Karton Box & cek stok kemasan toko"
+                    value={visitForm.purpose}
+                    onChange={e => setVisitForm({ ...visitForm, purpose: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                    Hasil Kunjungan / Order *
+                  </label>
+                  <textarea
+                    rows={2}
+                    required
+                    placeholder="Contoh: Pelanggan repeat order 1.000 Pcs Karton Box B-Flute"
+                    value={visitForm.outcome}
+                    onChange={e => setVisitForm({ ...visitForm, outcome: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                    Status Kunjungan
+                  </label>
+                  <select
+                    value={visitForm.status}
+                    onChange={e => setVisitForm({ ...visitForm, status: e.target.value as OfflineVisitReport['status'] })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold"
+                  >
+                    <option value="Selesai & Order">Selesai &amp; Order</option>
+                    <option value="Menunggu Follow-Up">Menunggu Follow-Up</option>
+                    <option value="Kunjungan Rutin">Kunjungan Rutin</option>
+                    <option value="Belum Order">Belum Order</option>
+                  </select>
+                </div>
+
+                <div className="pt-2 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddVisitModal(false)}
+                    className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold cursor-pointer"
+                  >
+                    Simpan Laporan Kunjungan
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* ============================================================ */}
+        {/* MODAL: INPUT LAPORAN PENJUALAN BARU                          */}
+        {/* ============================================================ */}
+        {showAddSalesModal && (
+          <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl">
+              <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+                <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                  Input Laporan Penjualan Marketing Offline
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setShowAddSalesModal(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-900 dark:hover:text-white cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <form onSubmit={handleAddSalesReport} className="space-y-3 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      No. Nota / SO *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={salesForm.noNota}
+                      onChange={e => setSalesForm({ ...salesForm, noNota: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Tanggal Penjualan *
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={salesForm.tanggal}
+                      onChange={e => setSalesForm({ ...salesForm, tanggal: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Nama Toko / Pelanggan *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Contoh: TK ANUGRAH SEKAR WANGI"
+                      value={salesForm.storeName}
+                      onChange={e => setSalesForm({ ...salesForm, storeName: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Sales / Marketing PIC *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={salesForm.salesName}
+                      onChange={e => setSalesForm({ ...salesForm, salesName: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Wilayah / Area
+                    </label>
+                    <input
+                      type="text"
+                      value={salesForm.region}
+                      onChange={e => setSalesForm({ ...salesForm, region: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Kategori Barang
+                    </label>
+                    <select
+                      value={salesForm.kategoriBarang}
+                      onChange={e => setSalesForm({ ...salesForm, kategoriBarang: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold"
+                    >
+                      <option value="Karton Box Corrugated">Karton Box Corrugated</option>
+                      <option value="Karton Box Double Wall">Karton Box Double Wall</option>
+                      <option value="Box Kemasan Makanan">Box Kemasan Makanan</option>
+                      <option value="Paper Cup & Food Pack">Paper Cup &amp; Food Pack</option>
+                      <option value="Plastik & Stretch Film">Plastik &amp; Stretch Film</option>
+                      <option value="Lakban & Strapping Band">Lakban &amp; Strapping Band</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                    Nama / Spesifikasi Barang *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={salesForm.namaBarang}
+                    onChange={e => setSalesForm({ ...salesForm, namaBarang: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Qty *
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      required
+                      value={salesForm.qty}
+                      onChange={e => setSalesForm({ ...salesForm, qty: Number(e.target.value) })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Satuan
+                    </label>
+                    <select
+                      value={salesForm.satuan}
+                      onChange={e => setSalesForm({ ...salesForm, satuan: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold"
+                    >
+                      <option value="Pcs">Pcs</option>
+                      <option value="Karton">Karton</option>
+                      <option value="Ball">Ball</option>
+                      <option value="Roll">Roll</option>
+                      <option value="Ikat">Ikat</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Diskon (Rp)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={salesForm.diskon}
+                      onChange={e => setSalesForm({ ...salesForm, diskon: Number(e.target.value) })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Harga Satuan (Rp) *
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      required
+                      value={salesForm.hargaSatuan}
+                      onChange={e => setSalesForm({ ...salesForm, hargaSatuan: Number(e.target.value) })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+                    />
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 flex items-center justify-between">
+                  <span className="font-bold text-emerald-800 dark:text-emerald-300">
+                    Total Harga Setelah Diskon:
+                  </span>
+                  <span className="font-mono text-sm font-black text-emerald-700 dark:text-emerald-400">
+                    Rp {(Math.max(0, Number(salesForm.qty) * Number(salesForm.hargaSatuan) - (Number(salesForm.diskon) || 0))).toLocaleString('id-ID')}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Status Pembayaran
+                    </label>
+                    <select
+                      value={salesForm.statusPembayaran}
+                      onChange={e =>
+                        setSalesForm({
+                          ...salesForm,
+                          statusPembayaran: e.target.value as OfflineSalesReport['statusPembayaran']
+                        })
+                      }
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold"
+                    >
+                      <option value="Lunas">Lunas</option>
+                      <option value="Tempo 14 Hari">Tempo 14 Hari</option>
+                      <option value="Tempo 30 Hari">Tempo 30 Hari</option>
+                      <option value="DP / Cicilan">DP / Cicilan</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Catatan Tambahan
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Opsional..."
+                      value={salesForm.catatan}
+                      onChange={e => setSalesForm({ ...salesForm, catatan: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-2 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddSalesModal(false)}
+                    className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold cursor-pointer"
+                  >
+                    Simpan Laporan Penjualan
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* ============================================================ */}
+        {/* MODAL: INPUT TAGIHAN PELANGGAN (TERINTEGRASI FINANCE)        */}
+        {/* ============================================================ */}
+        {showAddBillingModal && (
+          <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                    Input Tagihan Pelanggan (Terintegrasi Finance &amp; Marketing Offline)
+                  </h3>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Otomatis tersinkron ke Monitoring Tagihan Finance &amp; Aplikasi Penagihan Pelanggan
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAddBillingModal(false)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-900 dark:hover:text-white cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <form onSubmit={handleAddBillingInvoice} className="space-y-3 text-xs">
+                {/* Quick-fill from Marketing Offline Sales / Visits */}
+                <div className="p-3 rounded-xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 space-y-1.5">
+                  <label className="block font-bold text-amber-800 dark:text-amber-300 text-[11px]">
+                    Ambil Cepat dari Data Toko Marketing Offline (Opsional):
+                  </label>
+                  <select
+                    defaultValue=""
+                    onChange={e => {
+                      const val = e.target.value;
+                      if (!val) return;
+                      if (val.startsWith('SALE:')) {
+                        const sId = val.replace('SALE:', '');
+                        const s = salesReports.find(x => x.id === sId);
+                        if (s) {
+                          const v = visitReports.find(
+                            vr => vr.storeName.toLowerCase() === s.storeName.toLowerCase()
+                          );
+                          setBillingForm(prev => ({
+                            ...prev,
+                            noSuratJalan: s.noNota,
+                            customerName: s.storeName,
+                            contactPhone: v?.contactPerson || prev.contactPhone,
+                            region: s.region,
+                            invoiceDate: s.tanggal,
+                            itemSummary: `${s.namaBarang} (${s.qty} ${s.satuan})`,
+                            totalTagihan: s.totalPenjualan,
+                            notes: `Sales Offline: ${s.salesName} (${s.statusPembayaran})`
+                          }));
+                        }
+                      } else if (val.startsWith('VISIT:')) {
+                        const vId = val.replace('VISIT:', '');
+                        const v = visitReports.find(x => x.id === vId);
+                        if (v) {
+                          setBillingForm(prev => ({
+                            ...prev,
+                            customerName: v.storeName,
+                            contactPhone: v.contactPerson,
+                            region: v.region,
+                            itemSummary: v.outcome || prev.itemSummary,
+                            notes: `Kunjungan Sales: ${v.salesName}`
+                          }));
+                        }
+                      }
+                    }}
+                    className="w-full px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-700 text-xs font-bold text-slate-900 dark:text-white cursor-pointer"
+                  >
+                    <option value="">-- Pilih Nota Penjualan / Kunjungan Toko untuk Isi Otomatis --</option>
+                    <optgroup label="Dari Laporan Penjualan Marketing Offline">
+                      {salesReports.map(s => (
+                        <option key={s.id} value={`SALE:${s.id}`}>
+                          {s.noNota} — {s.storeName} (Rp {s.totalPenjualan.toLocaleString('id-ID')})
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Dari Laporan Kunjungan Marketing Offline">
+                      {visitReports.map(v => (
+                        <option key={v.id} value={`VISIT:${v.id}`}>
+                          {v.id} — {v.storeName} ({v.region})
+                        </option>
+                      ))}
+                    </optgroup>
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      No. Invoice / Faktur *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={billingForm.noInvoice}
+                      onChange={e => setBillingForm({ ...billingForm, noInvoice: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      No. Surat Jalan / SO
+                    </label>
+                    <input
+                      type="text"
+                      value={billingForm.noSuratJalan}
+                      onChange={e => setBillingForm({ ...billingForm, noSuratJalan: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Nama Pelanggan / Toko *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Contoh: TK ANUGRAH SEKAR WANGI"
+                      value={billingForm.customerName}
+                      onChange={e => setBillingForm({ ...billingForm, customerName: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Wilayah / Cabang
+                    </label>
+                    <input
+                      type="text"
+                      value={billingForm.region}
+                      onChange={e => setBillingForm({ ...billingForm, region: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Kontak / WhatsApp
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="0812-..."
+                      value={billingForm.contactPhone}
+                      onChange={e => setBillingForm({ ...billingForm, contactPhone: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Tanggal Invoice *
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={billingForm.invoiceDate}
+                      onChange={e => setBillingForm({ ...billingForm, invoiceDate: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Tanggal Jatuh Tempo *
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={billingForm.dueDate}
+                      onChange={e => setBillingForm({ ...billingForm, dueDate: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                    Rincian Barang / Pesanan *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Contoh: Karton Box Corrugated B-Flute 60x40x40 cm (2.000 Pcs)"
+                    value={billingForm.itemSummary}
+                    onChange={e => setBillingForm({ ...billingForm, itemSummary: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-bold"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      Total Nilai Tagihan (Rp) *
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      required
+                      value={billingForm.totalTagihan}
+                      onChange={e => setBillingForm({ ...billingForm, totalTagihan: Number(e.target.value) })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                      DP / Sudah Dibayar Awal (Rp)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      value={billingForm.jumlahTerbayar}
+                      onChange={e => setBillingForm({ ...billingForm, jumlahTerbayar: Number(e.target.value) })}
+                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono font-bold"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-600 dark:text-slate-400 mb-1">
+                    Catatan Penagihan / Sales PIC
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Contoh: Jatuh tempo 14 hari setelah barang diterima..."
+                    value={billingForm.notes}
+                    onChange={e => setBillingForm({ ...billingForm, notes: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                  />
+                </div>
+
+                <div className="pt-2 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddBillingModal(false)}
+                    className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold cursor-pointer"
+                  >
+                    Simpan Tagihan
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL: CATAT PEMBAYARAN / CICILAN DARI MARKETING OFFLINE */}
+        {billingPayModalInvoice && (
+          <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+              <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                    Catat Pembayaran / Pelunasan Tagihan
+                  </h3>
+                  <p className="text-[11px] text-slate-500 font-mono mt-0.5">
+                    {billingPayModalInvoice.noInvoice} &bull; {billingPayModalInvoice.customerName}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setBillingPayModalInvoice(null)}
+                  className="p-1 rounded-lg text-slate-400 hover:text-slate-900 dark:hover:text-white cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveBillingPayment} className="space-y-3.5 text-xs">
+                <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 space-y-1.5">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Total Tagihan Faktur:</span>
+                    <span className="font-mono font-bold text-slate-900 dark:text-white">
+                      Rp {billingPayModalInvoice.totalTagihan.toLocaleString('id-ID')}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Sudah Terbayar Sebelumnya:</span>
+                    <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                      Rp {billingPayModalInvoice.jumlahTerbayar.toLocaleString('id-ID')}
+                    </span>
+                  </div>
+                  <div className="flex justify-between pt-1.5 border-t border-slate-200 dark:border-slate-800">
+                    <span className="font-bold text-slate-700 dark:text-slate-300">Sisa Tagihan Saat Ini:</span>
+                    <span className="font-mono font-black text-rose-600 dark:text-rose-400">
+                      Rp {Math.max(0, billingPayModalInvoice.totalTagihan - billingPayModalInvoice.jumlahTerbayar).toLocaleString('id-ID')}
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Nominal Pembayaran Masuk (Rp) *
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={Math.max(0, billingPayModalInvoice.totalTagihan - billingPayModalInvoice.jumlahTerbayar)}
+                    required
+                    value={billingPayNominal}
+                    onChange={e => setBillingPayNominal(Number(e.target.value))}
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white font-mono text-sm font-black"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Catatan Pembayaran / Referensi
+                  </label>
+                  <textarea
+                    rows={2}
+                    placeholder="Contoh: Pembayaran titipan sales / transfer BCA..."
+                    value={billingPayNotes}
+                    onChange={e => setBillingPayNotes(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white"
+                  />
+                </div>
+
+                <div className="pt-2 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setBillingPayModalInvoice(null)}
+                    className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold cursor-pointer"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold cursor-pointer"
+                  >
+                    Simpan Pembayaran
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* POPUP MODAL */}
+        {popupModal && (
+          <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-6 text-center space-y-4 shadow-2xl">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-100 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto">
+                <CheckCircle2 className="w-6 h-6" />
+              </div>
+              <div className="space-y-1.5">
+                <h4 className="text-base font-black text-slate-900 dark:text-white">{popupModal.title}</h4>
+                <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">{popupModal.message}</p>
+              </div>
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  autoFocus
+                  onClick={() => setPopupModal(null)}
+                  className="w-full py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-black text-xs cursor-pointer transition"
+                >
+                  Oke, Mengerti
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ============================================================
+  // RENDER: MARKETING ONLINE (UNCHANGED CORE FUNCTIONALITY)
+  // ============================================================
+  return (
+    <div className="space-y-6" id="marketing_hub">
+      {/* HEADER SECTION */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 p-6 bg-gradient-to-r from-slate-900 via-slate-900 to-amber-950/20 border border-slate-800 rounded-2xl shadow-xl">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 rounded-xl bg-orange-500/15 border border-orange-500/30 flex items-center justify-center text-orange-400 shrink-0">
+            <Globe className="w-6 h-6" />
+          </div>
+          <div>
+            <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Departemen Marketing AKK</div>
+            <h2 className="text-xl font-black text-white tracking-tight flex items-center gap-2">
+              <span>Marketing Online Hub</span>
+              <span className="text-xs bg-amber-500/10 text-amber-300 font-bold px-2 py-0.5 rounded-full border border-amber-500/20">
+                Akses Terotorisasi
+              </span>
+            </h2>
+            <p className="text-slate-400 text-xs mt-1">
+              Manajemen prospek digital, pelacakan kampanye iklan online, dan optimasi konversi leads pabrik.
+            </p>
+          </div>
+        </div>
+
+        <div>
+          <button
+            onClick={() => setShowAddLeadModal(true)}
+            className="w-full md:w-auto px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Tambah Prospek Online</span>
+          </button>
+        </div>
+      </div>
+
+      {/* METRICS ROW */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-slate-900/80 border border-slate-800 p-5 rounded-2xl shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-slate-400 text-[10px] font-black uppercase tracking-wider">Potensi Omset Leads</span>
+            <DollarSign className="w-4 h-4 text-emerald-400" />
+          </div>
+          <div className="text-xl font-black text-white">Rp {totalLeadBudget.toLocaleString('id-ID')}</div>
+          <p className="text-slate-500 text-[10px] mt-1">Dari prospek aktif (selain batal)</p>
+        </div>
+
+        <div className="bg-slate-900/80 border border-slate-800 p-5 rounded-2xl shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-slate-400 text-[10px] font-black uppercase tracking-wider">Nilai Deal / SPK</span>
+            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+          </div>
+          <div className="text-xl font-black text-emerald-400">Rp {totalDealsValue.toLocaleString('id-ID')}</div>
+          <p className="text-slate-500 text-[10px] mt-1">Pemasukan sah dari prospek digital</p>
+        </div>
+
+        <div className="bg-slate-900/80 border border-slate-800 p-5 rounded-2xl shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-slate-400 text-[10px] font-black uppercase tracking-wider">Total Leads Masuk</span>
+            <Globe className="w-4 h-4 text-amber-400" />
+          </div>
+          <div className="text-xl font-black text-white">{totalLeadsCount} Leads</div>
+          <p className="text-slate-500 text-[10px] mt-1">Registrasi prospek via digital ads</p>
+        </div>
+
+        <div className="bg-slate-900/80 border border-slate-800 p-5 rounded-2xl shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-slate-400 text-[10px] font-black uppercase tracking-wider">Rasio Konversi (SLA)</span>
+            <TrendingUp className="w-4 h-4 text-amber-400" />
+          </div>
+          <div className="text-xl font-black text-amber-400">{conversionRate}%</div>
+          <p className="text-slate-500 text-[10px] mt-1">Persentase prospek sukses SPK</p>
+        </div>
+      </div>
+
+      {/* DETAILED CONTENT AREA */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 space-y-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
+            <div className="p-5 border-b border-slate-800/80 bg-slate-900 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <BarChart3 className="w-4.5 h-4.5 text-amber-400" />
+                <h3 className="text-xs font-black uppercase tracking-wider text-white">
+                  Daftar Prospek Proaktif Digital
+                </h3>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2.5">
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-slate-500" />
+                  <input
+                    type="text"
+                    placeholder="Cari klien, kota..."
+                    value={onlineSearch}
+                    onChange={e => setOnlineSearch(e.target.value)}
+                    className="pl-8 pr-3 py-1.5 w-40 text-xs rounded-xl bg-slate-950 border border-slate-800 text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-amber-500/50"
+                  />
+                </div>
+
+                <select
+                  value={onlineFilterStatus}
+                  onChange={e => setOnlineFilterStatus(e.target.value)}
+                  className="px-2.5 py-1.5 text-xs rounded-xl bg-slate-950 border border-slate-800 text-slate-300"
+                >
+                  <option value="all">Semua Status</option>
+                  <option value="Lead Baru">Lead Baru</option>
+                  <option value="Follow Up">Follow Up</option>
+                  <option value="Negosiasi">Negosiasi</option>
+                  <option value="Deal / SPK">Deal / SPK</option>
+                  <option value="Batal">Batal</option>
+                </select>
+
+                <select
+                  value={onlineFilterChannel}
+                  onChange={e => setOnlineFilterChannel(e.target.value)}
+                  className="px-2.5 py-1.5 text-xs rounded-xl bg-slate-950 border border-slate-800 text-slate-300"
+                >
+                  <option value="all">Semua Channel</option>
+                  <option value="Google Search">Google Search</option>
+                  <option value="WhatsApp Ads">WhatsApp Ads</option>
+                  <option value="Instagram DM">Instagram DM</option>
+                  <option value="TikTok Business">TikTok Business</option>
+                  <option value="Website Form">Website Form</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              {filteredOnlineLeads.length === 0 ? (
+                <div className="p-8 text-center text-slate-500 text-xs">
+                  Tidak ada data prospek online yang cocok dengan pencarian Anda.
+                </div>
+              ) : (
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-800/80 bg-slate-950 text-slate-400 text-[10px] font-bold uppercase tracking-wider">
+                      <th className="p-3.5 pl-5">Kode</th>
+                      <th className="p-3.5">Klien / Lokasi</th>
+                      <th className="p-3.5">Spesifikasi Karton</th>
+                      <th className="p-3.5 text-right">Volume &amp; Anggaran</th>
+                      <th className="p-3.5">Channel Masuk</th>
+                      <th className="p-3.5">Status Prospek</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 text-xs text-slate-300">
+                    {filteredOnlineLeads.map(lead => (
+                      <tr key={lead.id} className="hover:bg-slate-900/60 transition duration-150">
+                        <td className="p-3.5 pl-5 font-mono font-bold text-slate-400">{lead.id}</td>
+                        <td className="p-3.5">
+                          <div className="font-bold text-white">{lead.clientName}</div>
+                          <div className="text-[10px] text-slate-500 flex items-center gap-1 mt-0.5">
+                            <MapPin className="w-3 h-3 text-slate-600" />
+                            <span>{lead.city}</span>
+                          </div>
+                        </td>
+                        <td className="p-3.5">
+                          <div className="truncate max-w-[150px]">{lead.productType}</div>
+                          <div className="text-[10px] text-slate-500 italic mt-0.5 max-w-[180px] truncate" title={lead.notes}>
+                            "{lead.notes || 'Tidak ada catatan khusus'}"
+                          </div>
+                        </td>
+                        <td className="p-3.5 text-right">
+                          <div className="font-bold text-white">{(lead.estVolumePcs || 0).toLocaleString('id-ID')} pcs</div>
+                          <div className="text-[10px] text-emerald-400 mt-0.5 font-semibold">
+                            Rp {(lead.budgetIDR || 0).toLocaleString('id-ID')}
+                          </div>
+                        </td>
+                        <td className="p-3.5">
+                          <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-slate-950 border border-slate-800 text-slate-300">
+                            {lead.channel}
+                          </span>
+                        </td>
+                        <td className="p-3.5">
+                          <select
+                            value={lead.status}
+                            onChange={e => updateLeadStatus(lead.id, e.target.value as OnlineLead['status'])}
+                            className={`text-[10px] font-black px-2 py-1 rounded-lg border focus:outline-none cursor-pointer ${
+                              lead.status === 'Deal / SPK'
+                                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                                : lead.status === 'Negosiasi'
+                                ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                                : lead.status === 'Follow Up'
+                                ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30'
+                                : lead.status === 'Batal'
+                                ? 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                                : 'bg-slate-950 text-slate-300 border-slate-800'
+                            }`}
+                          >
+                            <option value="Lead Baru">Lead Baru</option>
+                            <option value="Follow Up">Follow Up</option>
+                            <option value="Negosiasi">Negosiasi</option>
+                            <option value="Deal / SPK">Deal / SPK</option>
+                            <option value="Batal">Batal</option>
+                          </select>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-6">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
+            <div className="flex items-center gap-2">
+              <TrendingUp className="w-4.5 h-4.5 text-amber-400" />
+              <h3 className="text-xs font-black uppercase tracking-wider text-white">Iklan Online &amp; Digital Campaign</h3>
+            </div>
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              Efisiensi anggaran iklan online dan konversi lead yang mendaftar ke form database sales.
+            </p>
+            <div className="space-y-3.5 pt-2">
+              <div className="space-y-1">
+                <div className="flex justify-between text-[11px]">
+                  <span className="font-semibold text-slate-300">WhatsApp Marketing Ads</span>
+                  <span className="text-amber-400 font-mono font-bold">ROAS 4.2x</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-slate-950 overflow-hidden border border-slate-800">
+                  <div className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-green-400" style={{ width: '85%' }} />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <div className="flex justify-between text-[11px]">
+                  <span className="font-semibold text-slate-300">Google Search Ads (Pabrik Karton)</span>
+                  <span className="text-amber-400 font-mono font-bold">ROAS 3.8x</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-slate-950 overflow-hidden border border-slate-800">
+                  <div className="h-full rounded-full bg-gradient-to-r from-amber-500 to-yellow-400" style={{ width: '75%' }} />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-3">
+            <h4 className="text-xs font-black uppercase text-white flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              <span>SOP Prospek Digital (SLA)</span>
+            </h4>
+            <ul className="space-y-2.5 text-[11px] text-slate-400 leading-relaxed">
+              <li className="flex items-start gap-2.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0 mt-1.5" />
+                <span><strong>Kecepatan Respon:</strong> Lead baru wajib dihubungi maksimal 15 menit setelah data masuk.</span>
+              </li>
+              <li className="flex items-start gap-2.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0 mt-1.5" />
+                <span><strong>Pencocokan Sampel:</strong> Kirim contoh karton sheet atau mockup box maksimal 48 jam.</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      {/* MODAL ADD ONLINE LEAD */}
+      {showAddLeadModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-sm font-black text-white">Tambah Prospek Online Baru</h3>
+              <button onClick={() => setShowAddLeadModal(false)} className="text-slate-400 hover:text-white">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <form onSubmit={handleAddOnlineLead} className="space-y-3 text-xs">
+              <div>
+                <label className="block text-slate-400 font-bold mb-1">Nama Klien / Perusahaan *</label>
+                <input
+                  type="text"
+                  required
+                  value={newLeadName}
+                  onChange={e => setNewLeadName(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white"
+                />
+              </div>
+              <div>
+                <label className="block text-slate-400 font-bold mb-1">Kota / Lokasi *</label>
+                <input
+                  type="text"
+                  required
+                  value={newLeadCity}
+                  onChange={e => setNewLeadCity(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-400 font-bold mb-1">Estimasi Volume (Pcs)</label>
+                  <input
+                    type="number"
+                    value={newLeadVolume}
+                    onChange={e => setNewLeadVolume(Number(e.target.value))}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-400 font-bold mb-1">Estimasi Budget (Rp)</label>
+                  <input
+                    type="number"
+                    value={newLeadBudget}
+                    onChange={e => setNewLeadBudget(Number(e.target.value))}
+                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-white"
+                  />
+                </div>
+              </div>
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddLeadModal(false)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 font-bold"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-amber-500 text-slate-950 font-bold"
+                >
+                  Simpan Prospek
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
