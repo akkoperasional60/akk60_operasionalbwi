@@ -257,7 +257,7 @@ export const FuelConsumptionReportModal: React.FC<FuelConsumptionReportModalProp
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
             <div className="bg-white p-3 rounded-lg border border-slate-200">
               <span className="text-xs text-slate-500 block">Total BBM</span>
-              <span className="text-lg font-bold text-slate-900 font-mono tabular-nums">{Number(activeMetrics.totalLiters || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L</span>
+              <span className="text-lg font-bold text-slate-900 font-mono tabular-nums">{activeMetrics.totalLiters.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L</span>
               <span className="text-xs text-slate-500 block">{activeMetrics.totalRefuels}x isi</span>
             </div>
 

@@ -149,6 +149,68 @@ export const DriverReportsManagement: React.FC = () => {
   const fleets = useMemo(() => logisticsStore.getFleets(), [storeTick]);
   const schedules = useMemo(() => logisticsStore.getSchedules(), [storeTick]);
 
+  // Single Source of Truth: Evaluasi kecocokan armada laporan terhadap jadwal kiriman admin
+  const resolveScheduleFleetAudit = (rep: {
+    scheduleId?: string;
+    deliveryId?: string;
+    driverName?: string;
+    helperName?: string;
+    areaName?: string;
+    date?: string;
+    timestamp?: string;
+    plateNumber?: string;
+    fleetId?: string;
+  }) => {
+    const rDate = rep.date || (rep.timestamp ? getLocalDateStr(rep.timestamp) : '');
+    const normStr = (v?: string) => String(v || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+    const targetDriver = normStr(rep.driverName);
+    const targetArea = normStr(rep.areaName);
+
+    const matchedSchedule =
+      schedules.find(
+        s =>
+          (rep.scheduleId && (s.id === rep.scheduleId || s.trackingNumber === rep.scheduleId)) ||
+          (rep.deliveryId && (s.id === rep.deliveryId || s.trackingNumber === rep.deliveryId))
+      ) ||
+      schedules.find(s => {
+        if (!rDate || getLocalDateStr(s.departureDate) !== rDate) return false;
+        const sDriver = normStr(s.crew?.name);
+        const sHelper = normStr(s.crewHelper?.name);
+        const sArea = normStr(s.areaName || s.store?.storeName);
+        const crewMatch = Boolean(targetDriver && (sDriver === targetDriver || sHelper === targetDriver));
+        const areaMatch = !targetArea || !sArea || sArea.includes(targetArea) || targetArea.includes(sArea);
+        return crewMatch && areaMatch;
+      });
+
+    if (!matchedSchedule) {
+      return { schedule: null, status: 'unscheduled' as const, expectedLabel: '' };
+    }
+
+    const schedFleetObj =
+      matchedSchedule.fleet ||
+      fleets.find(f => f.id === matchedSchedule.fleetId);
+    const schedPlateRaw = schedFleetObj?.plateNumber || matchedSchedule.armada || '';
+    const schedCodeRaw = schedFleetObj?.initialCode || matchedSchedule.armada || '';
+    const expectedLabel = schedPlateRaw
+      ? formatPlateWithInitial(schedPlateRaw)
+      : schedCodeRaw || '-';
+
+    const repClean = String(rep.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+    const schedPlateClean = String(schedPlateRaw || '').replace(/\s+/g, '').toUpperCase();
+    const schedCodeClean = String(schedCodeRaw || '').replace(/\s+/g, '').toUpperCase();
+
+    const isMatched =
+      (rep.fleetId && matchedSchedule.fleetId && rep.fleetId === matchedSchedule.fleetId) ||
+      (repClean && schedPlateClean && repClean === schedPlateClean) ||
+      (repClean && schedCodeClean && repClean === schedCodeClean);
+
+    return {
+      schedule: matchedSchedule,
+      status: isMatched ? ('synced' as const) : ('mismatch' as const),
+      expectedLabel
+    };
+  };
+
   // Helper untuk menampilkan Plat Nomor beserta Nama Inisial Armada (contoh: P 8711 UW (N21 / NL2))
   const formatPlateWithInitial = (plateRaw?: string): string => {
     const raw = (plateRaw || '-').trim();
@@ -1016,16 +1078,7 @@ export const DriverReportsManagement: React.FC = () => {
   // Data Laporan Check-In & Check-Out Terpadu + Ketepatan Waktu vs Target Jadwal (Terintegrasi dengan Modal Buat Kiriman)
   const checkinCheckoutSummary = useMemo(() => {
     const parseClockMinutes = (raw?: string): number | null => {
-      if (
-        !raw ||
-        raw === '-' ||
-        raw === 'Belum Check-Out' ||
-        raw === 'Belum Check-In' ||
-        raw === 'Belum Berangkat' ||
-        raw === 'Belum Tiba'
-      ) {
-        return null;
-      }
+      if (!raw || raw === '-' || raw === 'Belum Tiba' || raw === 'Belum Berangkat') return null;
       const trimmed = String(raw).trim();
       // 1. Format HH:MM atau HH.MM langsung (tanpa T / timestamp ISO)
       if (!trimmed.includes('T')) {
@@ -1068,29 +1121,6 @@ export const DriverReportsManagement: React.FC = () => {
       const hh = Math.floor(normalized / 60);
       const mm = normalized % 60;
       return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
-    };
-
-    const formatIsoOrClockToWib = (raw?: string): string => {
-      if (
-        !raw ||
-        raw === '-' ||
-        raw === 'Belum Check-Out' ||
-        raw === 'Belum Check-In' ||
-        raw === 'Belum Berangkat' ||
-        raw === 'Belum Tiba'
-      ) {
-        return '-';
-      }
-      const trimmed = String(raw).trim();
-      if (!trimmed.includes('T') && !/(?:Z|[+-]\d{2}:?\d{2})$/i.test(trimmed)) {
-        const clockMatch = trimmed.match(/^(\d{1,2})[:.](\d{2})(?:\s*WIB)?$/i);
-        if (clockMatch) {
-          return `${clockMatch[1].padStart(2, '0')}:${clockMatch[2]} WIB`;
-        }
-      }
-      const mins = parseClockMinutes(trimmed);
-      if (mins !== null) return `${formatMinutesHHMM(mins)} WIB`;
-      return '-';
     };
 
     const formatDiffMinutes = (diffMins: number): string => {
@@ -1182,6 +1212,9 @@ export const DriverReportsManagement: React.FC = () => {
       targetReturnLabel: string;
       checkinPunctuality: { status: 'tepat' | 'awal' | 'terlambat' | 'belum'; label: string; diffMinutes: number | null };
       checkoutPunctuality: { status: 'tepat' | 'awal' | 'terlambat' | 'belum'; label: string; diffMinutes: number | null };
+      fleetAuditStatus?: 'synced' | 'mismatch' | 'unscheduled';
+      expectedFleetLabel?: string;
+      matchedSchedule?: typeof schedules[number] | null;
     };
 
     const combinedMap = new Map<string, CheckinRow>();
@@ -1249,14 +1282,33 @@ export const DriverReportsManagement: React.FC = () => {
           (!cleanPlate || (s.plateNumber || '').replace(/\s+/g, '').toUpperCase() === cleanPlate))
       );
 
-      // Tarik plat nomor dan area otomatis dari jadwal Admin bila di shift belum lengkap
-      const resolvedPlate = !isPlaceholderPlate(base.plateNumber)
+      // Single Source of Truth: prioritaskan armada & plat nomor dari jadwal kiriman Admin
+      const schedFleetObj = matchedSchedule
+        ? (matchedSchedule.fleet || fleets.find(f => f.id === matchedSchedule.fleetId))
+        : undefined;
+      const schedPlateRaw = (schedFleetObj?.plateNumber || matchedSchedule?.armada || '').trim();
+      const schedPlateValid = Boolean(schedPlateRaw && !isPlaceholderPlate(schedPlateRaw));
+      const basePlateValid = Boolean(base.plateNumber && !isPlaceholderPlate(base.plateNumber));
+
+      const resolvedPlate = schedPlateValid
+        ? schedPlateRaw
+        : basePlateValid
         ? base.plateNumber.trim()
-        : matchedSchedule?.fleet?.plateNumber
-        ? matchedSchedule.fleet.plateNumber.trim()
-        : matchedSchedule?.armada && !isPlaceholderPlate(matchedSchedule.armada)
-        ? matchedSchedule.armada.trim()
         : '-';
+
+      let fleetAuditStatus: 'synced' | 'mismatch' | 'unscheduled' = 'unscheduled';
+      let expectedFleetLabel = '';
+      if (matchedSchedule) {
+        expectedFleetLabel = schedPlateValid ? formatPlateWithInitial(schedPlateRaw) : '-';
+        const baseClean = (base.plateNumber || '').replace(/\s+/g, '').toUpperCase();
+        const schedClean = schedPlateRaw.replace(/\s+/g, '').toUpperCase();
+        const schedCodeClean = (schedFleetObj?.initialCode || matchedSchedule.armada || '').replace(/\s+/g, '').toUpperCase();
+        if (!basePlateValid || !schedClean || baseClean === schedClean || (schedCodeClean && baseClean === schedCodeClean)) {
+          fleetAuditStatus = 'synced';
+        } else {
+          fleetAuditStatus = 'mismatch';
+        }
+      }
 
       const resolvedArea = !isGenericArea(base.areaName)
         ? base.areaName.trim()
@@ -1312,32 +1364,6 @@ export const DriverReportsManagement: React.FC = () => {
       const targetDepartureLabel = `${formatMinutesHHMM(targetDepMinutes)} WIB`;
       const targetReturnLabel = `${formatMinutesHHMM(targetArrMinutes)} WIB`;
 
-      const scheduleActualDepWib = formatIsoOrClockToWib(matchedSchedule?.actualDeparture);
-      const scheduleActualArrWib = formatIsoOrClockToWib(matchedSchedule?.actualArrival);
-
-      const resolvedCheckinTime =
-        base.checkinTime && base.checkinTime !== '-'
-          ? base.checkinTime
-          : scheduleActualDepWib !== '-'
-          ? scheduleActualDepWib
-          : '-';
-
-      const resolvedCheckoutTime =
-        base.checkoutTime && base.checkoutTime !== '-'
-          ? base.checkoutTime
-          : scheduleActualArrWib !== '-'
-          ? scheduleActualArrWib
-          : '-';
-
-      const resolvedStatus: CheckinRow['status'] =
-        resolvedCheckoutTime !== '-' || matchedSchedule?.status === 'delivered'
-          ? 'selesai_shift'
-          : resolvedCheckinTime !== '-' || matchedSchedule?.status === 'in_transit' || base.status === 'sedang_bertugas'
-          ? 'sedang_bertugas'
-          : 'belum_checkin';
-
-      const isNightTrip = sopTiming.isNightDeparture || targetDepMinutes >= 18 * 60;
-
       return {
         ...base,
         scheduleId: base.scheduleId || matchedSchedule?.id,
@@ -1345,13 +1371,13 @@ export const DriverReportsManagement: React.FC = () => {
         plateNumber: resolvedPlate,
         areaName: resolvedArea,
         helperName: helperName || '-',
-        checkinTime: resolvedCheckinTime,
-        checkoutTime: resolvedCheckoutTime,
-        status: resolvedStatus,
         targetDepartureLabel,
         targetReturnLabel,
-        checkinPunctuality: evalPunctuality(resolvedCheckinTime, targetDepMinutes, isNightTrip),
-        checkoutPunctuality: evalPunctuality(resolvedCheckoutTime, targetArrMinutes, isNightTrip)
+        checkinPunctuality: evalPunctuality(base.checkinTime, targetDepMinutes, sopTiming.isNightDeparture || targetDepMinutes >= 18 * 60),
+        checkoutPunctuality: evalPunctuality(base.checkoutTime, targetArrMinutes, false),
+        fleetAuditStatus,
+        expectedFleetLabel,
+        matchedSchedule: matchedSchedule || null
       };
     };
 
@@ -1362,6 +1388,8 @@ export const DriverReportsManagement: React.FC = () => {
         buildRecord({
           id: r.id,
           shiftId: r.shiftId,
+          scheduleId: r.scheduleId || r.deliveryId,
+          trackingNumber: r.trackingNumber,
           date: r.date || getLocalDateStr(r.timestamp),
           driverName: r.driverName,
           helperName: r.helperName,
@@ -1422,6 +1450,7 @@ export const DriverReportsManagement: React.FC = () => {
           buildRecord({
             id: s.id,
             shiftId: s.id,
+            scheduleId: (s as any).scheduleId,
             date: s.date,
             driverName: s.driverName,
             helperName: isHelperShift ? '-' : filteredHelperCombined || '-',
@@ -1438,7 +1467,7 @@ export const DriverReportsManagement: React.FC = () => {
     });
 
     // Integrasi langsung Modal "Buat Kiriman" -> Laporan Check-In & Check-Out:
-    // Jadwal aktif yang baru diterbitkan Admin otomatis tampil sebagai "Terjadwal / Belum Check-In"
+    // Jadwal aktif yang baru diterbitkan Admin otomatis tampil sebagai "Terjadwal / Belum Berangkat"
     // sebelum kru melakukan Check-In, sehingga target jam & plat nomor langsung terbaca.
     schedules.forEach(sch => {
       if (String(sch.status) === 'cancelled' || matchedScheduleIds.has(sch.id)) return;
@@ -1450,15 +1479,6 @@ export const DriverReportsManagement: React.FC = () => {
       const schArea = sch.areaName || sch.store?.storeName || 'Operasional DC';
       const key = `sched-${sch.id}`;
       if (combinedMap.has(key)) return;
-      const schCheckin = formatIsoOrClockToWib(sch.actualDeparture);
-      const schCheckout = formatIsoOrClockToWib(sch.actualArrival);
-      const schStatus: CheckinRow['status'] =
-        schCheckout !== '-' || sch.status === 'delivered'
-          ? 'selesai_shift'
-          : schCheckin !== '-' || sch.status === 'in_transit'
-          ? 'sedang_bertugas'
-          : 'belum_checkin';
-
       combinedMap.set(
         key,
         buildRecord({
@@ -1472,9 +1492,9 @@ export const DriverReportsManagement: React.FC = () => {
           userRole: schDriver !== 'Belum Ditentukan' ? 'Driver' : 'Menunggu Kru',
           plateNumber: schPlate,
           areaName: schArea,
-          checkinTime: schCheckin,
-          checkoutTime: schCheckout,
-          status: schStatus,
+          checkinTime: '-',
+          checkoutTime: '-',
+          status: sch.status === 'delivered' ? 'selesai_shift' : 'belum_checkin',
           notes: sch.notes || `Jadwal terbit (${sch.trackingNumber})`
         })
       );
@@ -1606,8 +1626,8 @@ export const DriverReportsManagement: React.FC = () => {
 
   return (
     <div className="akk-flat-reports w-full max-w-full bg-slate-50 dark:bg-[#0F172A] px-3 sm:px-6 py-5 space-y-5 animate-in fade-in duration-200">
-      {/* 1. Header Utama & Menu Logistik (Flat / Modern Clean Design) */}
-      <div className="bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] rounded-xl px-5 py-3.5 flex items-center justify-between gap-4 relative z-30">
+      {/* 1. Header Utama & Logo Minimalis */}
+      <div className="bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] rounded-xl px-5 py-3.5 shadow-sm flex items-center justify-between gap-4 relative z-30">
         <div className="flex items-center gap-3 min-w-0">
           <AkkLogo size="md" showSubtitle subtitle="AKK Pengiriman · Logistik DC" />
         </div>
@@ -1617,16 +1637,12 @@ export const DriverReportsManagement: React.FC = () => {
             type="button"
             onClick={() => setIsLogisticsMenuOpen(prev => !prev)}
             aria-expanded={isLogisticsMenuOpen}
-            className={`inline-flex items-center gap-2.5 px-4 py-2 rounded-xl border text-xs sm:text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-              isLogisticsMenuOpen
-                ? 'bg-slate-50 dark:bg-slate-800 border-blue-600 text-slate-900 dark:text-white'
-                : 'bg-white dark:bg-[#162234] hover:bg-slate-50 dark:hover:bg-slate-800 border-slate-200 dark:border-[#24344D] text-slate-800 dark:text-slate-100'
-            }`}
+            className="inline-flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-white dark:bg-[#162234] hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-[#24344D] text-xs sm:text-sm font-semibold text-slate-800 dark:text-slate-100 transition-colors cursor-pointer whitespace-nowrap"
           >
             {activeLogisticsMenu.icon}
             <span>Menu Logistik</span>
-            <span className="hidden sm:inline text-slate-300 dark:text-slate-600" aria-hidden="true">/</span>
-            <span className="hidden sm:inline text-xs font-semibold text-blue-600 dark:text-blue-400">
+            <span className="hidden sm:inline text-xs font-medium text-slate-400">·</span>
+            <span className="hidden sm:inline text-xs font-medium text-blue-600 dark:text-blue-400">
               {activeLogisticsMenu.label}
             </span>
             <ChevronDown
@@ -1635,8 +1651,8 @@ export const DriverReportsManagement: React.FC = () => {
           </button>
 
           {isLogisticsMenuOpen && (
-            <div className="absolute right-0 mt-1.5 w-72 rounded-xl bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] p-1.5 z-50">
-              <div className="px-3 py-2 text-xs font-semibold text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-800 mb-1">
+            <div className="absolute right-0 mt-2 w-72 rounded-xl bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] shadow-lg p-1.5 z-50">
+              <div className="px-3 py-2 text-[11px] font-semibold text-slate-400 dark:text-slate-500 border-b border-slate-100 dark:border-slate-800 mb-1">
                 Pilih Modul Laporan Logistik
               </div>
               <div className="space-y-0.5">
@@ -1650,9 +1666,9 @@ export const DriverReportsManagement: React.FC = () => {
                         setActiveSubMenu(item.id);
                         setIsLogisticsMenuOpen(false);
                       }}
-                      className={`w-full flex items-center justify-between gap-2.5 px-3 py-2 rounded-lg text-left text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                      className={`w-full flex items-center justify-between gap-2.5 px-3 py-2 rounded-lg text-left text-xs font-semibold transition-colors cursor-pointer ${
                         isActive
-                          ? 'bg-blue-600 text-white [&_svg]:text-white'
+                          ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300'
                           : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/70'
                       }`}
                     >
@@ -1662,10 +1678,10 @@ export const DriverReportsManagement: React.FC = () => {
                       </span>
                       {typeof item.count === 'number' && (
                         <span
-                          className={`text-xs font-mono tabular-nums shrink-0 ${
+                          className={`text-[11px] px-2 py-0.5 rounded-md font-mono tabular-nums ${
                             isActive
-                              ? 'text-blue-100'
-                              : 'text-slate-500 dark:text-slate-400'
+                              ? 'bg-blue-100 dark:bg-blue-500/30 text-blue-700 dark:text-blue-200'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
                           }`}
                         >
                           {item.count}
@@ -1732,10 +1748,10 @@ export const DriverReportsManagement: React.FC = () => {
                     'Area / Lokasi',
                     'Target Berangkat (WIB)',
                     'Target Pulang (WIB)',
-                    'Waktu Berangkat',
-                    'Ketepatan & Selisih Berangkat',
-                    'Waktu Tiba',
-                    'Ketepatan & Selisih Tiba',
+                    'Waktu Check-In',
+                    'Ketepatan & Selisih Check-In',
+                    'Waktu Check-Out',
+                    'Ketepatan & Selisih Check-Out',
                     'Status Shift'
                   ];
                   const rows = checkinCheckoutList.map(item => [
@@ -1765,7 +1781,7 @@ export const DriverReportsManagement: React.FC = () => {
                   link.click();
                   document.body.removeChild(link);
                 }}
-                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold flex items-center gap-2 cursor-pointer transition whitespace-nowrap"
+                className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold flex items-center gap-2 cursor-pointer transition"
               >
                 <FileSpreadsheet className="w-4 h-4" />
                 <span>Ekspor Excel</span>
@@ -1817,7 +1833,7 @@ export const DriverReportsManagement: React.FC = () => {
                   {checkinCheckoutSummary.counts.belumCheckin}
                 </div>
                 <span className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 block">
-                  Jadwal terbit menunggu keberangkatan
+                  Jadwal terbit menunggu absen kru
                 </span>
               </div>
               <div className="w-11 h-11 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
@@ -1842,7 +1858,7 @@ export const DriverReportsManagement: React.FC = () => {
                   {checkinCheckoutSummary.counts.sedangBertugas}
                 </div>
                 <span className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 block">
-                  Sudah berangkat, belum tiba
+                  Sudah Check-In, belum Check-Out
                 </span>
               </div>
               <div className="w-11 h-11 rounded-xl bg-amber-50 dark:bg-amber-500/15 border border-amber-200 dark:border-amber-500/30 flex items-center justify-center text-amber-600 dark:text-amber-400 shrink-0">
@@ -1867,7 +1883,7 @@ export const DriverReportsManagement: React.FC = () => {
                   {checkinCheckoutSummary.counts.selesaiShift}
                 </div>
                 <span className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 block">
-                  Berangkat &amp; Tiba lengkap
+                  Check-In &amp; Check-Out lengkap
                 </span>
               </div>
               <div className="w-11 h-11 rounded-xl bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
@@ -1906,7 +1922,7 @@ export const DriverReportsManagement: React.FC = () => {
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-sm">
                 <thead>
-                  <tr className="bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 text-xs font-semibold text-slate-600 dark:text-slate-400">
+                  <tr className="bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
                     <th className="py-3.5 px-4 w-12 text-center">#</th>
                     <th className="py-3.5 px-4">Tanggal</th>
                     <th className="py-3.5 px-4">Nama Kru (Driver &amp; Helper)</th>
@@ -1930,104 +1946,149 @@ export const DriverReportsManagement: React.FC = () => {
                   ) : (
                     checkinCheckoutList.map((item, idx) => (
                       <tr key={item.id || idx} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition">
-                        <td className="py-3.5 px-4 text-center font-mono text-slate-500 font-semibold tabular-nums">{idx + 1}</td>
-                        <td className="py-3.5 px-4 font-mono font-semibold text-slate-900 dark:text-white whitespace-nowrap tabular-nums">
+                        <td className="py-3.5 px-4 text-center font-mono text-slate-500 font-bold tabular-nums">{idx + 1}</td>
+                        <td className="py-3.5 px-4 font-mono font-bold text-slate-900 dark:text-white whitespace-nowrap tabular-nums">
                           <div>{item.date}</div>
                           {item.trackingNumber && (
-                            <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mt-0.5">
+                            <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mt-0.5">
                               {item.trackingNumber}
                             </div>
                           )}
                         </td>
                         <td className="py-3.5 px-4">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-sm font-bold text-slate-900 dark:text-white">
+                            <span className="text-[15px] font-bold text-slate-900 dark:text-white">
                               {item.driverName}
                             </span>
-                            <span className="text-xs font-medium text-blue-600 dark:text-blue-400">
-                              · {item.userRole}
+                            <span className="px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-500/30 text-xs font-semibold">
+                              {item.userRole}
                             </span>
                           </div>
                           {item.helperName &&
                             item.helperName !== '-' &&
                             !String(item.userRole || '').toLowerCase().includes('helper') &&
                             item.helperName.trim().toLowerCase() !== (item.driverName || '').trim().toLowerCase() && (
-                              <div className="text-xs text-slate-600 dark:text-slate-300 mt-0.5 font-medium">
+                              <div className="text-[13px] text-amber-700 dark:text-amber-300 mt-1 font-semibold">
                                 Helper: {item.helperName}
                               </div>
                             )}
                         </td>
-                        <td className="py-3.5 px-4 whitespace-nowrap font-mono text-sm font-semibold text-slate-900 dark:text-slate-100 tabular-nums">
-                          {formatPlateWithInitial(item.plateNumber)}
+                        <td className="py-3.5 px-4 whitespace-nowrap">
+                          <div className="flex flex-col items-start gap-1">
+                            <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono text-sm font-bold text-slate-900 dark:text-slate-100">
+                              {formatPlateWithInitial(item.plateNumber)}
+                            </span>
+                            {item.matchedSchedule && item.fleetAuditStatus === 'synced' && (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-semibold">
+                                <CheckCircle2 className="w-3 h-3" />
+                                Sesuai Jadwal
+                              </span>
+                            )}
+                            {item.matchedSchedule && item.fleetAuditStatus === 'mismatch' && (
+                              <div className="flex flex-wrap items-center gap-1">
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-semibold">
+                                  <AlertTriangle className="w-3 h-3 text-amber-600" />
+                                  Jadwal: {item.expectedFleetLabel}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const sch = item.matchedSchedule!;
+                                    const schFleet = sch.fleet || fleets.find(f => f.id === sch.fleetId);
+                                    driverReportService.syncReportsFleetFromSchedule({
+                                      scheduleId: sch.id,
+                                      trackingNumber: sch.trackingNumber,
+                                      fleetId: sch.fleetId,
+                                      plateNumber: schFleet?.plateNumber || sch.armada,
+                                      fleetInitialCode: schFleet?.initialCode || sch.armada,
+                                      driverName: sch.crew?.name,
+                                      areaName: sch.areaName || sch.store?.storeName,
+                                      date: getLocalDateStr(sch.departureDate)
+                                    });
+                                    loadReports();
+                                    addNotification(
+                                      'schedule',
+                                      'Armada Disinkronkan',
+                                      `Armada Check-In & Laporan diperbarui mengikuti jadwal admin (${item.expectedFleetLabel}).`
+                                    );
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-semibold transition-colors cursor-pointer"
+                                >
+                                  <RefreshCw className="w-2.5 h-2.5" />
+                                  Sinkronkan Armada
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </td>
                         <td className="py-3.5 px-4 text-sm font-semibold text-slate-800 dark:text-slate-200">
                           {item.areaName}
                         </td>
                         <td className="py-3.5 px-4 text-center whitespace-nowrap">
-                          <div className="text-xs font-mono text-slate-700 dark:text-slate-200 tabular-nums">
+                          <div className="text-[13px] font-mono text-slate-700 dark:text-slate-200 tabular-nums">
                             <span className="text-slate-500 font-sans font-medium">Berangkat:</span>{' '}
                             <strong className="text-emerald-700 dark:text-emerald-400">{item.targetDepartureLabel}</strong>
                           </div>
-                          <div className="text-xs font-mono text-slate-700 dark:text-slate-200 mt-1 tabular-nums">
+                          <div className="text-[13px] font-mono text-slate-700 dark:text-slate-200 mt-1 tabular-nums">
                             <span className="text-slate-500 font-sans font-medium">Pulang:</span>{' '}
                             <strong className="text-blue-700 dark:text-blue-400">{item.targetReturnLabel}</strong>
                           </div>
                         </td>
                         <td className="py-3.5 px-4 text-center whitespace-nowrap">
                           {item.checkinTime && item.checkinTime !== '-' ? (
-                            <span className="font-mono font-bold text-sm text-emerald-700 dark:text-emerald-400 tabular-nums">
+                            <span className="inline-flex items-center px-3 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30 font-mono font-bold text-sm tabular-nums">
                               {item.checkinTime}
                             </span>
                           ) : (
-                            <span className="text-slate-400 text-xs">Belum Berangkat</span>
+                            <span className="text-slate-400 italic text-xs">Belum Berangkat</span>
                           )}
                         </td>
                         <td className="py-3.5 px-4 text-center whitespace-nowrap">
                           {item.checkoutTime && item.checkoutTime !== '-' ? (
-                            <span className="font-mono font-bold text-sm text-blue-700 dark:text-blue-400 tabular-nums">
+                            <span className="inline-flex items-center px-3 py-1 rounded-lg bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-500/30 font-mono font-bold text-sm tabular-nums">
                               {item.checkoutTime}
                             </span>
                           ) : (
-                            <span className="text-slate-400 text-xs">Belum Tiba</span>
+                            <span className="text-slate-400 italic text-xs">Belum Tiba</span>
                           )}
                         </td>
                         <td className="py-3.5 px-4 text-center whitespace-nowrap">
-                          <div className="flex flex-col items-center gap-1 text-xs tabular-nums">
+                          <div className="flex flex-col items-center gap-1.5">
                             <span
-                              className={`font-semibold ${
+                              className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-bold border ${
                                 item.checkinPunctuality.status === 'terlambat'
-                                  ? 'text-rose-700 dark:text-rose-400'
+                                  ? 'bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-500/30'
                                   : item.checkinPunctuality.status === 'tepat' || item.checkinPunctuality.status === 'awal'
-                                  ? 'text-emerald-700 dark:text-emerald-400'
-                                  : 'text-slate-400'
+                                  ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/30'
+                                  : 'bg-slate-100 dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700'
                               }`}
                             >
-                              Berangkat: {item.checkinPunctuality.label}
+                              In: {item.checkinPunctuality.label}
                             </span>
                             <span
-                              className={`font-semibold ${
+                              className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-bold border ${
                                 item.checkoutPunctuality.status === 'terlambat'
-                                  ? 'text-amber-700 dark:text-amber-400'
+                                  ? 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-500/30'
                                   : item.checkoutPunctuality.status === 'tepat' || item.checkoutPunctuality.status === 'awal'
-                                  ? 'text-blue-700 dark:text-blue-400'
-                                  : 'text-slate-400'
+                                  ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-500/30'
+                                  : 'bg-slate-100 dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700'
                               }`}
                             >
-                              Tiba: {item.checkoutPunctuality.label}
+                              Out: {item.checkoutPunctuality.label}
                             </span>
                           </div>
                         </td>
                         <td className="py-3.5 px-4 text-center whitespace-nowrap">
                           {item.status === 'selesai_shift' ? (
-                            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-[13px] font-bold bg-emerald-50 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30">
                               <CheckCircle2 className="w-3.5 h-3.5" /> Selesai Shift
                             </span>
                           ) : item.status === 'sedang_bertugas' ? (
-                            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-700 dark:text-amber-400">
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-[13px] font-bold bg-amber-50 dark:bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-500/30">
                               <Clock className="w-3.5 h-3.5" /> Sedang Bertugas
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-600 dark:text-blue-400">
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-[13px] font-bold bg-blue-50 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-500/30">
                               <Calendar className="w-3.5 h-3.5" /> Terjadwal / Belum Berangkat
                             </span>
                           )}
@@ -3186,11 +3247,62 @@ export const DriverReportsManagement: React.FC = () => {
                             );
                           })()}
 
-                          {/* 3. Armada (Beserta Nama Inisial Armada) */}
+                          {/* 3. Armada (Single Source of Truth dari Jadwal Kiriman Admin) */}
                           <td className="py-3.5 px-4 align-middle whitespace-nowrap">
-                            <span className="inline-flex items-center gap-1.5 font-mono tabular-nums font-bold text-slate-900 dark:text-amber-300 text-sm bg-slate-100 dark:bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700">
-                              {formatPlateWithInitial(item.plateNumber)}
-                            </span>
+                            {(() => {
+                              const fleetAudit = resolveScheduleFleetAudit(item);
+                              return (
+                                <div className="flex flex-col items-start gap-1">
+                                  <span className="inline-flex items-center gap-1.5 font-mono tabular-nums font-bold text-slate-900 dark:text-amber-300 text-sm bg-slate-100 dark:bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700">
+                                    {formatPlateWithInitial(item.plateNumber)}
+                                  </span>
+                                  {fleetAudit.schedule && fleetAudit.status === 'synced' && (
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-semibold">
+                                      <CheckCircle2 className="w-3 h-3" />
+                                      Sesuai Jadwal
+                                    </span>
+                                  )}
+                                  {fleetAudit.schedule && fleetAudit.status === 'mismatch' && (
+                                    <div className="flex flex-wrap items-center gap-1">
+                                      <span
+                                        title={`Armada pada jadwal admin: ${fleetAudit.expectedLabel}`}
+                                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-semibold"
+                                      >
+                                        <AlertTriangle className="w-3 h-3 text-amber-600" />
+                                        Jadwal: {fleetAudit.expectedLabel}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const sch = fleetAudit.schedule!;
+                                          const schFleet = sch.fleet || fleets.find(f => f.id === sch.fleetId);
+                                          driverReportService.syncReportsFleetFromSchedule({
+                                            scheduleId: sch.id,
+                                            trackingNumber: sch.trackingNumber,
+                                            fleetId: sch.fleetId,
+                                            plateNumber: schFleet?.plateNumber || sch.armada,
+                                            fleetInitialCode: schFleet?.initialCode || sch.armada,
+                                            driverName: sch.crew?.name,
+                                            areaName: sch.areaName || sch.store?.storeName,
+                                            date: getLocalDateStr(sch.departureDate)
+                                          });
+                                          loadReports();
+                                          addNotification(
+                                            'schedule',
+                                            'Armada Laporan Disinkronkan',
+                                            `Armada laporan diperbarui mengikuti jadwal kiriman admin (${fleetAudit.expectedLabel}).`
+                                          );
+                                        }}
+                                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-semibold transition-colors cursor-pointer"
+                                      >
+                                        <RefreshCw className="w-2.5 h-2.5" />
+                                        Sinkronkan Armada
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </td>
 
                           {/* 4. Jenis Laporan */}

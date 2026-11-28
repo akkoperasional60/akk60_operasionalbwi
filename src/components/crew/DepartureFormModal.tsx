@@ -1,9 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Building2, Check, ClipboardCheck, Clock, Eraser, MapPin, PenTool, Truck, UserCheck, Users } from 'lucide-react';
-import type { UserProfile } from '../../types';
-import { branchStore } from '../../services/branchStore';
-import { logisticsStore } from '../../services/store';
+import { Check, CheckCircle2, ClipboardCheck, Eraser, MapPin, PenTool, Truck, Users } from 'lucide-react';
 import type { DepartureSignatureKey, DepartureValidationData, FieldTrip } from './crewModel';
+import { logisticsStore } from '../../services/store';
+import { branchStore } from '../../services/branchStore';
 import { Button, Dialog } from './CrewFieldUI';
 
 interface SignatureBoxDef {
@@ -38,132 +37,14 @@ function formatNowWib(): string {
   return `${datePart} · ${timePart} WIB`;
 }
 
-function resolveBranchLabel(branchId: string): string {
-  const b = branchStore.getBranchById(branchId);
-  const raw = b?.name || (branchId === 'cab-sidoarjo' ? 'Sidoarjo' : 'Nusantara');
-  return raw.replace(/^Cabang\s+/i, '').trim() || 'Nusantara';
-}
-
-function userMatchesBranchStrict(user: UserProfile, branchId: string): boolean {
-  if (!branchId) return true;
-  if (user.role === 'super_admin') {
-    const bp = user.permissions?.branchPermissions;
-    if (bp && Object.keys(bp).length > 0 && bp[branchId] !== undefined) {
-      return Boolean(bp[branchId]?.enabled);
-    }
-    return true;
-  }
-  const bp = user.permissions?.branchPermissions;
-  if (bp && Object.keys(bp).length > 0) {
-    if (bp[branchId]?.enabled) return true;
-    // Check if explicitly disabled when another branch is enabled
-    const anyEnabledElsewhere = Object.entries(bp).some(([bId, entry]) => bId !== branchId && Boolean(entry?.enabled));
-    if (anyEnabledElsewhere) return false;
-  }
-  const crewBranch = branchStore.getCrewBranchId(user.id, user.fullName);
-  if (crewBranch) return crewBranch === branchId;
-  return branchStore.canUserAccessBranch(user, branchId);
-}
-
-function resolveCandidatesByBox(
-  users: UserProfile[],
-  branchId: string,
-  trip: FieldTrip,
-  actorName: string
-): Record<DepartureSignatureKey, string[]> {
-  const approved = users.filter(u => u && u.status === 'approved' && String(u.fullName || '').trim());
-  const inBranch = approved.filter(u => userMatchesBranchStrict(u, branchId));
-  const pool = inBranch.length > 0 ? inBranch : approved;
-
-  const uniqueNames = (list: string[]) => {
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const raw of list) {
-      const clean = String(raw || '').trim();
-      if (!clean || clean === '-') continue;
-      const key = clean.toLowerCase();
-      if (!seen.has(key)) {
-        seen.add(key);
-        out.push(clean);
-      }
-    }
-    return out;
-  };
-
-  // 1. SPV Logistik
-  const spvLogPrimary = pool.filter(u => u.role === 'spv_logistik');
-  const spvLogFallback = inBranch.filter(
-    u => u.role === 'dispatcher' || u.role === 'koordinator_driver'
-  );
-  const spvLogAny = approved.filter(u => u.role === 'spv_logistik');
-  const spvLogistik = uniqueNames([
-    ...spvLogPrimary.map(u => u.fullName),
-    ...spvLogFallback.map(u => u.fullName),
-    ...spvLogAny.map(u => u.fullName)
-  ]);
-
-  // 2. SPV Operasional (prioritize role 'operasional' or dept/title mentioning operasional in branch)
-  const isOpUser = (u: UserProfile) =>
-    u.role === 'operasional' ||
-    String(u.department || '').toLowerCase().includes('operasional') ||
-    String(u.notes || '').toLowerCase().includes('spv operasional');
-
-  const spvOpPrimary = inBranch.filter(u => u.role === 'operasional');
-  const spvOpSecondary = inBranch.filter(u => isOpUser(u) && u.role !== 'spv_logistik');
-  const spvOpSuperAdmin = pool.filter(u => u.role === 'super_admin');
-  const spvOpAny = approved.filter(u => u.role === 'operasional' || isOpUser(u));
-  const spvOperasional = uniqueNames([
-    ...spvOpPrimary.map(u => u.fullName),
-    ...spvOpSecondary.map(u => u.fullName),
-    ...spvOpSuperAdmin.map(u => u.fullName),
-    ...spvOpAny.map(u => u.fullName)
-  ]);
-
-  // 3. Security
-  const secPrimary = inBranch.filter(u => u.role === 'security');
-  const secAny = approved.filter(u => u.role === 'security');
-  const security = uniqueNames([
-    ...secPrimary.map(u => u.fullName),
-    ...secAny.map(u => u.fullName)
-  ]);
-
-  // 4. Driver / Helper
-  const driverName = String(trip.driver?.name || '').trim();
-  const helperName = String(trip.helper?.name || actorName || '').trim();
-  const comboLabel =
-    driverName && helperName && driverName.toLowerCase() !== helperName.toLowerCase()
-      ? `${driverName} / ${helperName}`
-      : driverName || helperName;
-  const branchCrews = inBranch.filter(u => u.role === 'driver' || u.role === 'crew_helper');
-  const crew = uniqueNames([
-    comboLabel,
-    driverName,
-    helperName,
-    ...branchCrews.map(u => u.fullName)
-  ]);
-
-  return { spvLogistik, spvOperasional, security, crew };
-}
-
 interface SignaturePadCardProps {
   def: SignatureBoxDef;
   value: string;
-  signerName: string;
-  candidates: string[];
   disabled?: boolean;
-  onSignerChange: (key: DepartureSignatureKey, name: string) => void;
   onChange: (key: DepartureSignatureKey, dataUrl: string) => void;
 }
 
-const SignaturePadCard: React.FC<SignaturePadCardProps> = ({
-  def,
-  value,
-  signerName,
-  candidates,
-  disabled,
-  onSignerChange,
-  onChange
-}) => {
+const SignaturePadCard: React.FC<SignaturePadCardProps> = ({ def, value, disabled, onChange }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawingRef = useRef(false);
   const hasStrokeRef = useRef(false);
@@ -174,7 +55,7 @@ const SignaturePadCard: React.FC<SignaturePadCardProps> = ({
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
     const width = Math.max(200, Math.floor(rect.width || 220));
-    const height = 104;
+    const height = 108;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     if (canvas.width !== width * dpr || canvas.height !== height * dpr) {
       canvas.width = width * dpr;
@@ -259,7 +140,7 @@ const SignaturePadCard: React.FC<SignaturePadCardProps> = ({
       const ctx = canvas.getContext('2d');
       const rect = canvas.getBoundingClientRect();
       const width = Math.max(200, Math.floor(rect.width || 220));
-      const height = 104;
+      const height = 108;
       if (ctx) {
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, width, height);
@@ -270,13 +151,6 @@ const SignaturePadCard: React.FC<SignaturePadCardProps> = ({
   };
 
   const signed = Boolean(value && value.startsWith('data:image/'));
-  const selectOptions = useMemo(() => {
-    const list = [...candidates];
-    if (signerName && !list.some(c => c.toLowerCase() === signerName.toLowerCase())) {
-      list.unshift(signerName);
-    }
-    return list;
-  }, [candidates, signerName]);
 
   return (
     <div className={`cv75-sig-card ${signed ? 'cv75-sig-card--signed' : ''}`}>
@@ -302,30 +176,6 @@ const SignaturePadCard: React.FC<SignaturePadCardProps> = ({
           )}
         </div>
       </div>
-
-      <div className="cv75-sig-person">
-        {selectOptions.length > 1 ? (
-          <select
-            className="cv75-sig-select"
-            aria-label={`Pilih petugas ${def.title}`}
-            value={signerName}
-            disabled={disabled}
-            onChange={e => onSignerChange(def.key, e.target.value)}
-          >
-            {selectOptions.map(name => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <div className="cv75-sig-name-row">
-            <UserCheck size={12} />
-            <span>{signerName || `Belum ada user ${def.title} di cabang ini`}</span>
-          </div>
-        )}
-      </div>
-
       <div className="cv75-sig-pad-wrap">
         <canvas
           ref={canvasRef}
@@ -365,14 +215,7 @@ export const DepartureFormModal: React.FC<DepartureFormModalProps> = ({
   onClose,
   onSubmit
 }) => {
-  const [users, setUsers] = useState<UserProfile[]>(() => logisticsStore.getUsers());
   const [signatures, setSignatures] = useState<Record<DepartureSignatureKey, string>>({
-    spvLogistik: '',
-    spvOperasional: '',
-    security: '',
-    crew: ''
-  });
-  const [signerNames, setSignerNames] = useState<Record<DepartureSignatureKey, string>>({
     spvLogistik: '',
     spvOperasional: '',
     security: '',
@@ -380,41 +223,96 @@ export const DepartureFormModal: React.FC<DepartureFormModalProps> = ({
   });
   const [clockLabel, setClockLabel] = useState<string>(() => formatNowWib());
 
-  const branchName = useMemo(() => resolveBranchLabel(trip.branchId), [trip.branchId]);
-
-  useEffect(() => {
-    const unsub = logisticsStore.subscribe(() => {
-      setUsers(logisticsStore.getUsers());
-    });
-    void logisticsStore.refreshUsersFromHostinger();
-    return () => unsub();
-  }, []);
-
   useEffect(() => {
     const t = window.setInterval(() => setClockLabel(formatNowWib()), 15000);
     return () => clearInterval(t);
   }, []);
 
-  const candidatesByBox = useMemo(
-    () => resolveCandidatesByBox(users, trip.branchId, trip, actorName),
-    [users, trip, actorName]
-  );
+  // Auto-resolve penandatangan berdasarkan Role + Cabang dari Manajemen User & Hak Akses Cabang
+  const branchLabel = useMemo(() => {
+    const bId = trip.branchId || 'cab-banyuwangi';
+    if (bId === 'cab-sidoarjo') return 'Sidoarjo';
+    return 'Nusantara';
+  }, [trip.branchId]);
 
-  // Auto-fill signer names whenever role + branch candidates resolve, unless user manually picked another option
+  const roleCandidates = useMemo(() => {
+    const allUsers = logisticsStore.getUsers().filter(u => u.status === 'approved');
+    const targetBranchId = trip.branchId || 'cab-banyuwangi';
+    const inBranch = (u: any) => {
+      const permsMap = branchStore.getUserBranchPermissions(
+        u.id,
+        u.role,
+        u.permissions?.modules,
+        u.permissions?.branchPermissions
+      );
+      const entry = permsMap?.[targetBranchId];
+      if (!entry) return true;
+      return Boolean(entry.enabled);
+    };
+    const branchUsers = allUsers.filter(inBranch);
+    const pool = branchUsers.length > 0 ? branchUsers : allUsers;
+
+    const spvLogList = pool.filter(u =>
+      ['spv_logistik', 'admin_logistik', 'super_admin'].includes(String(u.role || '').toLowerCase()) ||
+      String(u.fullName || '').toLowerCase().includes('rachmat')
+    );
+    const spvOpsList = pool.filter(u =>
+      ['spv_operasional', 'operasional', 'super_admin'].includes(String(u.role || '').toLowerCase()) ||
+      String(u.fullName || '').toLowerCase().includes('jerry')
+    );
+    const secList = pool.filter(u =>
+      ['security', 'satpam'].includes(String(u.role || '').toLowerCase())
+    );
+    const crewNames = [trip.driver?.name, trip.helper?.name, actorName]
+      .filter((v): v is string => Boolean(v && v.trim() && v !== '-'))
+      .map((name, idx) => ({ id: `crew-${idx}`, fullName: name.trim() }));
+
+    return {
+      spvLogistik:
+        spvLogList.length > 0
+          ? spvLogList
+          : [{ id: 'def-spvlog', fullName: 'rachmat setiyadi' }],
+      spvOperasional:
+        spvOpsList.length > 0
+          ? spvOpsList
+          : [{ id: 'def-spvops', fullName: 'AHMAD JERRY KURNIAWAN' }],
+      security:
+        secList.length > 0
+          ? secList
+          : [{ id: 'def-sec', fullName: 'Hairul Rozikin' }],
+      crew: crewNames.length > 0 ? crewNames : [{ id: 'def-crew', fullName: actorName || 'Kru Pengiriman' }]
+    };
+  }, [trip.branchId, trip.driver?.name, trip.helper?.name, actorName]);
+
+  const [selectedSignerNames, setSelectedSignerNames] = useState<Record<DepartureSignatureKey, string>>(() => ({
+    spvLogistik:
+      roleCandidates.spvLogistik.find(u => u.fullName.toLowerCase().includes('rachmat'))?.fullName ||
+      roleCandidates.spvLogistik[0]?.fullName ||
+      'rachmat setiyadi',
+    spvOperasional:
+      roleCandidates.spvOperasional.find(u => u.fullName.toLowerCase().includes('jerry'))?.fullName ||
+      roleCandidates.spvOperasional[0]?.fullName ||
+      'AHMAD JERRY KURNIAWAN',
+    security: roleCandidates.security[0]?.fullName || 'Hairul Rozikin',
+    crew: roleCandidates.crew[0]?.fullName || actorName || 'Kru Pengiriman'
+  }));
+
   useEffect(() => {
-    setSignerNames(prev => {
-      const next = { ...prev };
-      let changed = false;
-      (Object.keys(candidatesByBox) as DepartureSignatureKey[]).forEach(key => {
-        const list = candidatesByBox[key];
-        if (!next[key] && list.length > 0) {
-          next[key] = list[0];
-          changed = true;
-        }
-      });
-      return changed ? next : prev;
-    });
-  }, [candidatesByBox]);
+    setSelectedSignerNames(prev => ({
+      spvLogistik:
+        prev.spvLogistik ||
+        roleCandidates.spvLogistik.find(u => u.fullName.toLowerCase().includes('rachmat'))?.fullName ||
+        roleCandidates.spvLogistik[0]?.fullName ||
+        'rachmat setiyadi',
+      spvOperasional:
+        prev.spvOperasional ||
+        roleCandidates.spvOperasional.find(u => u.fullName.toLowerCase().includes('jerry'))?.fullName ||
+        roleCandidates.spvOperasional[0]?.fullName ||
+        'AHMAD JERRY KURNIAWAN',
+      security: prev.security || roleCandidates.security[0]?.fullName || 'Hairul Rozikin',
+      crew: prev.crew || roleCandidates.crew[0]?.fullName || actorName || 'Kru Pengiriman'
+    }));
+  }, [roleCandidates, actorName]);
 
   const signedCount = useMemo(
     () => SIGNATURE_BOXES.filter(box => Boolean(signatures[box.key]?.startsWith('data:image/'))).length,
@@ -427,23 +325,18 @@ export const DepartureFormModal: React.FC<DepartureFormModalProps> = ({
     setSignatures(prev => ({ ...prev, [key]: dataUrl }));
   }, []);
 
-  const handleSignerChange = useCallback((key: DepartureSignatureKey, name: string) => {
-    setSignerNames(prev => ({ ...prev, [key]: name }));
-  }, []);
-
   const handleSave = () => {
     if (!isReady || busy) return;
     const nowIso = new Date().toISOString();
     const wibStamp = formatNowWib();
     const payload: DepartureValidationData = {
       summary: {
-        branchId: trip.branchId,
-        branchName,
         driverName: trip.driver?.name || '-',
         helperName: trip.helper?.name || actorName || '-',
         fleetLabel: trip.fleetLabel || '-',
-        departureTime: trip.departureTime || '-',
         areaName: trip.area || '-',
+        branchName: branchLabel,
+        departureTime: trip.departureTime || wibStamp,
         recordedAt: nowIso,
         recordedAtWib: wibStamp
       },
@@ -451,17 +344,17 @@ export const DepartureFormModal: React.FC<DepartureFormModalProps> = ({
         waybillMatch: true,
         documentsReady: true
       },
-      signerNames: {
-        spvLogistik: signerNames.spvLogistik || candidatesByBox.spvLogistik[0] || '',
-        spvOperasional: signerNames.spvOperasional || candidatesByBox.spvOperasional[0] || '',
-        security: signerNames.security || candidatesByBox.security[0] || '',
-        crew: signerNames.crew || candidatesByBox.crew[0] || ''
-      },
       signatures: {
         spvLogistik: signatures.spvLogistik,
         spvOperasional: signatures.spvOperasional,
         security: signatures.security,
         crew: signatures.crew
+      },
+      signerNames: {
+        spvLogistik: selectedSignerNames.spvLogistik,
+        spvOperasional: selectedSignerNames.spvOperasional,
+        security: selectedSignerNames.security,
+        crew: selectedSignerNames.crew
       },
       signedAt: nowIso,
       signedBy: actorName || trip.helper?.name || 'Helper'
@@ -482,12 +375,8 @@ export const DepartureFormModal: React.FC<DepartureFormModalProps> = ({
         </div>
         <div className="cv75-summary-grid">
           <div className="cv75-summary-item">
-            <span className="cv75-summary-label"><Building2 size={12} /> Cabang</span>
-            <span className="cv75-summary-val">{branchName}</span>
-          </div>
-          <div className="cv75-summary-item">
-            <span className="cv75-summary-label"><Clock size={12} /> Jam Berangkat</span>
-            <span className="cv75-summary-val">{trip.departureTime ? `${trip.departureTime} WIB` : '-'}</span>
+            <span className="cv75-summary-label">Cabang</span>
+            <span className="cv75-summary-val">{branchLabel}</span>
           </div>
           <div className="cv75-summary-item">
             <span className="cv75-summary-label"><Truck size={12} /> Nama Driver</span>
@@ -498,8 +387,12 @@ export const DepartureFormModal: React.FC<DepartureFormModalProps> = ({
             <span className="cv75-summary-val">{trip.helper?.name || actorName || '-'}</span>
           </div>
           <div className="cv75-summary-item">
-            <span className="cv75-summary-label"><Truck size={12} /> Mobil Kiriman</span>
+            <span className="cv75-summary-label">Mobil Kiriman</span>
             <span className="cv75-summary-val">{trip.fleetLabel || '-'}</span>
+          </div>
+          <div className="cv75-summary-item">
+            <span className="cv75-summary-label">Jam Berangkat</span>
+            <span className="cv75-summary-val">{trip.departureTime ? `${trip.departureTime} WIB` : clockLabel}</span>
           </div>
           <div className="cv75-summary-item">
             <span className="cv75-summary-label"><MapPin size={12} /> Area Kirim</span>
@@ -510,34 +403,56 @@ export const DepartureFormModal: React.FC<DepartureFormModalProps> = ({
 
       <div className="cv75-sig-section">
         <div className="cv75-sig-section-head">
-          <span>Tanda Tangan Digital (4 Pihak · Cabang {branchName})</span>
+          <span>Tanda Tangan Digital Otomatis (Cabang {branchLabel})</span>
           <span className={`cv75-badge ${signedCount === 4 ? 'cv75-badge--green' : 'cv75-badge--slate'}`}>
             {signedCount}/4 Lengkap
           </span>
         </div>
         <div className="cv75-sig-grid">
-          {SIGNATURE_BOXES.map(def => (
-            <SignaturePadCard
-              key={def.key}
-              def={def}
-              value={signatures[def.key]}
-              signerName={signerNames[def.key] || ''}
-              candidates={candidatesByBox[def.key]}
-              disabled={busy}
-              onSignerChange={handleSignerChange}
-              onChange={handleSigChange}
-            />
-          ))}
+          {SIGNATURE_BOXES.map(def => {
+            const cands = roleCandidates[def.key] || [];
+            const activeName = selectedSignerNames[def.key] || cands[0]?.fullName || '';
+            return (
+              <div key={def.key} className="space-y-1.5">
+                <div className="flex items-center justify-between gap-1.5 px-1">
+                  <span className="text-[11px] font-semibold text-slate-800 truncate">{activeName}</span>
+                  {cands.length > 1 && (
+                    <select
+                      aria-label={`Pilih kandidat ${def.title}`}
+                      value={activeName}
+                      disabled={busy}
+                      onChange={e =>
+                        setSelectedSignerNames(prev => ({ ...prev, [def.key]: e.target.value }))
+                      }
+                      className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-700"
+                    >
+                      {cands.map(c => (
+                        <option key={c.id} value={c.fullName}>
+                          {c.fullName}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                <SignaturePadCard
+                  def={def}
+                  value={signatures[def.key]}
+                  disabled={busy}
+                  onChange={handleSigChange}
+                />
+              </div>
+            );
+          })}
         </div>
       </div>
 
       <Button disabled={busy || !isReady} loading={busy} onClick={handleSave}>
         <Check size={18} />
-        {isReady ? 'Simpan Form Keluar & Validasi' : `Lengkapi ${4 - signedCount} Tanda Tangan Tersisa`}
+        {isReady ? 'Simpan Form Keluar & Validasi' : `Lengkapi ${4 - signedCount} TTD Tersisa`}
       </Button>
       {!qa && (
         <p className="cv66-meta cv66-gps">
-          Waktu keluar, koordinat GPS, petugas validasi, dan 4 tanda tangan digital tersimpan ke server.
+          Waktu keluar, koordinat GPS, dan 4 tanda tangan digital tersimpan permanen ke server.
         </p>
       )}
     </Dialog>

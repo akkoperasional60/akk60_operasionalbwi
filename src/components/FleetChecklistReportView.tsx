@@ -227,15 +227,23 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
             Laporan Checklist Pemeriksaan Per Armada
           </h2>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-            Pilih armada untuk melihat riwayat inspeksi 9 poin dan rekomendasi servis.
+            Klik armada untuk melihat riwayat inspeksi 9 poin &amp; panduan perbaikan.
           </p>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap shrink-0">
           <button
-            type="button"
+            onClick={() => setShowCatalogModal(true)}
+            className="h-9 px-3.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs sm:text-sm flex items-center gap-1.5 transition cursor-pointer"
+            title="Buka panduan standar interval servis & tindakan darurat"
+          >
+            <BookOpen className="w-4 h-4" />
+            <span>Katalog Servis</span>
+          </button>
+
+          <button
             onClick={loadChecklists}
-            className="h-9 px-3.5 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs sm:text-sm font-semibold flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap"
+            className="h-9 px-3 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs sm:text-sm font-semibold flex items-center gap-1.5 transition cursor-pointer"
             title="Muat Ulang Data"
           >
             <RefreshCw className="w-4 h-4 text-slate-500" />
@@ -243,23 +251,12 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
           </button>
 
           <button
-            type="button"
             onClick={handleExportCsv}
-            className="h-9 px-3.5 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs sm:text-sm font-semibold flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap"
-            title="Unduh laporan checklist ke CSV"
+            className="h-9 px-3.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs sm:text-sm flex items-center gap-1.5 transition cursor-pointer"
+            title="Unduh laporan checklist ke CSV / Excel"
           >
-            <FileSpreadsheet className="w-4 h-4 text-slate-500" />
+            <FileSpreadsheet className="w-4 h-4" />
             <span>Ekspor CSV</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setShowCatalogModal(true)}
-            className="h-9 px-3.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs sm:text-sm flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap"
-            title="Buka panduan standar interval servis & tindakan darurat"
-          >
-            <BookOpen className="w-4 h-4" />
-            <span>Katalog Servis</span>
           </button>
         </div>
       </div>
@@ -272,7 +269,7 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
             <span className="text-3xl font-bold text-slate-900 dark:text-white font-mono tabular-nums leading-none">
               {totalCount}
             </span>
-            <span className="text-xs font-medium text-slate-500 dark:text-slate-400 tabular-nums">
+            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
               {uniqueFleets.length} Armada
             </span>
           </div>
@@ -309,21 +306,20 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
         </div>
       </div>
 
-      {/* Filter & Armada Selector Bar (1-Row Clean Layout) */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5">
-        <div className="flex flex-col lg:flex-row gap-2.5">
-          <div className="flex-1 relative min-w-0">
+      {/* Filter & Fleet Selector Bar */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 space-y-2.5">
+        <div className="flex flex-col sm:flex-row gap-2.5">
+          <div className="flex-1 relative">
             <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Cari nomor polisi, inisial armada, nama driver, atau catatan..."
-              className="w-full h-10 pl-10 pr-8 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-600"
+              className="w-full h-10 pl-10 pr-8 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-blue-500"
             />
             {searchQuery && (
               <button
-                type="button"
                 onClick={() => setSearchQuery('')}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer"
               >
@@ -331,20 +327,6 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
               </button>
             )}
           </div>
-
-          <select
-            value={fleetFilter}
-            onChange={(e) => setFleetFilter(e.target.value)}
-            aria-label="Filter Armada"
-            className="h-10 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 text-sm font-semibold rounded-lg px-3 focus:outline-none focus:border-blue-600 cursor-pointer shrink-0"
-          >
-            <option value="all">Semua Armada ({uniqueFleets.length})</option>
-            {uniqueFleets.map(f => (
-              <option key={f.plate} value={f.plate}>
-                {f.plate}{f.initialCode ? ` (${f.initialCode})` : ''} — {f.count} laporan
-              </option>
-            ))}
-          </select>
 
           <div className="flex items-center gap-1.5 h-10 bg-slate-50 dark:bg-slate-950 px-3 rounded-lg border border-slate-200 dark:border-slate-800 text-sm shrink-0">
             <Calendar className="w-4 h-4 text-slate-500 shrink-0" />
@@ -356,7 +338,6 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
             />
             {selectedDate && (
               <button
-                type="button"
                 onClick={() => setSelectedDate('')}
                 className="text-xs text-rose-600 dark:text-rose-400 hover:underline font-semibold ml-1 cursor-pointer"
               >
@@ -368,14 +349,54 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as any)}
-            aria-label="Filter Status Kelayakan"
-            className="h-10 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 text-sm font-semibold rounded-lg px-3 focus:outline-none focus:border-blue-600 cursor-pointer shrink-0"
+            className="h-10 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 text-sm font-semibold rounded-lg px-3 focus:outline-none focus:border-blue-500 cursor-pointer shrink-0"
           >
             <option value="all">Semua Status</option>
             <option value="passed">Siap Jalan (Aman)</option>
             <option value="warning">Perlu Servis</option>
             <option value="failed">Kritis</option>
           </select>
+        </div>
+
+        {/* Pilihan Armada */}
+        <div className="pt-2.5 border-t border-slate-100 dark:border-slate-800 flex items-center gap-1.5 flex-wrap">
+          <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 mr-1">
+            Armada:
+          </span>
+          <button
+            type="button"
+            onClick={() => setFleetFilter('all')}
+            className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition cursor-pointer ${
+              fleetFilter === 'all'
+                ? 'bg-blue-600 text-white'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+            }`}
+          >
+            Semua ({uniqueFleets.length})
+          </button>
+
+          {uniqueFleets.map(f => {
+            const isSelected = fleetFilter === f.plate;
+            return (
+              <button
+                key={f.plate}
+                type="button"
+                onClick={() => setFleetFilter(isSelected ? 'all' : f.plate)}
+                className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                  isSelected
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                }`}
+              >
+                <span className="font-mono font-bold">{f.plate}</span>
+                {f.initialCode && (
+                  <span className={`text-xs font-mono ${isSelected ? 'text-blue-100' : 'text-slate-500 dark:text-slate-400'}`}>
+                    ({f.initialCode})
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -400,7 +421,7 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
             return (
               <div
                 key={fleetGroup.plateNumber}
-                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-blue-600/50 rounded-xl overflow-hidden transition"
+                className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-blue-400 dark:hover:border-blue-500/50 rounded-xl overflow-hidden transition"
               >
                 {/* Header Armada */}
                 <div
@@ -410,10 +431,10 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
                       [fleetGroup.plateNumber]: !prev[fleetGroup.plateNumber]
                     }))
                   }
-                  className="px-4 py-3.5 sm:px-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer select-none hover:bg-slate-50/70 dark:hover:bg-slate-800/40 transition"
+                  className="px-4 py-3.5 sm:px-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer select-none hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition"
                 >
                   <div className="flex items-center gap-3.5 min-w-0">
-                    <div className="w-10 h-10 rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
+                    <div className="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
                       <Truck className="w-5 h-5" />
                     </div>
                     <div className="min-w-0">
@@ -422,22 +443,22 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
                           {fleetGroup.plateNumber}
                         </h3>
                         {fleetGroup.initialCode && (
-                          <span className="text-xs font-mono font-semibold text-blue-600 dark:text-blue-400">
-                            · {fleetGroup.initialCode}
+                          <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700">
+                            {fleetGroup.initialCode}
                           </span>
                         )}
                         <span className="text-sm font-medium text-slate-500 dark:text-slate-400">
                           · {fleetGroup.vehicleType}
                         </span>
                       </div>
-                      <div className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-2 flex-wrap">
-                        <span className="font-semibold text-slate-700 dark:text-slate-200 tabular-nums">
+                      <div className="text-sm text-slate-600 dark:text-slate-300 mt-0.5 flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-slate-800 dark:text-slate-200 tabular-nums">
                           {fleetGroup.items.length} Laporan
                         </span>
-                        <span aria-hidden="true">·</span>
+                        <span className="text-slate-300 dark:text-slate-600">·</span>
                         <span>
-                          Driver Terakhir: <strong className="font-semibold text-slate-900 dark:text-white">{fleetGroup.latestCheck.driverName}</strong>{' '}
-                          <span className="font-mono tabular-nums">
+                          Driver Terakhir: <strong className="font-bold text-slate-900 dark:text-white">{fleetGroup.latestCheck.driverName}</strong>{' '}
+                          <span className="font-mono tabular-nums text-slate-500 dark:text-slate-400">
                             ({fleetGroup.latestCheck.date} {fleetGroup.latestCheck.time} WIB)
                           </span>
                         </span>
@@ -445,66 +466,68 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
                     </div>
                   </div>
 
-                  {/* Ringkasan Status Per Armada (Clean Unboxed Inline Text) */}
-                  <div className="flex items-center gap-3 self-end sm:self-center shrink-0">
-                    <div className="flex items-center gap-2.5 text-xs sm:text-sm font-semibold tabular-nums">
-                      {fleetGroup.passedCount > 0 && (
-                        <span className="text-emerald-700 dark:text-emerald-400">
-                          {fleetGroup.passedCount} Aman
-                        </span>
-                      )}
-                      {fleetGroup.warningCount > 0 && (
-                        <span className="text-amber-700 dark:text-amber-400">
-                          {fleetGroup.warningCount} Waspada
-                        </span>
-                      )}
-                      {fleetGroup.failedCount > 0 && (
-                        <span className="text-rose-700 dark:text-rose-400">
-                          {fleetGroup.failedCount} Kritis
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-slate-400">
-                      {isExpanded ? <ChevronDown className="w-4 h-4 text-blue-600" /> : <ChevronRight className="w-4 h-4" />}
+                  {/* Ringkasan Status Per Armada */}
+                  <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                    {fleetGroup.passedCount > 0 && (
+                      <span className="px-2.5 py-1 rounded-lg text-xs sm:text-sm font-bold bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30 tabular-nums">
+                        {fleetGroup.passedCount} Aman
+                      </span>
+                    )}
+                    {fleetGroup.warningCount > 0 && (
+                      <span className="px-2.5 py-1 rounded-lg text-xs sm:text-sm font-bold bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-500/30 tabular-nums">
+                        {fleetGroup.warningCount} Waspada
+                      </span>
+                    )}
+                    {fleetGroup.failedCount > 0 && (
+                      <span className="px-2.5 py-1 rounded-lg text-xs sm:text-sm font-bold bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-500/30 tabular-nums">
+                        {fleetGroup.failedCount} Kritis
+                      </span>
+                    )}
+                    <div className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                      {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                     </div>
                   </div>
                 </div>
 
-                {/* Daftar Checklist Di Dalam Armada Ini (Clean Flat Divider List, No Nested Cards) */}
+                {/* Daftar Checklist Di Dalam Armada Ini */}
                 {isExpanded && (
-                  <div className="px-4 sm:px-5 py-2 bg-slate-50/60 dark:bg-slate-950/40 border-t border-slate-200 dark:border-slate-800 divide-y divide-slate-200 dark:divide-slate-800">
+                  <div className="p-4 bg-slate-50/70 dark:bg-slate-950/50 border-t border-slate-200 dark:border-slate-800 divide-y divide-slate-200 dark:divide-slate-800 space-y-4">
                     {fleetGroup.items.map((checklist, idx) => {
                       const issueItems = checklist.items.filter(i => i.status === 'issue');
 
                       return (
-                        <div key={checklist.id} className="py-3.5 space-y-2.5">
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="font-mono text-xs font-semibold text-slate-400 tabular-nums">
-                                  #{idx + 1}
-                                </span>
-                                <span className="font-mono font-bold text-slate-900 dark:text-white text-sm">
-                                  {checklist.id}
-                                </span>
-                                <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
-                                  · {checklist.inspectionType === 'pre_trip' ? 'Pre-Trip' : 'Post-Trip'}
-                                </span>
+                        <div
+                          key={checklist.id}
+                          className={`${idx > 0 ? 'pt-4' : ''} space-y-3`}
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0 font-mono text-xs font-bold">
+                                #{idx + 1}
                               </div>
-                              <div className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 mt-1 flex items-center gap-2 flex-wrap">
-                                <span>Driver: <strong className="font-semibold text-slate-900 dark:text-white">{checklist.driverName}</strong></span>
-                                <span className="text-slate-300 dark:text-slate-600" aria-hidden="true">·</span>
-                                <span className="font-mono tabular-nums">{checklist.date} {checklist.time} WIB</span>
-                                <span className="text-slate-300 dark:text-slate-600" aria-hidden="true">·</span>
-                                <span className="font-mono tabular-nums">Odometer: <strong className="font-semibold text-slate-900 dark:text-white">{checklist.odometerKm.toLocaleString('id-ID')} KM</strong></span>
+                              <div>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-mono font-bold text-slate-900 dark:text-white text-sm">
+                                    {checklist.id}
+                                  </span>
+                                  <span className="text-xs px-2 py-0.5 rounded-md bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-semibold">
+                                    {checklist.inspectionType === 'pre_trip' ? 'Pre-Trip' : 'Post-Trip'}
+                                  </span>
+                                </div>
+                                <div className="text-sm text-slate-600 dark:text-slate-300 mt-0.5 flex items-center gap-2 flex-wrap">
+                                  <span>Driver: <strong className="text-slate-900 dark:text-white">{checklist.driverName}</strong></span>
+                                  <span className="text-slate-300 dark:text-slate-600">·</span>
+                                  <span className="font-mono tabular-nums">{checklist.date} {checklist.time} WIB</span>
+                                  <span className="text-slate-300 dark:text-slate-600">·</span>
+                                  <span className="font-mono tabular-nums">Odometer: <strong className="text-slate-900 dark:text-white">{checklist.odometerKm.toLocaleString()} KM</strong></span>
+                                </div>
                               </div>
                             </div>
 
-                            <div className="flex items-center gap-2 shrink-0">
+                            <div className="flex items-center gap-2">
                               <button
-                                type="button"
                                 onClick={() => setSelectedChecklistModal(checklist)}
-                                className="px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs sm:text-sm flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap"
+                                className="px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs sm:text-sm flex items-center gap-1.5 transition cursor-pointer"
                                 title="Lihat seluruh poin pemeriksaan"
                               >
                                 <Eye className="w-4 h-4" />
@@ -514,7 +537,7 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
                                 <button
                                   type="button"
                                   onClick={() => setDeleteConfirmChecklist(checklist)}
-                                  className="p-2 rounded-lg bg-white dark:bg-slate-800 hover:bg-rose-600 text-rose-600 dark:text-rose-400 hover:text-white border border-slate-200 dark:border-slate-700 hover:border-rose-600 transition cursor-pointer"
+                                  className="p-2 rounded-lg bg-rose-50 dark:bg-rose-500/15 hover:bg-rose-600 text-rose-600 dark:text-rose-400 hover:text-white border border-rose-200 dark:border-rose-500/35 hover:border-rose-600 transition cursor-pointer"
                                   title="Hapus Laporan Checklist (Khusus Super Admin)"
                                 >
                                   <Trash2 className="w-4 h-4" />
@@ -524,18 +547,18 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
                           </div>
 
                           {checklist.notes && (
-                            <div className="text-xs sm:text-sm text-slate-600 dark:text-slate-300">
-                              <span className="font-semibold text-slate-800 dark:text-slate-200 mr-1.5">Catatan Supir:</span>
-                              <span>{checklist.notes}</span>
+                            <div className="bg-white dark:bg-slate-900 p-3 rounded-lg border border-slate-200 dark:border-slate-800 text-sm">
+                              <span className="font-bold text-slate-800 dark:text-slate-200 mr-1.5">Catatan Supir:</span>
+                              <span className="text-slate-600 dark:text-slate-400">{checklist.notes}</span>
                             </div>
                           )}
 
                           {issueItems.length > 0 ? (
-                            <div className="pt-1 space-y-2">
-                              <div className="flex items-center justify-between text-xs sm:text-sm font-semibold text-rose-700 dark:text-rose-400">
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between text-xs sm:text-sm font-bold text-rose-700 dark:text-rose-300">
                                 <div className="flex items-center gap-1.5">
                                   <Wrench className="w-4 h-4" />
-                                  <span>{issueItems.length} Komponen Perlu Perhatian</span>
+                                  <span>Rekomendasi Servis ({issueItems.length} Kendala):</span>
                                 </div>
                                 <button
                                   type="button"
@@ -545,33 +568,61 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
                                       [checklist.id]: !prev[checklist.id]
                                     }));
                                   }}
-                                  className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+                                  className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:bg-slate-100 transition cursor-pointer"
                                 >
                                   {minimizedDirectives[checklist.id] ? 'Tampilkan Arahan' : 'Sembunyikan'}
                                 </button>
                               </div>
 
                               {!minimizedDirectives[checklist.id] && (
-                                <div className="pl-3 border-l border-rose-200 dark:border-rose-500/40 space-y-2">
+                                <div className="space-y-2">
                                   {issueItems.map(item => {
                                     const rule = getMaintenanceRuleForItem(item.name);
 
                                     return (
-                                      <div key={item.id} className="text-xs sm:text-sm space-y-1 py-1">
-                                        <div className="flex items-center gap-2 flex-wrap">
-                                          <span className="font-semibold text-slate-900 dark:text-white">{item.name}</span>
-                                          <span className="text-xs text-slate-500 dark:text-slate-400">· {item.categoryLabel}</span>
-                                          <span className="text-xs font-semibold text-rose-700 dark:text-rose-400">· Perlu Perbaikan</span>
+                                      <div
+                                        key={item.id}
+                                        className="bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-500/30 rounded-xl p-3.5 space-y-2"
+                                      >
+                                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                          <div className="flex items-center gap-2 flex-wrap">
+                                            <span className="px-2 py-0.5 rounded-md text-xs font-bold bg-rose-50 dark:bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-500/40">
+                                              {item.categoryLabel}
+                                            </span>
+                                            <span className="text-sm font-bold text-slate-900 dark:text-white">
+                                              {item.name}
+                                            </span>
+                                          </div>
+                                          <span className="text-xs px-2.5 py-0.5 rounded-md font-bold bg-rose-100 dark:bg-rose-950 text-rose-800 dark:text-rose-300 self-start sm:self-auto">
+                                            Perlu Perbaikan Segera
+                                          </span>
                                         </div>
+
                                         {item.note && (
-                                          <p className="text-xs text-rose-700 dark:text-rose-300">
-                                            Keluhan: {item.note}
-                                          </p>
+                                          <div className="text-sm text-rose-800 dark:text-rose-200 bg-rose-50/70 dark:bg-rose-500/10 p-2.5 rounded-lg border border-rose-200 dark:border-rose-500/20">
+                                            <strong>Keluhan:</strong> {item.note}
+                                          </div>
                                         )}
+
                                         {rule && (
-                                          <p className="text-xs text-slate-600 dark:text-slate-400">
-                                            <span className="font-semibold text-slate-700 dark:text-slate-300">Tindakan:</span> {rule.immediateAction} ({rule.standardInterval})
-                                          </p>
+                                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs sm:text-sm pt-1">
+                                            <div>
+                                              <span className="text-xs font-bold text-amber-700 dark:text-amber-400 block">
+                                                Interval Servis Rutin:
+                                              </span>
+                                              <p className="text-slate-700 dark:text-slate-300 mt-0.5">
+                                                {rule.standardInterval}
+                                              </p>
+                                            </div>
+                                            <div>
+                                              <span className="text-xs font-bold text-rose-700 dark:text-rose-400 block">
+                                                Tindakan Segera:
+                                              </span>
+                                              <p className="text-rose-800 dark:text-rose-200 mt-0.5">
+                                                {rule.immediateAction}
+                                              </p>
+                                            </div>
+                                          </div>
                                         )}
                                       </div>
                                     );
@@ -580,9 +631,9 @@ export const FleetChecklistReportView: React.FC<FleetChecklistReportViewProps> =
                               )}
                             </div>
                           ) : (
-                            <div className="text-xs sm:text-sm text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
-                              <CheckCircle2 className="w-4 h-4 shrink-0" />
-                              <span>Seluruh 9 komponen pemeriksaan dalam kondisi aman dan siap jalan.</span>
+                            <div className="bg-emerald-50/70 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-500/20 rounded-lg px-3 py-2 text-sm text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
+                              <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                              <span>Seluruh 9 komponen pemeriksaan dalam kondisi prima dan siap jalan.</span>
                             </div>
                           )}
                         </div>

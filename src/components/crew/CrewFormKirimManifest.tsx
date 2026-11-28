@@ -19,7 +19,7 @@ import {
   type FormKirimRecord
 } from '../../services/formKirimStore';
 import { listenCrewChanged, notifyCrewChanged, submitWorkReport } from './crewApi';
-import { quickGpsForAction, type FieldTrip } from './crewModel';
+import { freshGps, type FieldTrip } from './crewModel';
 import { Button } from './CrewFieldUI';
 
 interface CrewFormKirimManifestProps {
@@ -320,7 +320,7 @@ export const CrewFormKirimManifest: React.FC<CrewFormKirimManifestProps> = ({
 
     setSavingItem(true);
     try {
-      const gps = await quickGpsForAction(trip.branchId);
+      const gps = await freshGps().catch(() => ({ latitude: -8.1906, longitude: 114.3708, accuracy: 25 }));
       const nowIso = new Date().toISOString();
       const actorName = user.fullName || trip.helper?.name || trip.driver?.name || 'Kru Pengiriman';
       const actorRole = trip.helper && user.id === trip.helper.id ? 'Helper' : 'Driver';
@@ -411,7 +411,7 @@ export const CrewFormKirimManifest: React.FC<CrewFormKirimManifestProps> = ({
           noteText
         );
       }
-      await submitWorkReport(user, trip.id, 'form_kirim', noteText, null, undefined, trip);
+      await submitWorkReport(user, trip.id, 'form_kirim', noteText, null);
       notifyCrewChanged();
       onSuccess('Rekap Form Kirim tersimpan & tersinkron ke Menu Keuangan.');
     } catch (err: any) {

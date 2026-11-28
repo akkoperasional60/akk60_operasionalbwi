@@ -132,15 +132,11 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterFuelType, setFilterFuelType] = useState<string>('all');
   const [filterSpbu, setFilterSpbu] = useState<'all' | 'Farly' | 'Gajah Mada' | 'SPBU Lain'>('all');
-  const [filterDateFrom, setFilterDateFrom] = useState<string>('');
-  const [filterDateTo, setFilterDateTo] = useState<string>('');
+  const [filterDate, setFilterDate] = useState<string>('');
   const [filterArea, setFilterArea] = useState<string>('all');
   const [logSortBy, setLogSortBy] = useState<'date_desc' | 'date_asc' | 'efficient_asc' | 'wasteful_desc'>('date_desc');
   const [logsCurrentPage, setLogsCurrentPage] = useState<number>(1);
   const LOGS_PER_PAGE = 10;
-
-  const formatLiters = (val: number): string =>
-    Number(val || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   // Inline delete confirm & error state
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -206,7 +202,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
 
   useEffect(() => {
     setLogsCurrentPage(1);
-  }, [searchQuery, filterFleetId, filterStatus, filterFuelType, filterSpbu, filterDateFrom, filterDateTo, filterArea, logSortBy, selectedBranchFilter]);
+  }, [searchQuery, filterFleetId, filterSpbu, filterStatus, filterFuelType, filterDate, filterArea, logSortBy, selectedBranchFilter]);
 
   useEffect(() => {
     if (!activeModalDropdown && !isGasStationDropdownOpen) return;
@@ -933,7 +929,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
     setFormDate(log.date || new Date().toISOString().split('T')[0]);
     setFormFuelType(log.fuelType || 'BioSolar');
     setFormCostPerLiter(log.costPerLiter !== undefined ? String(log.costPerLiter) : '6800');
-    setFormLiters(String(log.liters || ''));
+    setFormLiters(log.liters ? Number(log.liters).toFixed(2) : '');
     setFormStartOdo(String(log.startOdometerKm || ''));
     setFormEndOdo(String(log.endOdometerKm || ''));
     setFormGasStation(log.gasStation || 'SPBU Farly');
@@ -1068,7 +1064,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       helperName: formHelperName || undefined,
       date: formDate,
       fuelType: formFuelType,
-      liters: Number(formLiters),
+      liters: Number(Number(formLiters).toFixed(2)),
       costPerLiter: Number(formCostPerLiter) || 6800,
       startOdometerKm: startKm,
       endOdometerKm: endKm,
@@ -1110,15 +1106,6 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
     }
   };
 
-  const distinctAuditAreas = useMemo(() => {
-    const set = new Set<string>();
-    reconciledLogs.forEach(l => {
-      const area = String(l.routeTrip || '').trim();
-      if (area && area !== '-') set.add(area);
-    });
-    return Array.from(set).sort((a, b) => a.localeCompare(b, 'id'));
-  }, [reconciledLogs]);
-
   // Filtered & Sorted Logs for Audit Tab
   const filteredLogs = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -1150,14 +1137,12 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
           ? gsLower.includes('gajah mada')
           : !gsLower.includes('farly') && !gsLower.includes('gajah mada');
 
-      const logIsoDate = normalizeIsoDate(log.date);
-      const matchDateFrom = !filterDateFrom || (Boolean(logIsoDate) && logIsoDate >= filterDateFrom);
-      const matchDateTo = !filterDateTo || (Boolean(logIsoDate) && logIsoDate <= filterDateTo);
+      const matchDate = !filterDate || String(log.date || '').slice(0, 10) === filterDate;
       const matchArea =
         filterArea === 'all' ||
-        String(log.routeTrip || '').trim().toLowerCase() === filterArea.toLowerCase();
+        String(log.routeTrip || '').toLowerCase().includes(filterArea.toLowerCase());
 
-      return matchQuery && matchFleet && matchStatus && matchFuel && matchSpbu && matchDateFrom && matchDateTo && matchArea;
+      return matchQuery && matchFleet && matchStatus && matchFuel && matchSpbu && matchDate && matchArea;
     });
 
     if (logSortBy === 'efficient_asc') {
@@ -1170,7 +1155,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
       return [...list].sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.createdAt || '').localeCompare(b.createdAt || ''));
     }
     return [...list].sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.createdAt || '').localeCompare(a.createdAt || ''));
-  }, [reconciledLogs, searchQuery, filterFleetId, filterStatus, filterFuelType, filterSpbu, filterDateFrom, filterDateTo, filterArea, logSortBy, cleanCanonicalFleets, fleets]);
+  }, [reconciledLogs, searchQuery, filterFleetId, filterStatus, filterFuelType, filterSpbu, filterDate, filterArea, logSortBy, cleanCanonicalFleets, fleets]);
 
   const totalLogsPages = useMemo(
     () => Math.max(1, Math.ceil(filteredLogs.length / LOGS_PER_PAGE)),
@@ -1205,10 +1190,11 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
   }, [calcFleetType, calcDistanceKm, calcCustomPrice, calcCargoBoxes]);
 
   const handleExportExcel = () => {
-    const excelRows = filteredLogs.map(l => {
+    const rows = filteredLogs.map((l, idx) => {
       const bId = resolveLogBranchId(l);
       const bLabel = bId === 'cab-sidoarjo' ? 'Cabang Sidoarjo' : 'Cabang Nusantara';
       return {
+        'No': idx + 1,
         'ID Log': l.id,
         'Tanggal': l.date,
         'Cabang': bLabel,
@@ -1218,26 +1204,33 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
         'Driver': l.driverName,
         'Helper': l.helperName || '-',
         'Jenis BBM': l.fuelType,
-        'Volume (Liter)': Number((l.liters || 0).toFixed(2)),
-        'Harga/L (Rp)': Number(l.costPerLiter || 0),
-        'Total Biaya (Rp)': Number(l.totalCost || 0),
-        'KM Awal': Number(l.startOdometerKm || 0),
-        'KM Akhir': Number(l.endOdometerKm || 0),
-        'Jarak (KM)': Number(l.distanceKm || 0),
+        'Volume (Liter)': Number(Number(l.liters || 0).toFixed(2)),
+        'Harga/L (Rp)': l.costPerLiter,
+        'Total Biaya (Rp)': l.totalCost,
+        'KM Awal': l.startOdometerKm,
+        'KM Akhir': l.endOdometerKm,
+        'Jarak (KM)': l.distanceKm,
         'Sumber Jarak': l.distanceSource === 'portal' ? 'Portal Driver' : 'Input BBM',
-        'Rasio (KM/L)': Number((l.ratioKmPerLiter || 0).toFixed(2)),
-        'Standar Target': Number((l.targetRatio || 0).toFixed(2)),
+        'Rasio (KM/L)': l.ratioKmPerLiter,
+        'Standar Target': l.targetRatio,
         'Status Efisiensi': l.efficiencyStatus,
         'SPBU': l.gasStation,
-        'Area / Rute Perjalanan': l.routeTrip || '-'
+        'Rute Perjalanan': l.routeTrip || '-',
+        'Catatan': l.notes || '-'
       };
     });
 
-    const worksheet = XLSX.utils.json_to_sheet(excelRows.length > 0 ? excelRows : [{ Info: 'Tidak ada data catatan BBM sesuai filter.' }]);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Efisiensi BBM');
-    const dateStr = new Date().toISOString().split('T')[0];
-    XLSX.writeFile(workbook, `efisiensi_bbm_akk_${dateStr}.xlsx`);
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws['!cols'] = [
+      { wch: 5 }, { wch: 14 }, { wch: 12 }, { wch: 18 }, { wch: 14 },
+      { wch: 12 }, { wch: 16 }, { wch: 22 }, { wch: 20 }, { wch: 12 },
+      { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 12 }, { wch: 12 },
+      { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 22 },
+      { wch: 22 }, { wch: 28 }, { wch: 24 }
+    ];
+    XLSX.utils.book_append_sheet(wb, ws, 'Audit_Riwayat_BBM');
+    XLSX.writeFile(wb, `efisiensi_bbm_akk_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
   // Calendar grid helper for modal date picker
@@ -1326,7 +1319,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition cursor-pointer whitespace-nowrap"
             >
               <Download className="w-3.5 h-3.5 text-slate-500" />
-              <span>Ekspor Excel</span>
+              <span>Export Excel</span>
             </button>
 
             <button
@@ -1345,7 +1338,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
           <div className="p-4 rounded-xl border border-slate-200 bg-white">
             <div className="text-xs font-semibold text-slate-500">Total Konsumsi &amp; Biaya BBM</div>
             <div className="text-2xl font-bold text-slate-900 font-mono tabular-nums mt-1">
-              {formatLiters(kpiSummary.totalLiters)} <span className="text-sm font-medium text-slate-500">Liter</span>
+              {kpiSummary.totalLiters.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-sm font-medium text-slate-500">Liter</span>
             </div>
             <div className="text-xs text-slate-500 mt-1 tabular-nums">
               Rp {(kpiSummary.totalCost / 1000000).toFixed(2)} Juta · Rp {kpiSummary.overallAvgCostPerKm.toLocaleString('id-ID')}/KM
@@ -1815,7 +1808,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                         )}
                       </td>
                       <td className="py-3 px-4 text-right font-mono tabular-nums text-slate-700 whitespace-nowrap">
-                        {formatLiters(item.totalLiters)} L
+                        {item.totalLiters.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L
                       </td>
                       <td className="py-3 px-4 text-right font-mono tabular-nums font-bold text-slate-900 whitespace-nowrap">
                         {item.avgLKm}
@@ -1937,7 +1930,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                     <td className="py-3 px-4 text-xs text-slate-600 whitespace-nowrap">{item.areaKirim}</td>
                     <td className="py-3 px-4 text-right font-mono tabular-nums">{item.totalLogs}x</td>
                     <td className="py-3 px-4 text-right font-mono tabular-nums font-semibold text-slate-900">
-                      {formatLiters(item.totalLiters)} L
+                      {item.totalLiters.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L
                     </td>
                     <td className="py-3 px-4 text-right font-mono tabular-nums font-semibold text-blue-600">
                       {item.totalDistanceKm.toLocaleString('id-ID')}
@@ -2043,7 +2036,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                       <td className="py-3 px-4 text-right font-mono tabular-nums font-semibold text-blue-600">
                         {d.totalDistanceKm.toLocaleString('id-ID')} KM
                       </td>
-                      <td className="py-3 px-4 text-right font-mono tabular-nums">{formatLiters(d.totalLiters)} L</td>
+                      <td className="py-3 px-4 text-right font-mono tabular-nums">{d.totalLiters.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} L</td>
                       <td className="py-3 px-4 text-right font-mono tabular-nums font-bold text-slate-900">
                         {d.avgKmPerLiter}
                       </td>
@@ -2125,14 +2118,28 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                 ))}
               </select>
 
+              <input
+                type="date"
+                value={filterDate}
+                onChange={e => setFilterDate(e.target.value)}
+                aria-label="Filter Kalender BBM"
+                className="px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs font-medium text-slate-800 focus:outline-none focus:border-blue-600"
+              />
+
               <select
                 value={filterArea}
                 onChange={e => setFilterArea(e.target.value)}
-                aria-label="Filter Area"
+                aria-label="Filter Area BBM"
                 className="px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs font-medium text-slate-800 focus:outline-none focus:border-blue-600 cursor-pointer"
               >
-                <option value="all">Semua Area ({distinctAuditAreas.length})</option>
-                {distinctAuditAreas.map(area => (
+                <option value="all">Semua Area</option>
+                {Array.from(
+                  new Set(
+                    reconciledLogs
+                      .map(l => String(l.routeTrip || '').trim())
+                      .filter(Boolean)
+                  )
+                ).map(area => (
                   <option key={area} value={area}>
                     {area}
                   </option>
@@ -2163,58 +2170,12 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                 <option value="Boros">Boros</option>
                 <option value="Kritis / Potensi Anomali">Kritis / Potensi Anomali</option>
               </select>
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-2.5 pt-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-700">
-                  <Calendar className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                  <span className="font-medium text-slate-500">Dari:</span>
-                  <input
-                    type="date"
-                    aria-label="Filter Tanggal Mulai"
-                    value={filterDateFrom}
-                    onChange={e => setFilterDateFrom(e.target.value)}
-                    className="bg-transparent text-xs font-mono text-slate-800 focus:outline-none cursor-pointer"
-                  />
-                </div>
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-700">
-                  <Calendar className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                  <span className="font-medium text-slate-500">Sampai:</span>
-                  <input
-                    type="date"
-                    aria-label="Filter Tanggal Akhir"
-                    value={filterDateTo}
-                    onChange={e => setFilterDateTo(e.target.value)}
-                    className="bg-transparent text-xs font-mono text-slate-800 focus:outline-none cursor-pointer"
-                  />
-                </div>
-                {(searchQuery || filterFleetId !== 'all' || filterArea !== 'all' || filterSpbu !== 'all' || filterStatus !== 'all' || filterDateFrom || filterDateTo) && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSearchQuery('');
-                      setFilterFleetId('all');
-                      setFilterArea('all');
-                      setFilterSpbu('all');
-                      setFilterStatus('all');
-                      setFilterFuelType('all');
-                      setFilterDateFrom('');
-                      setFilterDateTo('');
-                    }}
-                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-semibold text-slate-600 cursor-pointer"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                    Reset Filter
-                  </button>
-                )}
-              </div>
 
               <select
                 value={logSortBy}
                 onChange={e => setLogSortBy(e.target.value as typeof logSortBy)}
                 aria-label="Urutkan Log"
-                className="px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-xs font-medium text-slate-800 focus:outline-none focus:border-blue-600 cursor-pointer"
+                className="px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs font-medium text-slate-800 focus:outline-none focus:border-blue-600 cursor-pointer"
               >
                 <option value="date_desc">Tanggal Terbaru</option>
                 <option value="date_asc">Tanggal Terlama</option>
@@ -2272,7 +2233,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                           </div>
                         </td>
                         <td className="py-3.5 px-4 text-right font-mono tabular-nums whitespace-nowrap text-xs">
-                          <span className="font-semibold text-slate-900">{formatLiters(log.liters)} L</span>
+                          <span className="font-semibold text-slate-900">{Number(log.liters || 0).toFixed(2)} L</span>
                           <span className="text-slate-400 mx-1">·</span>
                           <span className="text-slate-600">Rp {log.totalCost.toLocaleString('id-ID')}</span>
                         </td>
@@ -2472,7 +2433,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                   </button>
 
                   {activeModalDropdown === 'fleet' && (
-                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
+                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden">
                       <div className="p-2 border-b border-slate-100">
                         <input
                           type="text"
@@ -2519,7 +2480,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                   </button>
 
                   {activeModalDropdown === 'date' && (
-                    <div className="absolute right-0 top-full mt-1 z-30 w-72 bg-white border border-slate-200 rounded-lg shadow-lg p-3 space-y-2">
+                    <div className="absolute right-0 top-full mt-1 z-30 w-72 bg-white border border-slate-200 rounded-lg shadow-sm p-3 space-y-2">
                       <div className="flex items-center justify-between">
                         <button
                           type="button"
@@ -2582,7 +2543,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                   </button>
 
                   {activeModalDropdown === 'driver' && (
-                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
+                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden">
                       <div className="p-2 border-b border-slate-100">
                         <input
                           type="text"
@@ -2628,7 +2589,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                   </button>
 
                   {activeModalDropdown === 'helper' && (
-                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
+                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden">
                       <div className="p-2 border-b border-slate-100">
                         <input
                           type="text"
@@ -2702,7 +2663,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                     type="number"
                     step="0.01"
                     min="0"
-                    placeholder="Contoh: 25.50"
+                    placeholder="Contoh: 56.54"
                     value={formLiters}
                     onChange={e => setFormLiters(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-sm font-mono text-slate-900 focus:outline-none focus:border-blue-600"
@@ -2720,7 +2681,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                     className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 text-sm text-slate-900 focus:outline-none focus:border-blue-600"
                   />
                   {isGasStationDropdownOpen && (
-                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-lg shadow-lg divide-y divide-slate-100">
+                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-lg shadow-sm divide-y divide-slate-100">
                       {['SPBU Farly', 'SPBU Gajah Mada', 'SPBU Luar / Urgent'].map(st => (
                         <button
                           key={st}
@@ -2779,7 +2740,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                   </button>
 
                   {activeModalDropdown === 'area' && (
-                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
+                    <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden">
                       <div className="p-2 border-b border-slate-100">
                         <input
                           type="text"
@@ -2968,7 +2929,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 rounded-xl bg-slate-50 border border-slate-200">
                 <div>
                   <div className="text-xs text-slate-500">Estimasi BBM</div>
-                  <div className="text-lg font-bold text-slate-900 font-mono tabular-nums">{formatLiters(calcOutput.estLiters)} L</div>
+                  <div className="text-lg font-bold text-slate-900 font-mono tabular-nums">{calcOutput.estLiters.toFixed(2)} L</div>
                   <div className="text-[11px] text-slate-500">Target {calcOutput.target} KM/L</div>
                 </div>
                 <div>
@@ -3033,7 +2994,7 @@ export const FuelEfficiencyManagement: React.FC<FuelEfficiencyManagementProps> =
                 ...(selectedLogForDetail.helperName ? [{ label: 'Helper', value: selectedLogForDetail.helperName }] : []),
                 { label: 'SPBU', value: selectedLogForDetail.gasStation },
                 { label: 'Area Kirim', value: selectedLogForDetail.routeTrip || '-' },
-                { label: 'Volume & Jenis', value: `${formatLiters(selectedLogForDetail.liters)} L (${selectedLogForDetail.fuelType})` },
+                { label: 'Volume & Jenis', value: `${Number(selectedLogForDetail.liters || 0).toFixed(2)} L (${selectedLogForDetail.fuelType})` },
                 { label: 'Total Biaya', value: `Rp ${selectedLogForDetail.totalCost.toLocaleString('id-ID')}` },
                 { label: 'Odometer', value: `${selectedLogForDetail.startOdometerKm} – ${selectedLogForDetail.endOdometerKm} KM` },
                 {

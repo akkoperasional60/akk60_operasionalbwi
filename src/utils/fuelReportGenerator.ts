@@ -424,7 +424,7 @@ export function exportFuelReportToExcel(options: {
     'Inisial Armada': f.initialCode,
     'Tipe Kendaraan': f.vehicleType,
     'Frekuensi Isi': f.refuelCount,
-    'Total Liter': f.totalLiters,
+    'Total Liter': Number(Number(f.totalLiters || 0).toFixed(2)),
     'Total Jarak (KM)': f.totalDistanceKm,
     'Total Biaya (Rp)': f.totalCost,
     'Rasio Aktual (KM/L)': f.avgKmPerLiter,
@@ -469,7 +469,7 @@ export function exportFuelReportToExcel(options: {
       'Nama Driver': d.driverName,
       'Armada Dikemudikan': d.fleetPlates.join(', '),
       'Frekuensi Isi BBM': d.refuelCount,
-      'Total Liter BBM': d.totalLiters,
+      'Total Liter BBM': Number(Number(d.totalLiters || 0).toFixed(2)),
       'Total Jarak Tempuh (KM)': d.totalDistanceKm,
       'Total Biaya BBM (Rp)': d.totalCost,
       'Rasio Efisiensi (KM/L)': d.avgKmPerLiter,
@@ -500,7 +500,7 @@ export function exportFuelReportToExcel(options: {
       'Driver': l.driverName,
       'Helper': l.helperName || '-',
       'Jenis BBM': l.fuelType,
-      'Volume (Liter)': l.liters,
+      'Volume (Liter)': Number(Number(l.liters || 0).toFixed(2)),
       'Harga / Liter (Rp)': l.costPerLiter,
       'Total Biaya (Rp)': l.totalCost,
       'KM Awal': l.startOdometerKm,
@@ -644,7 +644,7 @@ export function exportFuelReportToPDF(options: {
   doc.text('TOTAL BBM:', margin + 4, yPos + 5);
   doc.setTextColor(15, 23, 42);
   doc.setFont('helvetica', 'bold');
-  doc.text(`${totalLiters.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Liter`, margin + 4, yPos + 10);
+  doc.text(`${totalLiters.toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Liter`, margin + 4, yPos + 10);
 
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(71, 85, 105);
@@ -759,7 +759,7 @@ export function exportFuelReportToPDF(options: {
       formatRupiah(f.totalCost),
       f.avgKmPerLiter.toFixed(2),
       f.avgLiterPerKm.toFixed(4),
-      f.targetRatio.toFixed(2),
+      f.targetRatio.toFixed(1),
       f.status
     ];
 

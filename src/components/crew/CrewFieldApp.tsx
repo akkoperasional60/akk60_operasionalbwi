@@ -11,12 +11,12 @@ import { logisticsStore } from '../../services/store';
 import { formKirimStore, type FormKirimInvoiceItem } from '../../services/formKirimStore';
 import {
   FUEL_STATION_CHOICES, VEHICLE_CHECKLIST_ITEMS, WORK_FOR_SLOT, WORK_LABELS, isQaAccount, isCompleted,
-  isTodayOrTomorrowTrip, isTodayTrip, memberFromUser, quickGpsForAction, slotForUser, validateVehicleChecklist,
+  isTodayOrTomorrowTrip, slotForUser, validateVehicleChecklist,
   type CrewSlot, type DepartureValidationData, type FieldTrip, type FuelStationChoice,
   type InspectionChecklistEntry, type VehicleChecklistKey, type WorkAction
 } from './crewModel';
-import { canClaimLive, claimTrip, getTripsForUser, listenCrewChanged, markTask,
-  moveTrip, readCachedTripsForUser, recordEndKm, recordKm, submitWorkReport, writeCachedTripsForUser } from './crewApi';
+import { canClaimLive, claimTrip, freshGps, getTripsForUser, listenCrewChanged, markTask,
+  moveTrip, recordEndKm, recordKm, submitWorkReport } from './crewApi';
 import { TABS, shortDate, initials, roleName, Button, IconTile, Heading,
   Panel, Empty, TripCard, ActiveTrip, TaskRow, Journey, Dialog, BackButton, ActionGrid, TAB_ART, type Screen } from './CrewFieldUI';
 import { CrewLiveCamera, EvidencePreview } from './CrewLiveCamera';
@@ -54,8 +54,8 @@ async function compressImageFileToJpeg(file: File): Promise<string> {
   return canvas.toDataURL('image/jpeg', 0.76);
 }
 
-async function buildEvidenceFromPhoto(photo: string, branchId?: string): Promise<CameraEvidence> {
-  const gps = await quickGpsForAction(branchId);
+async function buildEvidenceFromPhoto(photo: string): Promise<CameraEvidence> {
+  const gps = await freshGps().catch(() => ({ latitude: -8.1906, longitude: 114.3708, accuracy: 25 }));
   const nowIso = new Date().toISOString();
   return {
     photo,
@@ -78,21 +78,16 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
     document.body.classList.remove('akk-crew-portal-ui');
     return () => { document.body.classList.remove('akk-crew-v65-active'); };
   }, []);
-  const initialCached = useMemo(() => readCachedTripsForUser(user.id), [user.id]);
-  const [trips, setTrips] = useState<FieldTrip[]>(() => initialCached);
+  const [trips, setTrips] = useState<FieldTrip[]>([]);
   const [screen, setScreen] = useState<Screen>('kiriman');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(() => initialCached.length === 0);
-  const loadedOnce = useRef(initialCached.length > 0);
+  const [loading, setLoading] = useState(true);
+  const loadedOnce = useRef(false);
   const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [savingLabel, setSavingLabel] = useState('');
   const [fault, setFault] = useState('');
   const [message, setMessage] = useState('');
-  const retryFnRef = useRef<(() => void) | null>(null);
-  const tripsRef = useRef<FieldTrip[]>(trips);
-  tripsRef.current = trips;
   const [claimId, setClaimId] = useState<string | null>(null);
   const [claimPosition, setClaimPosition] = useState<CrewSlot | null>(null);
   const [claimReceipt, setClaimReceipt] = useState<string | null>(null);
@@ -134,13 +129,6 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
   selectedIdRef.current = selectedId;
   const main = useRef<HTMLElement | null>(null);
 
-  useEffect(() => {
-    const cached = readCachedTripsForUser(user.id);
-    setTrips(cached);
-    loadedOnce.current = cached.length > 0;
-    setLoading(cached.length === 0);
-  }, [user.id]);
-
   // A post-mutation refresh must not reuse a read started before the mutation.
   const refresh = useCallback(async (quiet = false, afterMutation = false) => {
     if (refreshInFlight.current) {
@@ -158,34 +146,23 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
         if (alive.current) {
           loadedOnce.current = true; setTrips(next);
           // Do not unlock during a failed or stale post-claim refresh.
-          setClaimReceipt(id => id && next.some(t => t.id === id && slotForUser(t, user)) ? null : id);
-          if (!quiet && !afterMutation) {
-            setFault('');
-            retryFnRef.current = null;
-          }
+          setClaimReceipt(id => id && next.some(t => t.id === id && slotForUser(t,user)) ? null : id);
+          if (!quiet && !afterMutation) setFault('');
 
-          const nextMine = next.filter(t => Boolean(slotForUser(t, user)));
-          const nextOngoing = nextMine.filter(t => !isCompleted(t));
-          const nextActive =
-            nextOngoing.find(t => t.id === selectedIdRef.current) ||
-            nextOngoing[0] ||
-            nextMine.find(t => isCompleted(t) && (isTodayTrip(t) || (slotForUser(t, user) === 'driver' && !t.odometerEnd))) ||
-            null;
+          const nextOngoing = next.filter(t => Boolean(slotForUser(t, user)) && !isCompleted(t));
+          const nextActive = nextOngoing.find(t => t.id === selectedIdRef.current) || nextOngoing[0] || null;
           const prev = prevActiveTripRef.current;
           prevActiveTripRef.current = nextActive ? { id: nextActive.id, phase: nextActive.phase } : null;
 
           if (prev && Date.now() - selfActionAtRef.current > 2000) {
             const prevInNext = next.find(t => t.id === prev.id);
             if (prevInNext && prev.phase === 'waiting' && prevInNext.phase === 'going' && slotForUser(prevInNext, user)) {
-              setMessage('Kiriman sudah berangkat (Dalam perjalanan).');
-            } else if (prevInNext && prev.phase !== 'returned' && prevInNext.phase === 'returned' && slotForUser(prevInNext, user)) {
-              const mySlot = slotForUser(prevInNext, user);
+              setMessage('Kiriman sudah berangkat.');
+            } else if (prevInNext && prevInNext.phase === 'returned' && slotForUser(prevInNext, user)) {
+              setScreen('riwayat');
+              setExpandedHistory(prevInNext.id);
               setCameraOpen(false); setReportKind(null); setReportTripId(null); setReportNote(''); setReportEvidence(null);
-              setMessage(
-                mySlot === 'driver' && !prevInNext.odometerEnd
-                  ? 'Armada Tiba di Gudang / Selesai. Silakan isi KM Akhir.'
-                  : 'Kiriman Tiba di Gudang / Selesai.'
-              );
+              setMessage('Kiriman selesai. Tiba di gudang tercatat.');
             } else if ((!prevInNext || (prevInNext.phase === 'waiting' && !slotForUser(prevInNext, user))) && !nextActive) {
               setScreen('kiriman');
               setSelectedId(null);
@@ -195,10 +172,7 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
           }
         }
       } catch (e) {
-        if (alive.current) {
-          retryFnRef.current = () => { void refresh(false, false); };
-          setFault((e as Error)?.message || 'Gagal memuat jadwal.');
-        }
+        if (alive.current) setFault((e as Error)?.message || 'Gagal memuat jadwal.');
         if (afterMutation) throw e;
       } finally {
         if (alive.current) { setLoading(false); setRefreshing(false); }
@@ -216,7 +190,7 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
   }, [user.id, user.email, user.fullName]);
   useEffect(() => {
     alive.current = true;
-    void refresh(initialCached.length > 0);
+    void refresh();
     const poll = () => {
       if (mutationInFlight.current) {
         pendingRefresh.current = true;
@@ -227,9 +201,9 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
     const detach = listenCrewChanged(poll);
     const onVisibility = () => { if (document.visibilityState === 'visible') poll(); };
     document.addEventListener('visibilitychange', onVisibility);
-    const timer = window.setInterval(poll, qa ? 4000 : 4500);
+    const timer = window.setInterval(poll, qa ? 5000 : 12000);
     return () => { alive.current = false; detach(); document.removeEventListener('visibilitychange', onVisibility); clearInterval(timer); };
-  }, [refresh, qa, initialCached.length]);
+  }, [refresh, qa]);
   const mine = useMemo(() => trips.filter(t => Boolean(slotForUser(t, user))), [trips, user.id, user.fullName]);
   const claimedDates = useMemo(() => new Set(mine.map(t => t.date).filter(Boolean)), [mine]);
   const ongoing = useMemo(() => mine.filter(t => !isCompleted(t)), [mine]);
@@ -240,12 +214,6 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
         .sort((a, b) => String(b.returnedAt || b.date || '').localeCompare(String(a.returnedAt || a.date || ''))),
     [mine]
   );
-  const taskTrips = useMemo(() => {
-    if (ongoing.length > 0) return ongoing;
-    return completed.filter(t =>
-      isTodayTrip(t) || (slotForUser(t, user) === 'driver' && !t.odometerEnd)
-    );
-  }, [ongoing, completed, user]);
   const pendingEndKmTrips = useMemo(
     () => completed.filter(t => slotForUser(t, user) === 'driver' && !t.odometerEnd),
     [completed, user]
@@ -254,22 +222,19 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
   const openTrips = useMemo(() => {
     const list = hasActiveAssignment
       ? ongoing
-      : trips.filter(t =>
-          (!isCompleted(t) && isTodayOrTomorrowTrip(t)) ||
-          (Boolean(slotForUser(t, user)) && (isTodayTrip(t) || (slotForUser(t, user) === 'driver' && !t.odometerEnd)))
-        );
+      : trips.filter(t => !isCompleted(t) && isTodayOrTomorrowTrip(t));
     return [...list].sort((a, b) =>
       a.date === b.date ? a.departureTime.localeCompare(b.departureTime) : a.date.localeCompare(b.date)
     );
-  }, [trips, ongoing, hasActiveAssignment, user]);
+  }, [trips, ongoing, hasActiveAssignment]);
   const visibleTrips = useMemo(() => openTrips.filter(t => {
     if (hasActiveAssignment) return true;
     const query = search.trim().toLocaleLowerCase('id-ID');
     return !query || [t.area, t.fleetLabel, t.trackingNumber, t.driver?.name, t.helper?.name].some(v => String(v || '').toLocaleLowerCase('id-ID').includes(query));
   }), [openTrips, search, hasActiveAssignment]);
-  const activeTrip = taskTrips.find(t => t.id === selectedId) || taskTrips[0] || null;
+  const activeTrip = ongoing.find(t => t.id === selectedId) || ongoing[0] || null;
   const activeSlot = activeTrip ? slotForUser(activeTrip, user) : null;
-  const reportTrip = reportTripId ? taskTrips.find(t => t.id === reportTripId) || null : null;
+  const reportTrip = reportTripId ? ongoing.find(t => t.id === reportTripId) || null : null;
   const claimTarget = trips.find(t => t.id === claimId);
   const claimEnabled = qa || canClaimLive();
   const claimAllowed = claimEnabled && !hasActiveAssignment;
@@ -342,78 +307,56 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
     setReturFakturEvidence(null);
     setReturBarangEvidence(null);
   };
-  const clearNotice = () => { setMessage(''); setFault(''); retryFnRef.current = null; };
-  const nav = (next: Screen) => { if (mutationInFlight.current) return; setScreen(next); resetReport(); clearNotice(); main.current?.scrollTo({top:0}); };
+  const clearNotice = () => { setMessage(''); setFault(''); };
+  const nav = (next: Screen) => {
+    setScreen(next);
+    resetReport();
+    clearNotice();
+    main.current?.scrollTo({ top: 0 });
+  };
   const choose = (id: string, next: Screen = 'tugas') => { setSelectedId(id); setScreen(next); resetReport(); clearNotice(); };
-  const invoke = async <T,>(
-    fn: () => Promise<T>,
+  const invoke = async (
+    fn: () => Promise<void>,
     success: string,
-    options?: {
-      savingText?: string;
-      optimistic?: (prev: FieldTrip[]) => FieldTrip[];
-      after?: (res: T) => void;
-      retry?: () => void;
-    }
+    after?: () => void,
+    optimisticUpdate?: () => (() => void) | void
   ) => {
     if (mutationInFlight.current) return;
     mutationInFlight.current = true;
     selfActionAtRef.current = Date.now();
     setBusy(true);
-    setSavingLabel(options?.savingText || 'Menyimpan...');
     clearNotice();
-
-    const snapshot = tripsRef.current;
-    if (options?.optimistic) {
-      const optimisticNext = options.optimistic(snapshot);
-      setTrips(optimisticNext);
-      writeCachedTripsForUser(user.id, optimisticNext);
-    }
-
+    const rollback = optimisticUpdate?.();
+    let timer: number | undefined;
     try {
-      const returned = await fn();
-      if (alive.current && returned && typeof returned === 'object' && 'id' in (returned as any) && 'phase' in (returned as any)) {
-        const retTrip = returned as unknown as FieldTrip;
-        const merged = tripsRef.current.some(t => t.id === retTrip.id)
-          ? tripsRef.current.map(t => (t.id === retTrip.id ? { ...retTrip, reports: t.reports.length > retTrip.reports.length ? t.reports : retTrip.reports } : t))
-          : [retTrip, ...tripsRef.current];
-        setTrips(merged);
-        writeCachedTripsForUser(user.id, merged);
-      }
-      options?.after?.(returned);
-      if (alive.current) setMessage(success);
+      await Promise.race([
+        fn(),
+        new Promise<never>((_, reject) => {
+          timer = window.setTimeout(
+            () => reject(new Error('Koneksi lambat (batas waktu 8000ms). Tekan Coba Lagi.')),
+            8000
+          );
+        })
+      ]);
+      after?.();
+      setMessage(success);
       void refresh(true, true).catch(() => {});
     } catch (e) {
-      if (alive.current) {
-        if (options?.optimistic) {
-          setTrips(snapshot);
-          writeCachedTripsForUser(user.id, snapshot);
-        }
-        retryFnRef.current = options?.retry || null;
-        setFault((e as Error)?.message || 'Gagal menyimpan. Periksa koneksi lalu coba lagi.');
-      }
+      rollback?.();
+      setFault((e as Error)?.message || 'Gagal menyimpan. Tekan Coba Lagi.');
     } finally {
+      if (timer !== undefined) window.clearTimeout(timer);
       mutationInFlight.current = false;
-      if (alive.current) {
-        setBusy(false);
-        setSavingLabel('');
-      }
+      setBusy(false);
     }
   };
   const closeClaim = () => { if (mutationInFlight.current) return; setClaimId(null); setClaimPosition(null); clearNotice(); };
   const submitClaim = () => {
     if (!claimId || !claimPosition || !claimPositionAvailable || busy || mutationInFlight.current) return;
     const id = claimId, slot = claimPosition;
-    const targetTrip = tripsRef.current.find(t => t.id === id);
-    const run = () => void invoke(() => claimTrip(user, id, slot, targetTrip), 'Kiriman berhasil diambil.', {
-      savingText: 'Mengambil kiriman...',
-      optimistic: prev =>
-        prev.map(t => (t.id === id ? { ...t, [slot]: memberFromUser(user) } : t)),
-      after: () => {
-        setClaimReceipt(id); setClaimId(null); setClaimPosition(null); choose(id);
-      },
-      retry: run
+    void invoke(() => claimTrip(user,id,slot), 'Kiriman berhasil diambil.', () => {
+      setClaimReceipt(id); setClaimId(null); setClaimPosition(null); choose(id);
     });
-    run();
   };
   const resetInspectionForm = () => {
     setInspectionStatuses({});
@@ -454,19 +397,18 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
     if (!files.length) return;
     clearNotice();
     try {
-      const targetBranchId = reportTrip?.branchId || activeTrip?.branchId;
       if (target === 'bbm') {
         const remaining = Math.max(0, 6 - bbmPhotos.length);
         const picked = files.slice(0, remaining);
         const created: CameraEvidence[] = [];
         for (const f of picked) {
           const jpeg = await compressImageFileToJpeg(f);
-          created.push(await buildEvidenceFromPhoto(jpeg, targetBranchId));
+          created.push(await buildEvidenceFromPhoto(jpeg));
         }
         setBbmPhotos(prev => [...prev, ...created].slice(0, 6));
       } else {
         const jpeg = await compressImageFileToJpeg(files[0]);
-        const ev = await buildEvidenceFromPhoto(jpeg, targetBranchId);
+        const ev = await buildEvidenceFromPhoto(jpeg);
         if (target === 'retur_faktur') setReturFakturEvidence(ev);
         else if (target === 'retur_barang') setReturBarangEvidence(ev);
         else setReportEvidence(ev);
@@ -479,25 +421,6 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
     e.preventDefault();
     if (!reportTrip || !reportKind || !slotForUser(reportTrip, user) || busy || cameraOpen) return;
     if (reportKind === 'form_kirim') return;
-
-    const appendOptimisticReport = (tripId: string, kind: WorkAction, note: string) => (prev: FieldTrip[]) =>
-      prev.map(t =>
-        t.id === tripId
-          ? {
-              ...t,
-              reports: [
-                ...t.reports,
-                {
-                  id: `opt-${Date.now()}`,
-                  type: kind,
-                  note,
-                  by: user.fullName || 'Kru AKK',
-                  at: new Date().toISOString()
-                }
-              ]
-            }
-          : t
-      );
 
     if (reportKind === 'bbm') {
       const effectiveNote = reportNote.trim().length >= 3
@@ -514,23 +437,16 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
         return;
       }
       const allPhotos = bbmPhotos.length > 0 ? bbmPhotos.map(p => p.photo) : [primaryEv.photo];
-      const runBbm = () =>
-        void invoke(
-          () =>
-            submitWorkReport(user, reportTrip.id, 'bbm', effectiveNote, primaryEv, {
-              fuelLocation,
-              fuelUrgentReason: fuelLocation === 'SPBU Lain (Urgent)' ? fuelUrgentReason.trim() : undefined,
-              photoUrls: allPhotos
-            }, reportTrip),
-          'Laporan pengisian BBM tersimpan.',
-          {
-            savingText: 'Menyimpan laporan BBM...',
-            optimistic: appendOptimisticReport(reportTrip.id, 'bbm', effectiveNote),
-            after: resetReport,
-            retry: runBbm
-          }
-        );
-      runBbm();
+      void invoke(
+        () =>
+          submitWorkReport(user, reportTrip.id, 'bbm', effectiveNote, primaryEv, {
+            fuelLocation,
+            fuelUrgentReason: fuelLocation === 'SPBU Lain (Urgent)' ? fuelUrgentReason.trim() : undefined,
+            photoUrls: allPhotos
+          }),
+        'Laporan pengisian BBM tersimpan.',
+        resetReport
+      );
       return;
     }
 
@@ -548,24 +464,14 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
         setFault(invalid || 'Ambil atau unggah foto bukti di toko terlebih dahulu.');
         return;
       }
-      const ev = reportEvidence;
-      const noteText = reportNote.trim();
-      const outlet = outletName.trim();
-      const runToko = () =>
-        void invoke(
-          () =>
-            submitWorkReport(user, reportTrip.id, 'toko', noteText, ev, {
-              customerOutletName: outlet
-            }, reportTrip),
-          'Absen Toko berhasil tersimpan.',
-          {
-            savingText: 'Menyimpan Absen Toko...',
-            optimistic: appendOptimisticReport(reportTrip.id, 'toko', noteText),
-            after: resetReport,
-            retry: runToko
-          }
-        );
-      runToko();
+      void invoke(
+        () =>
+          submitWorkReport(user, reportTrip.id, 'toko', reportNote.trim(), reportEvidence, {
+            customerOutletName: outletName.trim()
+          }),
+        'Absen Toko berhasil tersimpan.',
+        resetReport
+      );
       return;
     }
 
@@ -594,30 +500,18 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
         setFault(invalidBarang || 'Foto Barang retur wajib diambil atau diunggah.');
         return;
       }
-      const noteText = reportNote.trim();
-      const outlet = outletName.trim();
-      const inv = returInvoice.trim() || undefined;
-      const itemName = returItemName.trim();
-      const qty = returQty.trim() || undefined;
-      const runRetur = () =>
-        void invoke(
-          () =>
-            submitWorkReport(user, reportTrip.id, 'retur', noteText, evFaktur, {
-              customerOutletName: outlet,
-              invoiceNumber: inv,
-              issueItemName: itemName,
-              issueQty: qty,
-              photoUrls: [evFaktur.photo, evBarang.photo]
-            }, reportTrip),
-          'Laporan Retur Barang (Foto Faktur & Barang) tersimpan.',
-          {
-            savingText: 'Menyimpan Retur Barang...',
-            optimistic: appendOptimisticReport(reportTrip.id, 'retur', noteText),
-            after: resetReport,
-            retry: runRetur
-          }
-        );
-      runRetur();
+      void invoke(
+        () =>
+          submitWorkReport(user, reportTrip.id, 'retur', reportNote.trim(), evFaktur, {
+            customerOutletName: outletName.trim(),
+            invoiceNumber: returInvoice.trim() || undefined,
+            issueItemName: returItemName.trim(),
+            issueQty: returQty.trim() || undefined,
+            photoUrls: [evFaktur.photo, evBarang.photo]
+          }),
+        'Laporan Retur Barang (Foto Faktur & Barang) tersimpan.',
+        resetReport
+      );
       return;
     }
 
@@ -633,107 +527,78 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
     }
     const kind = reportKind;
     const evidence = reportEvidence;
-    const noteText = reportNote.trim();
-    const outlet = outletName.trim();
-    const subType = kendalaSubType;
-    const runKendala = () =>
-      void invoke(
-        () =>
-          submitWorkReport(user, reportTrip.id, kind, noteText, evidence, {
-            kendalaSubType: subType,
-            customerOutletName:
-              subType === 'antri_customer' && outlet
-                ? outlet
-                : undefined
-          }, reportTrip),
-        'Laporan kendala tersimpan & diteruskan ke SPV.',
-        {
-          savingText: 'Menyimpan laporan kendala...',
-          optimistic: appendOptimisticReport(reportTrip.id, kind, noteText),
-          after: resetReport,
-          retry: runKendala
-        }
-      );
-    runKendala();
+    void invoke(
+      () =>
+        submitWorkReport(user, reportTrip.id, kind, reportNote.trim(), evidence, {
+          kendalaSubType,
+          customerOutletName:
+            kendalaSubType === 'antri_customer' && outletName.trim()
+              ? outletName.trim()
+              : undefined
+        }),
+      'Laporan kendala tersimpan & diteruskan ke SPV.',
+      resetReport
+    );
   };
   const saveKm = (e: React.FormEvent) => {
     e.preventDefault(); if (!activeTrip || activeSlot !== 'driver' || activeTrip.odometerStart) return;
-    const tripRef = activeTrip;
-    const val = kmValue;
-    const cleanVal = String(Number(val));
-    const runSaveKm = () =>
-      void invoke(() => recordKm(user, tripRef.id, val, tripRef), 'KM awal tersimpan.', {
-        savingText: 'Menyimpan KM Awal...',
-        optimistic: prev => prev.map(t => (t.id === tripRef.id ? { ...t, odometerStart: cleanVal } : t)),
-        after: () => setKmValue(''),
-        retry: runSaveKm
-      });
-    runSaveKm();
+    void invoke(() => recordKm(user,activeTrip.id,kmValue), 'KM awal tersimpan.', () => setKmValue(''));
   };
   const saveEndKm = (trip: FieldTrip, e: React.FormEvent) => {
     e.preventDefault();
     if (slotForUser(trip, user) !== 'driver' || trip.odometerEnd) return;
     const rawValue = endKmByTrip[trip.id] || '';
     const minStartKm = Number(trip.odometerStart || 0);
-    const cleanVal = String(Number(rawValue));
-    const runSaveEndKm = () =>
-      void invoke(
-        () => recordEndKm(user, trip.id, rawValue, minStartKm, trip),
-        'KM akhir tersimpan. Jarak tempuh otomatis tercatat di Rekap KM & BBM.',
-        {
-          savingText: 'Menyimpan KM Akhir...',
-          optimistic: prev =>
-            prev.map(t =>
-              t.id === trip.id
-                ? { ...t, odometerEnd: cleanVal, odometerEndAt: new Date().toISOString() }
-                : t
-            ),
-          after: () =>
-            setEndKmByTrip(prev => {
-              const next = { ...prev };
-              delete next[trip.id];
-              return next;
-            }),
-          retry: runSaveEndKm
-        }
-      );
-    runSaveEndKm();
+    const parsedEnd = Number(rawValue);
+    void invoke(
+      () => recordEndKm(user, trip.id, rawValue, minStartKm),
+      'KM akhir tersimpan. Jarak tempuh otomatis tercatat di Rekap KM & BBM.',
+      () =>
+        setEndKmByTrip(prev => {
+          const next = { ...prev };
+          delete next[trip.id];
+          return next;
+        }),
+      () => {
+        if (!Number.isFinite(parsedEnd) || parsedEnd <= minStartKm) return;
+        const snapshot = trips;
+        setTrips(prev =>
+          prev.map(t => (t.id === trip.id ? { ...t, odometerEnd: String(parsedEnd) } : t))
+        );
+        return () => setTrips(snapshot);
+      }
+    );
   };
   const handleMove = (phase: 'going' | 'returned') => {
     if (!activeTrip || !activeSlot) return;
-    const tripRef = activeTrip;
+    const targetId = activeTrip.id;
     const nowIso = new Date().toISOString();
-    const runMove = () =>
-      void invoke(
-        () => moveTrip(user, tripRef.id, phase, tripRef),
-        phase === 'going'
-          ? 'Berangkat tercatat (Dalam perjalanan).'
-          : activeSlot === 'driver'
-            ? 'Tiba di Gudang / Selesai. Silakan masukkan KM Akhir.'
-            : 'Tiba di Gudang / Selesai tercatat.',
-        {
-          savingText: phase === 'going' ? 'Mencatat keberangkatan...' : 'Mencatat tiba di gudang...',
-          optimistic: prev =>
-            prev.map(t =>
-              t.id === tripRef.id
-                ? {
-                    ...t,
-                    phase,
-                    departedAt: phase === 'going' ? nowIso : t.departedAt,
-                    returnedAt: phase === 'returned' ? nowIso : t.returnedAt
-                  }
-                : t
-            ),
-          after: phase === 'returned'
-            ? () => {
-                setExpandedHistory(tripRef.id);
-                resetReport();
-              }
-            : undefined,
-          retry: runMove
-        }
-      );
-    runMove();
+    void invoke(
+      () => moveTrip(user, targetId, phase),
+      phase === 'going' ? 'Keberangkatan tercatat.' : 'Tiba di Gudang / Selesai tercatat.',
+      phase === 'returned'
+        ? () => {
+            setScreen('riwayat');
+            setExpandedHistory(targetId);
+            resetReport();
+          }
+        : undefined,
+      () => {
+        const snapshot = trips;
+        setTrips(prev =>
+          prev.map(t =>
+            t.id === targetId
+              ? {
+                  ...t,
+                  phase,
+                  ...(phase === 'going' ? { departedAt: nowIso } : { returnedAt: nowIso })
+                }
+              : t
+          )
+        );
+        return () => setTrips(snapshot);
+      }
+    );
   };
   const inspectionEntries = useMemo<InspectionChecklistEntry[]>(() =>
     VEHICLE_CHECKLIST_ITEMS.map(item => {
@@ -776,12 +641,9 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
     : null;
   const saveCheck = (departureData?: DepartureValidationData) => {
     if (!taskConfirm) return;
-    const target = taskTrips.find(t => t.id === taskConfirm.tripId);
-    const slot = target ? slotForUser(target, user) : null;
-    if (!target || slot !== (taskConfirm.kind === 'inspection' ? 'driver' : 'helper')) {
-      setFault('Tugas tidak tersedia. Muat ulang jadwal.');
-      return;
-    }
+    const target = ongoing.find(t=>t.id===taskConfirm.tripId);
+    const slot = target ? slotForUser(target,user) : null;
+    if (!target || slot !== (taskConfirm.kind === 'inspection' ? 'driver' : 'helper')) {setFault('Tugas tidak tersedia. Muat ulang jadwal.');return;}
     if (taskConfirm.kind === 'inspection') {
       if (!target.odometerStart) {
         setFault('Isi KM awal terlebih dahulu sebelum mengisi pemeriksaan armada.');
@@ -792,76 +654,23 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
         setFault(err);
         return;
       }
-      const entriesCopy = inspectionEntries;
-      const runInspection = () =>
-        void invoke(
-          () => markTask(user, target.id, 'inspection', entriesCopy, undefined, target),
-          'Pemeriksaan & foto armada tersimpan.',
-          {
-            savingText: 'Menyimpan Cek Armada...',
-            optimistic: prev =>
-              prev.map(t =>
-                t.id === target.id
-                  ? { ...t, inspectionDone: true, inspectionChecklist: entriesCopy }
-                  : t
-              ),
-            after: () => { setTaskConfirm(null); resetInspectionForm(); },
-            retry: runInspection
-          }
-        );
-      runInspection();
+      void invoke(
+        () => markTask(user, taskConfirm.tripId, 'inspection', inspectionEntries),
+        'Pemeriksaan & foto armada tersimpan.',
+        () => { setTaskConfirm(null); resetInspectionForm(); }
+      );
       return;
     }
     if (!departureData) return;
-    const depData = departureData;
-    const runWaybill = () =>
-      void invoke(
-        () => markTask(user, target.id, 'waybill', undefined, depData, target),
-        'Form Keluar & 4 TTD tersimpan.',
-        {
-          savingText: 'Menyimpan Form Keluar...',
-          optimistic: prev =>
-            prev.map(t =>
-              t.id === target.id
-                ? { ...t, waybillValidated: true, departureValidation: depData }
-                : t
-            ),
-          after: () => setTaskConfirm(null),
-          retry: runWaybill
-        }
-      );
-    runWaybill();
+    void invoke(
+      () => markTask(user, taskConfirm.tripId, 'waybill', undefined, departureData),
+      'Form Keluar & 4 TTD tersimpan.',
+      () => setTaskConfirm(null)
+    );
   };
-  const notice = fault ? (
-    <div className="cv66-notice cv66-notice--error" role="alert">
-      <CloudOff size={18}/>
-      <span>{fault}</span>
-      {retryFnRef.current && (
-        <button
-          type="button"
-          className="cv75-retry-btn"
-          disabled={busy}
-          onClick={() => retryFnRef.current?.()}
-        >
-          Coba Lagi
-        </button>
-      )}
-      <button type="button" aria-label="Tutup pesan" onClick={clearNotice}><X size={17}/></button>
-    </div>
-  ) : message ? (
-    <div className="cv66-notice cv66-notice--success" role="status">
-      <CheckCircle2 size={18}/>
-      <span>{message}</span>
-      <button type="button" aria-label="Tutup pesan" onClick={()=>setMessage('')}><X size={17}/></button>
-    </div>
-  ) : null;
-  const savingBanner = savingLabel && !modalOpen ? (
-    <div className="cv75-saving-bar" role="status" aria-live="polite">
-      <LoaderCircle size={15} className="cv66-spin"/>
-      <span>{savingLabel}</span>
-    </div>
-  ) : null;
-  const tripPicker = taskTrips.length > 1 && activeTrip ? <label className="cv66-picker"><span>Kiriman</span><select aria-label="Pilih kiriman" value={activeTrip.id} disabled={busy} onChange={e=>{setSelectedId(e.target.value);setKmValue('');resetReport();clearNotice();}}>{taskTrips.map(t=><option key={t.id} value={t.id}>{t.area} - {shortDate(t.date)}</option>)}</select><ChevronDown size={17}/></label> : null;
+  const notice = fault ? <div className="cv66-notice cv66-notice--error" role="alert"><CloudOff size={18}/><span>{fault}</span><button type="button" onClick={() => { setFault(''); void refresh(); }} className="ml-auto mr-1 rounded-md border border-rose-300 bg-white px-2.5 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-50">Coba Lagi</button><button type="button" aria-label="Tutup pesan" onClick={()=>setFault('')}><X size={17}/></button></div>
+    : message ? <div className="cv66-notice cv66-notice--success" role="status"><CheckCircle2 size={18}/><span>{message}</span><button type="button" aria-label="Tutup pesan" onClick={()=>setMessage('')}><X size={17}/></button></div> : null;
+  const tripPicker = ongoing.length > 1 && activeTrip ? <label className="cv66-picker"><span>Kiriman</span><select aria-label="Pilih kiriman" value={activeTrip.id} disabled={busy} onChange={e=>{setSelectedId(e.target.value);setKmValue('');resetReport();clearNotice();}}>{ongoing.map(t=><option key={t.id} value={t.id}>{t.area} - {shortDate(t.date)}</option>)}</select><ChevronDown size={17}/></label> : null;
 
   if (typeof document === 'undefined') return null;
   return createPortal(
@@ -870,10 +679,9 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
         <header className="cv66-header"><div className="cv66-brand"><span className="cv66-brand-icon"><CrewArt name="truck" size={37}/></span><div className="cv66-brand-text"><span className="cv66-brand-title">AKK Pengiriman</span>{(qa || branchText) && <span className="cv66-brand-sub">{qa ? 'Simulasi' : branchText}</span>}</div></div>
           <div className="cv66-header-actions"><button type="button" aria-label="Muat ulang jadwal" disabled={refreshing || busy} onClick={()=>void refresh()} className="cv66-icon-button"><RefreshCw size={20} className={refreshing ? 'cv66-spin' : ''}/></button><button type="button" aria-label="Akun" disabled={busy} onClick={()=>{clearNotice();setAccountOpen(true);}} className="cv66-avatar">{initials(user.fullName)}</button></div>
         </header>
-        {!modalOpen && savingBanner}
         {!modalOpen && notice}
         <main ref={main} className="cv66-main" id="akk-crew-main-content" aria-busy={loading}>
-          {loading ? <div className="cv66-loading" role="status"><LoaderCircle size={24} className="cv66-spin"/>Memuat kiriman...</div> : !loadedOnce.current ? <Empty icon={CloudOff} title="Jadwal gagal dimuat" action={{label:'Coba Lagi',run:()=>void refresh()}}/> :
+          {(loading && !loadedOnce.current) ? <div className="cv66-loading" role="status"><LoaderCircle size={24} className="cv66-spin"/>Memuat kiriman...</div> : !loadedOnce.current ? <Empty icon={CloudOff} title="Jadwal gagal dimuat" action={{label:'Coba Lagi',run:()=>void refresh()}}/> :
           <AnimatePresence mode="wait" initial={false}>
             <motion.div className="cv66-screen" key={screen} initial={reduced ? false : {opacity:0,y:8}} animate={{opacity:1,y:0}} exit={reduced ? {opacity:1} : {opacity:0,y:-3}} transition={{duration:reduced ? 0 : .19,ease:[.2,.7,.3,1]}}>
               {screen === 'kiriman' && <>
@@ -941,108 +749,47 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
                   </>
                 ) : <>
                   {tripPicker}<ActiveTrip trip={activeTrip} slot={activeSlot}/>
-                  <Panel title="Persiapan & Odometer">
+                  <Panel title="Persiapan">
                     {activeSlot === 'driver' ? <>
-                      <div className="cv66-km"><div className="cv66-km-label"><IconTile icon={activeTrip.odometerStart ? CheckCircle2 : Truck} art={activeTrip.odometerStart ? 'success' : 'gauge'} tone={activeTrip.odometerStart ? 'green' : 'blue'}/><span className="cv66-row-title">KM Awal</span>{activeTrip.odometerStart && <span className="cv66-km-value">{Number(activeTrip.odometerStart).toLocaleString('id-ID')} km</span>}</div>
-                        {!activeTrip.odometerStart && !isCompleted(activeTrip) && <form className="cv66-km-form" onSubmit={saveKm}><input type="number" inputMode="numeric" min="1" max="99999999" step="1" value={kmValue} placeholder="Isi KM" aria-label="KM awal kendaraan" onChange={e=>setKmValue(e.target.value)} required/><Button type="submit" disabled={busy || !Number.isFinite(Number(kmValue)) || Number(kmValue)<=0 || Number(kmValue)>99999999} loading={busy}>Simpan KM Awal</Button></form>}
+                      <div className="cv66-km"><div className="cv66-km-label"><IconTile icon={activeTrip.odometerStart ? CheckCircle2 : Truck} art={activeTrip.odometerStart ? 'success' : 'gauge'} tone={activeTrip.odometerStart ? 'green' : 'blue'}/><span className="cv66-row-title">KM Awal</span>{activeTrip.odometerStart && <span className="cv66-km-value">{activeTrip.odometerStart} km</span>}</div>
+                        {!activeTrip.odometerStart && <form className="cv66-km-form" onSubmit={saveKm}><input type="number" inputMode="numeric" min="1" max="99999999" step="1" value={kmValue} placeholder="Isi KM" aria-label="KM awal kendaraan" onChange={e=>setKmValue(e.target.value)} required/><Button type="submit" disabled={busy || !Number.isFinite(Number(kmValue)) || Number(kmValue)<=0 || Number(kmValue)>99999999}>Simpan</Button></form>}
                       </div>
-                      <div className="cv66-km cv66-km--end">
-                        {(() => {
-                          const startNum = Number(activeTrip.odometerStart || 0);
-                          const endNum = Number(activeTrip.odometerEnd || 0);
-                          const completedDist = startNum > 0 && endNum > startNum ? endNum - startNum : 0;
-                          const draftVal = endKmByTrip[activeTrip.id] || '';
-                          const draftNum = Number(draftVal);
-                          const validDraft = Number.isFinite(draftNum) && draftNum > 0 && draftNum <= 99999999 && (startNum <= 0 || draftNum > startNum);
-                          const previewDist = validDraft && startNum > 0 ? draftNum - startNum : 0;
-                          const arrived = isCompleted(activeTrip);
-                          return (
-                            <>
-                              <div className="cv66-km-label">
-                                <IconTile icon={activeTrip.odometerEnd ? CheckCircle2 : Truck} art={activeTrip.odometerEnd ? 'success' : 'gauge'} tone={activeTrip.odometerEnd ? 'green' : 'blue'}/>
-                                <div className="cv66-row-text">
-                                  <span className="cv66-row-title">KM Akhir (Pulang)</span>
-                                  <span className="cv66-meta">
-                                    {activeTrip.odometerEnd
-                                      ? `${endNum.toLocaleString('id-ID')} km${completedDist > 0 ? ` · Jarak tempuh ${completedDist.toLocaleString('id-ID')} km` : ''}`
-                                      : arrived
-                                        ? 'Tiba di Gudang tercatat — masukkan KM Akhir kendaraan'
-                                        : activeTrip.phase === 'going'
-                                          ? 'Terbuka otomatis setelah klik Tiba di Gudang'
-                                          : 'Diisi setelah armada tiba kembali di gudang'}
-                                  </span>
-                                </div>
-                                {activeTrip.odometerEnd && <span className="cv66-km-value">{endNum.toLocaleString('id-ID')} km</span>}
-                              </div>
-                              {arrived && !activeTrip.odometerEnd && (
-                                <div className="space-y-2 pt-1">
-                                  <form className="cv66-km-form" onSubmit={e => saveEndKm(activeTrip, e)}>
-                                    <input
-                                      type="number"
-                                      inputMode="numeric"
-                                      min={startNum > 0 ? startNum + 1 : 1}
-                                      max="99999999"
-                                      step="1"
-                                      value={draftVal}
-                                      placeholder="Masukkan KM Akhir"
-                                      aria-label="KM akhir kendaraan tiba di gudang"
-                                      onChange={e => setEndKmByTrip(prev => ({ ...prev, [activeTrip.id]: e.target.value }))}
-                                      required
-                                    />
-                                    <Button type="submit" disabled={busy || !validDraft} loading={busy}>Simpan KM Akhir</Button>
-                                  </form>
-                                  {draftVal !== '' && startNum > 0 && draftNum <= startNum && (
-                                    <p className="text-xs font-semibold text-rose-600">KM akhir harus lebih besar dari KM awal ({startNum.toLocaleString('id-ID')} km).</p>
-                                  )}
-                                  {previewDist > 0 && (
-                                    <div className="text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5">
-                                      Estimasi jarak tempuh: {previewDist.toLocaleString('id-ID')} km
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                            </>
-                          );
-                        })()}
+                      <div className="cv66-km">
+                        <div className="cv66-km-label">
+                          <IconTile icon={activeTrip.odometerEnd ? CheckCircle2 : Truck} art={activeTrip.odometerEnd ? 'success' : 'gauge'} tone={activeTrip.odometerEnd ? 'green' : 'blue'}/>
+                          <div className="cv66-row-text">
+                            <span className="cv66-row-title">KM Akhir (Pulang)</span>
+                            <span className="cv66-meta">
+                              {activeTrip.odometerEnd
+                                ? `${Number(activeTrip.odometerEnd).toLocaleString('id-ID')} km`
+                                : activeTrip.phase === 'going'
+                                  ? 'Terbuka otomatis setelah klik Tiba di Gudang'
+                                  : 'Diisi setelah armada tiba kembali di gudang'}
+                            </span>
+                          </div>
+                        </div>
                       </div>
                       <TaskRow
                         icon={ShieldCheck}
                         label="Cek Armada"
                         detail={!activeTrip.odometerStart ? 'Isi KM awal terlebih dahulu' : activeTrip.inspectionDone ? '7 kondisi & 4 foto bukti tersimpan' : '7 pemeriksaan kondisi · 4 foto bukti wajib'}
                         done={Boolean(activeTrip.inspectionDone)}
-                        disabled={busy || !activeTrip.odometerStart || isCompleted(activeTrip)}
+                        disabled={busy || !activeTrip.odometerStart}
                         onClick={()=>openTaskConfirm('inspection')}
                       />
                     </> : (
-                      <>
-                        <TaskRow
-                          icon={ClipboardCheck}
-                          label="Form Keluar & Surat Jalan"
-                          detail={
-                            activeTrip.waybillValidated
-                              ? '4 tanda tangan & surat jalan tervalidasi'
-                              : 'Ringkasan kru, cek dokumen & 4 TTD wajib'
-                          }
-                          done={Boolean(activeTrip.waybillValidated)}
-                          disabled={busy || isCompleted(activeTrip)}
-                          onClick={() => openTaskConfirm('waybill')}
-                        />
-                        {isCompleted(activeTrip) && (
-                          <div className="cv66-km cv66-km--end">
-                            <div className="cv66-km-label">
-                              <IconTile icon={activeTrip.odometerEnd ? CheckCircle2 : Truck} art={activeTrip.odometerEnd ? 'success' : 'gauge'} tone={activeTrip.odometerEnd ? 'green' : 'blue'}/>
-                              <div className="cv66-row-text">
-                                <span className="cv66-row-title">Status KM Akhir (Driver)</span>
-                                <span className="cv66-meta">
-                                  {activeTrip.odometerEnd
-                                    ? `${Number(activeTrip.odometerEnd).toLocaleString('id-ID')} km tercatat`
-                                    : 'Menunggu Driver mengisi KM Akhir'}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </>
+                      <TaskRow
+                        icon={ClipboardCheck}
+                        label="Form Keluar & Surat Jalan"
+                        detail={
+                          activeTrip.waybillValidated
+                            ? '4 tanda tangan & surat jalan tervalidasi'
+                            : 'Ringkasan kru, cek dokumen & 4 TTD wajib'
+                        }
+                        done={Boolean(activeTrip.waybillValidated)}
+                        disabled={busy}
+                        onClick={() => openTaskConfirm('waybill')}
+                      />
                     )}
                   </Panel>
                   <Journey trip={activeTrip} busy={busy} onMove={handleMove}/>
@@ -1765,7 +1512,7 @@ export const CrewFieldApp: React.FC<CrewFieldAppProps> = ({ currentUser: user, o
         {taskConfirm?.kind === 'waybill' && activeTrip && (
           <DepartureFormModal
             key="waybill-departure"
-            trip={taskTrips.find(t => t.id === taskConfirm.tripId) || activeTrip}
+            trip={ongoing.find(t => t.id === taskConfirm.tripId) || activeTrip}
             actorName={user.fullName || 'Helper'}
             busy={busy}
             qa={qa}

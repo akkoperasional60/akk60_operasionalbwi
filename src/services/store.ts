@@ -548,10 +548,6 @@ class LogisticsStore {
   private systemActivities: SystemActivity[] = [];
   private spareParts: SparePart[] = [];
   private sparePartUsages: SparePartUsage[] = [];
-  private pendingSparePartDeletes: Set<string> = new Set();
-  private pendingSparePartUsageDeletes: Set<string> = new Set();
-  private lastSparePartsSyncAt: number = 0;
-  private sparePartsSyncPromise: Promise<boolean> | null = null;
   private fuelLogs: FuelLog[] = [];
   private pendingFuelLogUpserts: Map<string, FuelLog> = new Map();
   private pendingFuelLogDeletes: Set<string> = new Set();
@@ -1605,6 +1601,9 @@ class LogisticsStore {
   }
 
   private loadFromStorage<T>(key: string, fallback: T): T {
+    if (MYSQL_BACKED_STORAGE_KEYS.has(key) || key.startsWith('akk_admin_schedule_cache_')) {
+      return fallback;
+    }
     try {
       const data = localStorage.getItem(key);
       return data ? JSON.parse(data) : fallback;
@@ -1628,23 +1627,14 @@ class LogisticsStore {
     this.cachedSchedules = null;
   }
 
-  private saveToStorage(key: string, data: any, silent = false) {
+  private saveToStorage(key: string, _data: any, silent = false) {
     this.invalidateReadCaches();
-    // Data operasional bisnis disimpan di Hostinger MySQL (/api/*), bukan localStorage browser
-    if (MYSQL_BACKED_STORAGE_KEYS.has(key) || key.startsWith('akk_admin_schedule_cache_')) {
-      try {
-        if (typeof localStorage !== 'undefined') {
-          localStorage.removeItem(key);
-        }
-      } catch {}
-      if (!silent) this.notify();
-      return;
-    }
+    // 100% langsung ke database MySQL (/api/*), tanpa menyimpan data operasional di localStorage browser
     try {
-      safeSetItem(key, JSON.stringify(data));
-    } catch {
-      // Safe fallback - in-memory state remains fully intact
-    }
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem(key);
+      }
+    } catch {}
     if (!silent) this.notify();
   }
 
@@ -3824,11 +3814,14 @@ class LogisticsStore {
 
   public async loginUserRemote(identifier: string, password: string): Promise<UserProfile | null> {
     this.lastAuthError = null;
+    const controller = new AbortController();
+    const timeoutId = typeof window !== 'undefined' ? window.setTimeout(() => controller.abort(), 8000) : null;
     try {
       const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
+        signal: controller.signal,
         body: JSON.stringify({ identifier: identifier.trim(), password })
       });
       const payload = await response.json().catch(() => ({}));
@@ -3900,12 +3893,19 @@ class LogisticsStore {
       const previewFallback = this.tryPreviewLoginFallback(identifier, password);
       if (previewFallback) return previewFallback;
 
+      const isAbort = err?.name === 'AbortError' || String(err?.message || '').toLowerCase().includes('abort');
       this.lastAuthError = {
         status: 503,
-        message: 'Tidak dapat terhubung ke server autentikasi. Periksa koneksi jaringan atau status server.'
+        message: isAbort
+          ? 'Permintaan login melebihi batas waktu (8 detik). Periksa koneksi database MySQL atau coba hubungkan ulang.'
+          : 'Tidak dapat terhubung ke server autentikasi. Periksa koneksi jaringan atau status server.'
       };
       console.warn('[Hostinger Auth] Login gagal:', err);
       return null;
+    } finally {
+      if (timeoutId !== null && typeof window !== 'undefined') {
+        window.clearTimeout(timeoutId);
+      }
     }
   }
 
@@ -3974,25 +3974,21 @@ class LogisticsStore {
           setTimeout(() => {
             void (async () => {
               try {
-                const [fuelRes, scanRes, rotationRes, adminSchedRes, sparePartRes] = await Promise.all([
+                const [fuelRes, scanRes, rotationRes, adminSchedRes, spareRes] = await Promise.all([
                   fetch('/api/fuel-logs', { credentials: 'same-origin', headers: authHeaders }),
                   fetch('/api/scanned-documents', { credentials: 'same-origin', headers: authHeaders }),
                   fetch('/api/logistics/crew-rotation-state', { credentials: 'same-origin', headers: authHeaders }),
                   fetch('/api/admin-schedules', { credentials: 'same-origin', headers: authHeaders }),
                   fetch('/api/spare-parts', { credentials: 'same-origin', headers: authHeaders })
                 ]);
-                const [fuelPayload, scanPayload, rotationPayload, adminSchedPayload, sparePartPayload] = await Promise.all([
+                const [fuelPayload, scanPayload, rotationPayload, adminSchedPayload, sparePayload] = await Promise.all([
                   fuelRes.ok ? fuelRes.json().catch(() => ({})) : Promise.resolve({}),
                   scanRes.ok ? scanRes.json().catch(() => ({})) : Promise.resolve({}),
                   rotationRes.ok ? rotationRes.json().catch(() => ({})) : Promise.resolve({}),
                   adminSchedRes.ok ? adminSchedRes.json().catch(() => ({})) : Promise.resolve({}),
-                  sparePartRes.ok ? sparePartRes.json().catch(() => ({})) : Promise.resolve({})
+                  spareRes.ok ? spareRes.json().catch(() => ({})) : Promise.resolve({})
                 ]);
                 let secondaryUpdated = false;
-                if (sparePartRes.ok && sparePartPayload?.success) {
-                  this.applyRemoteSparePartsPayload(sparePartPayload);
-                  secondaryUpdated = true;
-                }
                 if (fuelRes.ok && Array.isArray(fuelPayload?.data)) {
                   const serverLogs: FuelLog[] = (fuelPayload.data as FuelLog[]).filter(
                     l => !this.pendingFuelLogDeletes.has(l.id)
@@ -4046,6 +4042,15 @@ class LogisticsStore {
                 }
                 if (adminSchedRes.ok && Array.isArray(adminSchedPayload?.schedules)) {
                   this.lastAdminScheduleWeeksList = adminSchedPayload.schedules;
+                  secondaryUpdated = true;
+                }
+                if (spareRes.ok && sparePayload?.success) {
+                  if (Array.isArray(sparePayload.spareParts)) {
+                    this.spareParts = sparePayload.spareParts;
+                  }
+                  if (Array.isArray(sparePayload.usages)) {
+                    this.sparePartUsages = sparePayload.usages;
+                  }
                   secondaryUpdated = true;
                 }
                 if (secondaryUpdated) {
@@ -4555,9 +4560,7 @@ class LogisticsStore {
         changed = true;
       }
       if (changed) {
-        try {
-          safeSetItem(STORAGE_KEYS.CREWS, JSON.stringify(this.crews));
-        } catch {}
+        this.saveToStorage(STORAGE_KEYS.CREWS, this.crews, true);
       }
     } else {
       matchedCrew = {
@@ -4869,6 +4872,25 @@ class LogisticsStore {
     });
     this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
     this.syncSchedulesToCrewHistory(this.schedules);
+
+    if (newSch) {
+      try {
+        import('./driverReportService')
+          .then(({ driverReportService, getLocalDateStr }) => {
+            driverReportService.syncReportsFleetFromSchedule({
+              scheduleId: newSch!.id,
+              trackingNumber: newSch!.trackingNumber,
+              fleetId: newSch!.fleetId,
+              plateNumber: newSch!.fleet?.plateNumber || newSch!.armada,
+              fleetInitialCode: newSch!.fleet?.initialCode || newSch!.armada,
+              driverName: newSch!.crew?.name,
+              areaName: newSch!.areaName || newSch!.store?.storeName,
+              date: getLocalDateStr(newSch!.departureDate)
+            });
+          })
+          .catch(() => {});
+      } catch {}
+    }
 
     if (newSch) {
       this.dispatchMiddleware({
@@ -6848,130 +6870,49 @@ class LogisticsStore {
   // ==========================================
   // SPARE PARTS & ROUTINE MAINTENANCE METHODS
   // ==========================================
-  private applyRemoteSparePartsPayload(payload: any): void {
-    const serverDeletedParts = new Set<string>(
-      Array.isArray(payload?.deletedPartIds) ? payload.deletedPartIds.map((x: any) => String(x)) : []
-    );
-    const serverDeletedUsages = new Set<string>(
-      Array.isArray(payload?.deletedUsageIds) ? payload.deletedUsageIds.map((x: any) => String(x)) : []
-    );
-    this.pendingSparePartDeletes.forEach(id => serverDeletedParts.add(id));
-    this.pendingSparePartUsageDeletes.forEach(id => serverDeletedUsages.add(id));
-
-    const remoteParts: SparePart[] = Array.isArray(payload?.spareParts) ? payload.spareParts : [];
-    const remoteUsages: SparePartUsage[] = Array.isArray(payload?.usages) ? payload.usages : [];
-
-    const partMap = new Map<string, SparePart>();
-    for (const p of this.spareParts) {
-      if (p?.id && !serverDeletedParts.has(p.id)) partMap.set(p.id, p);
-    }
-    for (const rp of remoteParts) {
-      if (!rp?.id || serverDeletedParts.has(rp.id)) continue;
-      const loc = partMap.get(rp.id);
-      const locTs = loc?.updatedAt ? Date.parse(loc.updatedAt) : 0;
-      const remTs = rp.updatedAt ? Date.parse(rp.updatedAt) : 0;
-      if (!loc || !locTs || remTs >= locTs) {
-        partMap.set(rp.id, rp);
-      }
-    }
-
-    const usageMap = new Map<string, SparePartUsage>();
-    for (const u of this.sparePartUsages) {
-      if (u?.id && !serverDeletedUsages.has(u.id)) usageMap.set(u.id, u);
-    }
-    for (const ru of remoteUsages) {
-      if (!ru?.id || serverDeletedUsages.has(ru.id)) continue;
-      const loc = usageMap.get(ru.id);
-      const locTs = loc?.updatedAt ? Date.parse(loc.updatedAt) : 0;
-      const remTs = ru.updatedAt ? Date.parse(ru.updatedAt) : 0;
-      if (!loc || !locTs || remTs >= locTs) {
-        usageMap.set(ru.id, ru);
-      }
-    }
-
-    this.spareParts = Array.from(partMap.values());
-    this.sparePartUsages = Array.from(usageMap.values());
-    this.lastSparePartsSyncAt = Date.now();
-  }
-
-  public async syncSparePartsFromServer(force: boolean = false): Promise<boolean> {
-    if (this.sparePartsSyncPromise) return this.sparePartsSyncPromise;
-    if (!force && Date.now() - this.lastSparePartsSyncAt < 8000) return true;
-    this.sparePartsSyncPromise = (async () => {
-      try {
-        if (this.isPreviewEnvironment()) {
-          await this.ensurePreviewServerSession(false);
-        }
-        const res = await fetch('/api/spare-parts', {
-          credentials: 'same-origin',
-          headers: this.buildSessionAuthHeaders({ Accept: 'application/json' })
-        });
-        if (!res.ok) return false;
-        const payload = await res.json().catch(() => ({}));
-        if (!payload?.success) return false;
-        this.applyRemoteSparePartsPayload(payload);
-        this.notify();
-        return true;
-      } catch {
-        return false;
-      } finally {
-        this.sparePartsSyncPromise = null;
-      }
-    })();
-    return this.sparePartsSyncPromise;
-  }
-
-  private async persistSparePartsToServer(
-    partsToPush: SparePart[],
-    usagesToPush: SparePartUsage[],
-    deletedPartIds: string[] = [],
-    deletedUsageIds: string[] = []
-  ): Promise<void> {
-    try {
-      if (this.isPreviewEnvironment()) {
-        await this.ensurePreviewServerSession(false);
-      }
-      const res = await fetch('/api/spare-parts', {
-        method: 'PUT',
-        credentials: 'same-origin',
-        headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({
-          spareParts: partsToPush,
-          usages: usagesToPush,
-          deletedPartIds,
-          deletedUsageIds
-        })
-      });
-      if (!res.ok) return;
-      const payload = await res.json().catch(() => ({}));
-      if (payload?.success) {
-        deletedPartIds.forEach(id => this.pendingSparePartDeletes.delete(id));
-        deletedUsageIds.forEach(id => this.pendingSparePartUsageDeletes.delete(id));
-        this.applyRemoteSparePartsPayload(payload);
-        this.notify();
-      }
-    } catch {
-      // ignore transient network failure; remains in memory & retries on next sync
-    }
-  }
-
   public getSpareParts(): SparePart[] {
+    const role = String(this.currentUser?.role || '').toLowerCase().replace(/[\s_-]+/g, '');
+    if (role === 'superadmin') {
+      return [...this.spareParts];
+    }
     return [...this.spareParts];
   }
 
+  public async refreshSparePartsFromServer(): Promise<{ spareParts: SparePart[]; usages: SparePartUsage[] }> {
+    try {
+      const res = await fetch('/api/spare-parts', {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: this.buildSessionAuthHeaders({ Accept: 'application/json' })
+      });
+      const payload = await res.json().catch(() => null);
+      if (res.ok && payload?.success) {
+        if (Array.isArray(payload.spareParts)) {
+          this.spareParts = payload.spareParts;
+        }
+        if (Array.isArray(payload.usages)) {
+          this.sparePartUsages = payload.usages;
+        }
+        this.notify();
+      }
+    } catch (err) {
+      console.warn('[Hostinger SpareParts] Gagal refresh dari MySQL:', err);
+    }
+    return { spareParts: [...this.spareParts], usages: [...this.sparePartUsages] };
+  }
+
   public addSparePart(part: Omit<SparePart, 'id'>): SparePart {
-    const nowIso = new Date().toISOString();
-    const actorName = this.currentUser?.fullName || this.currentUser?.email || 'Admin';
     const newPart: SparePart = {
       ...part,
-      id: 'sp-' + Math.random().toString(36).substring(2, 9),
-      createdBy: part.createdBy || actorName,
-      updatedAt: nowIso
+      id: 'sp-' + Math.random().toString(36).substring(2, 9)
     };
-    this.pendingSparePartDeletes.delete(newPart.id);
     this.spareParts = [newPart, ...this.spareParts];
-    this.saveToStorage(STORAGE_KEYS.SPARE_PARTS, this.spareParts);
-    void this.persistSparePartsToServer([newPart], []);
+    void fetch('/api/spare-parts', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(newPart)
+    }).catch(err => console.warn('[MySQL SparePart POST]', err));
     this.logActivity(
       'Tambah Sparepart Baru',
       newPart.name,
@@ -6983,20 +6924,15 @@ class LogisticsStore {
   }
 
   public updateSparePart(id: string, updated: Partial<SparePart>): void {
-    const nowIso = new Date().toISOString();
     const existing = this.spareParts.find(p => p.id === id);
-    let savedItem: SparePart | null = null;
-    this.spareParts = this.spareParts.map(p => {
-      if (p.id === id) {
-        savedItem = { ...p, ...updated, updatedAt: nowIso };
-        return savedItem;
-      }
-      return p;
-    });
-    this.saveToStorage(STORAGE_KEYS.SPARE_PARTS, this.spareParts);
-    if (savedItem) {
-      void this.persistSparePartsToServer([savedItem], []);
-    }
+    const merged = existing ? { ...existing, ...updated } : updated;
+    this.spareParts = this.spareParts.map(p => p.id === id ? { ...p, ...updated } : p);
+    void fetch(`/api/spare-parts/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(merged)
+    }).catch(err => console.warn('[MySQL SparePart PUT]', err));
     if (existing) {
       this.logActivity(
         'Ubah Data Sparepart',
@@ -7010,10 +6946,13 @@ class LogisticsStore {
 
   public deleteSparePart(id: string): void {
     const part = this.spareParts.find(p => p.id === id);
-    this.pendingSparePartDeletes.add(id);
     this.spareParts = this.spareParts.filter(p => p.id !== id);
-    this.saveToStorage(STORAGE_KEYS.SPARE_PARTS, this.spareParts);
-    void this.persistSparePartsToServer([], [], [id], []);
+    this.sparePartUsages = this.sparePartUsages.filter(u => u.partId !== id && (u as any).sparePartId !== id);
+    void fetch(`/api/spare-parts/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders()
+    }).catch(err => console.warn('[MySQL SparePart DELETE]', err));
     if (part) {
       this.logActivity(
         'Hapus Master Sparepart',
@@ -7027,19 +6966,17 @@ class LogisticsStore {
   public restockSparePart(id: string, amount: number, notes?: string): void {
     const part = this.spareParts.find(p => p.id === id);
     if (!part) return;
-    const nowIso = new Date().toISOString();
     const newStock = part.stock + amount;
-    const today = nowIso.substring(0, 10);
-    const updatedPart: SparePart = {
-      ...part,
-      stock: newStock,
-      lastRestockDate: today,
-      notes: notes || part.notes,
-      updatedAt: nowIso
-    };
-    this.spareParts = this.spareParts.map(p => (p.id === id ? updatedPart : p));
-    this.saveToStorage(STORAGE_KEYS.SPARE_PARTS, this.spareParts);
-    void this.persistSparePartsToServer([updatedPart], []);
+    const today = new Date().toISOString().substring(0, 10);
+    this.spareParts = this.spareParts.map(p =>
+      p.id === id ? { ...p, stock: newStock, lastRestockDate: today, notes: notes || p.notes } : p
+    );
+    void fetch(`/api/spare-parts/${encodeURIComponent(id)}/restock`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ quantity: amount, notes })
+    }).catch(err => console.warn('[MySQL SparePart Restock]', err));
     this.logActivity(
       'Restock Sparepart Masuk',
       part.name,
@@ -7056,33 +6993,34 @@ class LogisticsStore {
   }
 
   public recordSparePartUsage(usage: Omit<SparePartUsage, 'id'>): SparePartUsage {
-    const nowIso = new Date().toISOString();
     const newUsage: SparePartUsage = {
       ...usage,
-      id: 'usg-' + Math.random().toString(36).substring(2, 9),
-      updatedAt: nowIso
+      id: 'usg-' + Math.random().toString(36).substring(2, 9)
     };
 
-    // 1. Simpan ke daftar riwayat pemakaian
-    this.pendingSparePartUsageDeletes.delete(newUsage.id);
+    // 1. Simpan ke daftar riwayat pemakaian & langsung kirim ke MySQL
     this.sparePartUsages = [newUsage, ...this.sparePartUsages];
-    this.saveToStorage(STORAGE_KEYS.SPARE_PART_USAGES, this.sparePartUsages);
+    void fetch('/api/spare-part-usages', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        ...newUsage,
+        sparePartId: newUsage.partId,
+        date: newUsage.replacementDate
+      })
+    }).catch(err => console.warn('[MySQL SparePart Usage POST]', err));
 
     // 2. Potong stok otomatis di master inventaris gudang jika partId cocok
-    let updatedPart: SparePart | null = null;
     if (usage.partId) {
       this.spareParts = this.spareParts.map(p => {
         if (p.id === usage.partId) {
           const reducedStock = Math.max(0, p.stock - usage.quantity);
-          updatedPart = { ...p, stock: reducedStock, updatedAt: nowIso };
-          return updatedPart;
+          return { ...p, stock: reducedStock };
         }
         return p;
       });
-      this.saveToStorage(STORAGE_KEYS.SPARE_PARTS, this.spareParts);
     }
-
-    void this.persistSparePartsToServer(updatedPart ? [updatedPart] : [], [newUsage]);
 
     // 3. Sinkronisasi tanggal servis terakhir pada armada
     if (usage.fleetId) {
@@ -7096,7 +7034,6 @@ class LogisticsStore {
         }
         return f;
       });
-      this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
     }
 
     // 4. Catat ke audit log aktivitas sistem
@@ -7112,10 +7049,12 @@ class LogisticsStore {
 
   public deleteSparePartUsage(id: string): void {
     const item = this.sparePartUsages.find(u => u.id === id);
-    this.pendingSparePartUsageDeletes.add(id);
     this.sparePartUsages = this.sparePartUsages.filter(u => u.id !== id);
-    this.saveToStorage(STORAGE_KEYS.SPARE_PART_USAGES, this.sparePartUsages);
-    void this.persistSparePartsToServer([], [], [], [id]);
+    void fetch(`/api/spare-part-usages/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      credentials: 'same-origin',
+      headers: this.buildSessionAuthHeaders()
+    }).catch(err => console.warn('[MySQL SparePart Usage DELETE]', err));
     if (item) {
       this.logActivity(
         'Hapus Log Ganti Sparepart',
@@ -7292,19 +7231,7 @@ class LogisticsStore {
     this.spareParts = [...INITIAL_SPARE_PARTS];
     this.sparePartUsages = [...INITIAL_SPARE_PART_USAGES];
     this.fuelLogs = [...INITIAL_FUEL_LOGS];
-    this.saveToStorage(STORAGE_KEYS.FLEETS, this.fleets);
-    this.saveToStorage(STORAGE_KEYS.CREWS, this.crews);
-    this.saveToStorage(STORAGE_KEYS.STORES, this.stores);
-    this.saveToStorage(STORAGE_KEYS.SCHEDULES, this.schedules);
-    this.saveToStorage(STORAGE_KEYS.SALES_ORDERS, this.salesOrders);
-    this.saveToStorage(STORAGE_KEYS.ADMIN_ACTIVITIES, this.adminActivities);
-    this.saveToStorage(STORAGE_KEYS.ADMIN_SCHEDULES, this.adminSchedules);
-    this.saveToStorage(STORAGE_KEYS.LOADING_RECORDS, this.loadingRecords);
-    this.saveToStorage(STORAGE_KEYS.SKILL_PROFILES, this.skillProfiles);
-    this.saveToStorage(STORAGE_KEYS.JOBDESK_CONFIGS, this.jobdeskConfigs);
-    this.saveToStorage(STORAGE_KEYS.SPARE_PARTS, this.spareParts);
-    this.saveToStorage(STORAGE_KEYS.SPARE_PART_USAGES, this.sparePartUsages);
-    this.saveToStorage(STORAGE_KEYS.FUEL_LOGS, this.fuelLogs);
+    this.notify();
   }
 
   // ==========================================

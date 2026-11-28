@@ -794,7 +794,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
               3
             ).toFixed(2)
           )
-        : Number(Number(existing?.lastMonthPct || 0).toFixed(2));
+        : Number(existing?.lastMonthPct || 0);
 
       if (existing) {
         const avg = Number(
@@ -806,7 +806,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
           isInactive: Boolean(existing.isInactive),
           discountErrorsCount: Math.max(existing.discountErrorsCount, discountLogsCount),
           avgMonthlyPct: avg,
-          prevMonthPct: existing.lastMonthPct !== undefined ? Number(Number(existing.lastMonthPct).toFixed(2)) : computedPrevPct,
+          prevMonthPct: existing.lastMonthPct !== undefined ? Number(existing.lastMonthPct) : computedPrevPct,
           targetPct: 100,
           gapPct
         };
@@ -1044,7 +1044,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
         label: name,
         subLabel: isInactive
           ? `Tidak Aktif (${selectedMonth} ${selectedYear}) • Dikecualikan dari Analisa`
-          : `Aktual KPI: ${Number(rec?.avgMonthlyPct ?? 0).toFixed(2)}% • Cabang ${isSda ? 'Sidoarjo' : 'Nusantara'}`,
+          : `Aktual KPI: ${rec?.avgMonthlyPct ?? 0}% • Cabang ${isSda ? 'Sidoarjo' : 'Nusantara'}`,
         badgeText: isInactive ? 'Tidak Aktif' : isSda ? 'SDA' : 'BWI',
         badgeTone: isInactive ? 'rose' : 'emerald'
       };
@@ -1063,7 +1063,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
         label: name,
         subLabel: isInactive
           ? 'Status Bulan Ini: Tidak Aktif (Dikecualikan dari Analisa)'
-          : `Status Bulan Ini: Aktif • Aktual ${Number(rec?.avgMonthlyPct ?? 0).toFixed(2)}%`,
+          : `Status Bulan Ini: Aktif • Aktual ${rec?.avgMonthlyPct ?? 0}%`,
         badgeText: isInactive ? 'Tidak Aktif' : isSda ? 'SDA' : 'BWI',
         badgeTone: isInactive ? 'rose' : 'emerald'
       };
@@ -1457,10 +1457,10 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
       ? 'cab-banyuwangi'
       : selectedBranchId;
 
-    const validasiSoWeb = Number(Math.min(100, Math.max(0, parseNum(manualKpiValidasi))).toFixed(2));
-    const pembuatanFaktur = Number(Math.min(100, Math.max(0, parseNum(manualKpiPembuatan))).toFixed(2));
-    const pengecekanFaktur = Number(Math.min(100, Math.max(0, parseNum(manualKpiPengecekan))).toFixed(2));
-    const lastMonthPct = Number(Math.min(100, Math.max(0, parseNum(manualKpiPrevPct))).toFixed(2));
+    const validasiSoWeb = Math.min(100, Math.max(0, parseNum(manualKpiValidasi)));
+    const pembuatanFaktur = Math.min(100, Math.max(0, parseNum(manualKpiPembuatan)));
+    const pengecekanFaktur = Math.min(100, Math.max(0, parseNum(manualKpiPengecekan)));
+    const lastMonthPct = Math.min(100, Math.max(0, parseNum(manualKpiPrevPct)));
     const totalOrders = Math.max(0, Math.round(parseNum(manualKpiOrders)));
 
     const newRec: AdminIndividualKpiRecord = {
@@ -1914,8 +1914,8 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
       const totalReorder = rows.reduce((s, r) => s + r.totalReorder, 0);
       const terkirimFaktur = rows.reduce((s, r) => s + r.terkirimFaktur, 0);
       const belumTerkirimSo = rows.reduce((s, r) => s + r.belumTerkirimSo, 0);
-      const pctTerkirim = totalReorder > 0 ? Number(((terkirimFaktur / totalReorder) * 100).toFixed(1)) : 0;
-      const pctBelumTerkirim = totalReorder > 0 ? Number(((belumTerkirimSo / totalReorder) * 100).toFixed(1)) : 0;
+      const pctTerkirim = totalReorder > 0 ? Number(((terkirimFaktur / totalReorder) * 100).toFixed(2)) : 0;
+      const pctBelumTerkirim = totalReorder > 0 ? Number(((belumTerkirimSo / totalReorder) * 100).toFixed(2)) : 0;
 
       // Previous month calculation from MySQL reorderList or manual override
       const prevRows = reorderList.filter(
@@ -1924,7 +1924,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
       const prevTotalReorder = prevRows.reduce((s, r) => s + r.totalReorder, 0);
       const prevTerkirim = prevRows.reduce((s, r) => s + r.terkirimFaktur, 0);
       const computedPrevMonthPct =
-        prevTotalReorder > 0 ? Number(((prevTerkirim / prevTotalReorder) * 100).toFixed(1)) : 0;
+        prevTotalReorder > 0 ? Number(((prevTerkirim / prevTotalReorder) * 100).toFixed(2)) : 0;
       const customKey = `${unitName}_${selectedMonth}_${selectedYear}`;
       const prevMonthPct =
         unitPrevMonthPct[customKey] !== undefined
@@ -1932,7 +1932,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
           : computedPrevMonthPct;
       const targetPct = 100;
       const actualPct = pctTerkirim;
-      const gapPct = Number((targetPct - actualPct).toFixed(1));
+      const gapPct = Number((targetPct - actualPct).toFixed(2));
 
       return {
         rows,
@@ -1951,10 +1951,10 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
     const soetomo = computeUnit('Nusantara Dr. Soetomo');
     const expand = computeUnit('Nusantara Expand');
     // Gabungan Nusantara Dr. Soetomo & Nusantara Expand: (Prosentase Dr. Soetomo + Prosentase Nusantara Expand) / 2 * 100%
-    const combinedPrevMonthPct = Number(((soetomo.prevMonthPct + expand.prevMonthPct) / 2).toFixed(1));
+    const combinedPrevMonthPct = Number(((soetomo.prevMonthPct + expand.prevMonthPct) / 2).toFixed(2));
     const combinedTargetPct = 100;
-    const combinedActualPct = Number(((soetomo.actualPct + expand.actualPct) / 2).toFixed(1));
-    const combinedGapPct = Number(Math.max(0, combinedTargetPct - combinedActualPct).toFixed(1));
+    const combinedActualPct = Number(((soetomo.actualPct + expand.actualPct) / 2).toFixed(2));
+    const combinedGapPct = Number(Math.max(0, combinedTargetPct - combinedActualPct).toFixed(2));
 
     return {
       soetomo,
@@ -1981,8 +1981,8 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
     const lastMonthQty = synchronizedOmsetRows.reduce((s, r) => s + r.lastMonthQty, 0);
 
     const diffOmzet = omzetNetto - lastMonthOmzet;
-    const diffOmzetPct = lastMonthOmzet > 0 ? ((diffOmzet / lastMonthOmzet) * 100).toFixed(1) : '0.0';
-    const achvPct = targetBulanIni > 0 ? ((omzetNetto / targetBulanIni) * 100).toFixed(1) : '0.0';
+    const diffOmzetPct = lastMonthOmzet > 0 ? ((diffOmzet / lastMonthOmzet) * 100).toFixed(2) : '0.0';
+    const achvPct = targetBulanIni > 0 ? ((omzetNetto / targetBulanIni) * 100).toFixed(2) : '0.0';
     const gapTarget = omzetNetto - targetBulanIni;
 
     const pembagiHarian = 26;
@@ -1993,7 +1993,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
     const qtyHarian = qtyNetto > 0 ? qtyNetto / pembagiHarian : 0;
 
     const diffHarianPct =
-      rataBulanLalu > 0 ? (((rataHarianIni - rataBulanLalu) / rataBulanLalu) * 100).toFixed(1) : '0.0';
+      rataBulanLalu > 0 ? (((rataHarianIni - rataBulanLalu) / rataBulanLalu) * 100).toFixed(2) : '0.0';
 
     return {
       omzetNetto,
@@ -2033,7 +2033,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
     const maxOmzet = Math.max(...arr.map(x => x.omzet), 1);
     return arr.map(item => {
       const diff = item.omzet - item.lastOmzet;
-      const pct = item.lastOmzet > 0 ? ((diff / item.lastOmzet) * 100).toFixed(1) : '0.0';
+      const pct = item.lastOmzet > 0 ? ((diff / item.lastOmzet) * 100).toFixed(2) : '0.0';
       const isPositive = diff >= 0;
       return {
         kota: item.kota,
@@ -2064,7 +2064,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
     const maxOmzet = Math.max(...arr.map(x => x.omzet), 1);
     return arr.map(c => {
       const diff = c.omzet - c.lastOmzet;
-      const pct = c.lastOmzet > 0 ? ((diff / c.lastOmzet) * 100).toFixed(1) : '0.0';
+      const pct = c.lastOmzet > 0 ? ((diff / c.lastOmzet) * 100).toFixed(2) : '0.0';
       const isPos = diff >= 0;
       return {
         name: c.name,
@@ -2095,7 +2095,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
     const maxOmzet = Math.max(...arr.map(x => x.omzet), 1);
     return arr.map(b => {
       const diff = b.omzet - b.lastOmzet;
-      const pct = b.lastOmzet > 0 ? ((diff / b.lastOmzet) * 100).toFixed(1) : '0.0';
+      const pct = b.lastOmzet > 0 ? ((diff / b.lastOmzet) * 100).toFixed(2) : '0.0';
       const isPos = diff >= 0;
       return {
         name: b.name,
@@ -2153,7 +2153,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
 
         const valM = Number((rawNetto / 1e9).toFixed(2));
         const compM = Number((rawComp / 1e9).toFixed(2));
-        const pct = rawComp > 0 ? ((rawNetto / rawComp) * 100).toFixed(1).replace('.', ',') : '0,0';
+        const pct = rawComp > 0 ? ((rawNetto / rawComp) * 100).toFixed(2).replace('.', ',') : '0,0';
         const topLabel = rawNetto > 0 ? `${(rawNetto / 1e9).toFixed(2).replace('.', ',')} M` : '';
         return {
           label: m.short,
@@ -2193,13 +2193,13 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
       const series = rawWeeks.map(w => {
         const valM = Number((w.rawNetto / 1e9).toFixed(2));
         const compM = Number((w.rawComp / 1e9).toFixed(2));
-        const pct = w.rawComp > 0 ? ((w.rawNetto / w.rawComp) * 100).toFixed(1).replace('.', ',') : '0,0';
+        const pct = w.rawComp > 0 ? ((w.rawNetto / w.rawComp) * 100).toFixed(2).replace('.', ',') : '0,0';
         const topLabel =
           w.rawNetto <= 0
             ? ''
             : w.rawNetto >= 1e9
             ? `${(w.rawNetto / 1e9).toFixed(2).replace('.', ',')} M`
-            : `${(w.rawNetto / 1e6).toFixed(1).replace('.', ',')} jt`;
+            : `${(w.rawNetto / 1e6).toFixed(2).replace('.', ',')} jt`;
         return {
           label: w.label,
           omzetNetto: valM,
@@ -2234,8 +2234,8 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
       const rawComp = w === 0 ? 0 : dailyCompRp;
       const valJt = Number((rawNetto / 1e6).toFixed(2));
       const compJt = Number((rawComp / 1e6).toFixed(2));
-      const pct = rawComp > 0 ? ((rawNetto / rawComp) * 100).toFixed(1).replace('.', ',') : '0,0';
-      const topLabel = rawNetto > 0 ? `${valJt.toFixed(1).replace('.', ',')} jt` : '';
+      const pct = rawComp > 0 ? ((rawNetto / rawComp) * 100).toFixed(2).replace('.', ',') : '0,0';
+      const topLabel = rawNetto > 0 ? `${valJt.toFixed(2).replace('.', ',')} jt` : '';
       return {
         label: String(dayNum),
         omzetNetto: valJt,
@@ -2434,8 +2434,8 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                   </thead>
                   <tbody className="divide-y divide-slate-200 dark:divide-slate-800 tabular-nums">
                     {kpiPreviewRows.map((row, idx) => {
-                      const avg = ((row.validasiSoWeb + row.pembuatanFaktur + row.pengecekanFaktur) / 3).toFixed(2);
-                      const gap = Math.max(0, 100 - Number(avg)).toFixed(2);
+                      const avg = Number(((row.validasiSoWeb + row.pembuatanFaktur + row.pengecekanFaktur) / 3).toFixed(2));
+                      const gap = Number(Math.max(0, 100 - avg).toFixed(2));
                       return (
                         <tr key={row.id}>
                           <td className="py-2 px-3">{idx + 1}</td>
@@ -2446,9 +2446,9 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                           <td className="py-2 px-3 text-center font-medium text-slate-600 dark:text-slate-300">
                             {Number(row.lastMonthPct ?? 0).toFixed(2)}%
                           </td>
-                          <td className="py-2 px-3 text-center font-medium">{Number(row.validasiSoWeb ?? 0).toFixed(2)}%</td>
-                          <td className="py-2 px-3 text-center font-medium">{Number(row.pembuatanFaktur ?? 0).toFixed(2)}%</td>
-                          <td className="py-2 px-3 text-center font-medium">{Number(row.pengecekanFaktur ?? 0).toFixed(2)}%</td>
+                          <td className="py-2 px-3 text-center font-medium">{row.validasiSoWeb}%</td>
+                          <td className="py-2 px-3 text-center font-medium">{row.pembuatanFaktur}%</td>
+                          <td className="py-2 px-3 text-center font-medium">{row.pengecekanFaktur}%</td>
                           <td className="py-2 px-3 text-center font-bold text-blue-600 dark:text-blue-400">{avg}%</td>
                           <td className="py-2 px-3 text-center font-semibold text-amber-600 dark:text-amber-400">{gap}%</td>
                           <td className="py-2 px-3 text-center font-semibold text-rose-600">{row.discountErrorsCount}x</td>
@@ -2876,10 +2876,10 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                       x => x.adminName.toUpperCase() === defaultAdmin.toUpperCase()
                     );
                     setManualKpiAdmin(defaultAdmin);
-                    setManualKpiPrevPct(existing && existing.prevMonthPct > 0 ? Number(existing.prevMonthPct).toFixed(2) : '');
-                    setManualKpiValidasi(existing && existing.validasiSoWeb > 0 ? Number(existing.validasiSoWeb).toFixed(2) : '');
-                    setManualKpiPembuatan(existing && existing.pembuatanFaktur > 0 ? Number(existing.pembuatanFaktur).toFixed(2) : '');
-                    setManualKpiPengecekan(existing && existing.pengecekanFaktur > 0 ? Number(existing.pengecekanFaktur).toFixed(2) : '');
+                    setManualKpiPrevPct(existing && existing.prevMonthPct > 0 ? String(existing.prevMonthPct) : '');
+                    setManualKpiValidasi(existing && existing.validasiSoWeb > 0 ? String(existing.validasiSoWeb) : '');
+                    setManualKpiPembuatan(existing && existing.pembuatanFaktur > 0 ? String(existing.pembuatanFaktur) : '');
+                    setManualKpiPengecekan(existing && existing.pengecekanFaktur > 0 ? String(existing.pengecekanFaktur) : '');
                     setManualKpiOrders(existing && existing.totalOrders > 0 ? String(existing.totalOrders) : '');
                     setManualKpiIsInactive(Boolean(existing?.isInactive));
                     setIsManualKpiOpen(prev => !prev);
@@ -3099,10 +3099,10 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                           x => x.adminName.toUpperCase() === adm.toUpperCase()
                         );
                         setManualKpiAdmin(adm);
-                        setManualKpiPrevPct(existing && existing.prevMonthPct > 0 ? Number(existing.prevMonthPct).toFixed(2) : '');
-                        setManualKpiValidasi(existing && existing.validasiSoWeb > 0 ? Number(existing.validasiSoWeb).toFixed(2) : '');
-                        setManualKpiPembuatan(existing && existing.pembuatanFaktur > 0 ? Number(existing.pembuatanFaktur).toFixed(2) : '');
-                        setManualKpiPengecekan(existing && existing.pengecekanFaktur > 0 ? Number(existing.pengecekanFaktur).toFixed(2) : '');
+                        setManualKpiPrevPct(existing && existing.prevMonthPct > 0 ? String(existing.prevMonthPct) : '');
+                        setManualKpiValidasi(existing && existing.validasiSoWeb > 0 ? String(existing.validasiSoWeb) : '');
+                        setManualKpiPembuatan(existing && existing.pembuatanFaktur > 0 ? String(existing.pembuatanFaktur) : '');
+                        setManualKpiPengecekan(existing && existing.pengecekanFaktur > 0 ? String(existing.pengecekanFaktur) : '');
                         setManualKpiOrders(existing && existing.totalOrders > 0 ? String(existing.totalOrders) : '');
                         setManualKpiIsInactive(Boolean(existing?.isInactive));
                       }}
@@ -3124,7 +3124,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                       max={100}
                       value={manualKpiPrevPct}
                       onChange={e => setManualKpiPrevPct(e.target.value)}
-                      placeholder="Contoh: 92.50"
+                      placeholder="Contoh: 92.5"
                       className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm font-semibold tabular-nums"
                     />
                   </div>
@@ -3140,7 +3140,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                       max={100}
                       value={manualKpiValidasi}
                       onChange={e => setManualKpiValidasi(e.target.value)}
-                      placeholder="0.00 - 100.00"
+                      placeholder="0 - 100"
                       className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm font-semibold tabular-nums"
                     />
                   </div>
@@ -3156,7 +3156,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                       max={100}
                       value={manualKpiPembuatan}
                       onChange={e => setManualKpiPembuatan(e.target.value)}
-                      placeholder="0.00 - 100.00"
+                      placeholder="0 - 100"
                       className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm font-semibold tabular-nums"
                     />
                   </div>
@@ -3172,7 +3172,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                       max={100}
                       value={manualKpiPengecekan}
                       onChange={e => setManualKpiPengecekan(e.target.value)}
-                      placeholder="0.00 - 100.00"
+                      placeholder="0 - 100"
                       className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-sm font-semibold tabular-nums"
                     />
                   </div>
@@ -3236,7 +3236,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                 <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-200 dark:border-slate-800">
                   <div className="flex flex-wrap items-center gap-2.5 text-xs">
                     <span className="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 font-semibold text-slate-700 dark:text-slate-300 tabular-nums">
-                      Target: <strong>100.00%</strong>
+                      Target: <strong>100%</strong>
                     </span>
                     <span className="px-3 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/50 font-semibold text-blue-700 dark:text-blue-300 tabular-nums">
                       Aktual:{' '}
@@ -3320,7 +3320,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     <TrendingUp className="w-4 h-4 text-slate-400" />
                   </div>
                   <div className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white mt-2 tabular-nums">
-                    {Number(kpiOverallSummary.prevMonthPct || 0).toFixed(2)}%
+                    {kpiOverallSummary.prevMonthPct}%
                   </div>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                     Rerata capaian bulan lalu
@@ -3336,7 +3336,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     <Target className="w-4 h-4 text-slate-400" />
                   </div>
                   <div className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white mt-2 tabular-nums">
-                    {Number(kpiOverallSummary.targetPct || 100).toFixed(2)}%
+                    {kpiOverallSummary.targetPct}%
                   </div>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                     Standar target penuh
@@ -3352,7 +3352,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     <CheckCircle2 className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                   </div>
                   <div className="text-2xl sm:text-3xl font-bold text-blue-700 dark:text-blue-300 mt-2 tabular-nums">
-                    {Number(kpiOverallSummary.actualPct || 0).toFixed(2)}%
+                    {kpiOverallSummary.actualPct}%
                   </div>
                   <p className="text-xs font-medium text-blue-700/80 dark:text-blue-300/80 mt-1 tabular-nums">
                     {kpiOverallSummary.actualPct >= kpiOverallSummary.prevMonthPct
@@ -3370,10 +3370,10 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     <Activity className="w-4 h-4 text-amber-500" />
                   </div>
                   <div className="text-2xl sm:text-3xl font-bold text-amber-600 dark:text-amber-400 mt-2 tabular-nums">
-                    {Number(kpiOverallSummary.gapPct || 0).toFixed(2)}%
+                    {kpiOverallSummary.gapPct}%
                   </div>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                    Selisih terhadap target 100.00%
+                    Selisih terhadap target 100%
                   </p>
                 </div>
               </div>
@@ -3392,7 +3392,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                       : 'Belum Ada Data'}
                   </div>
                   <p className="text-xs text-emerald-700 dark:text-emerald-400 mt-1 font-semibold tabular-nums">
-                    Aktual {Number(activeDisplayedKpiList[0]?.avgMonthlyPct || 0).toFixed(2)}% &bull; Gap {Number(activeDisplayedKpiList[0]?.gapPct ?? 100).toFixed(2)}%
+                    Aktual {activeDisplayedKpiList[0]?.avgMonthlyPct || 0}% &bull; Gap {activeDisplayedKpiList[0]?.gapPct ?? 100}%
                   </p>
                 </div>
                 <div className="p-2.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-amber-600 shrink-0">
@@ -3614,12 +3614,12 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                               )}
                             </div>
                             <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 flex flex-wrap items-center gap-2 tabular-nums">
-                              <span>Bln Lalu: <strong className="text-slate-700 dark:text-slate-200">{Number(admin.prevMonthPct || 0).toFixed(2)}%</strong></span>
+                              <span>Bln Lalu: <strong className="text-slate-700 dark:text-slate-200">{admin.prevMonthPct}%</strong></span>
                               <span>&bull;</span>
-                              <span>Target: <strong className="text-slate-700 dark:text-slate-200">100.00%</strong></span>
+                              <span>Target: <strong className="text-slate-700 dark:text-slate-200">100%</strong></span>
                               <span>&bull;</span>
                               <span className="text-amber-700 dark:text-amber-400 font-semibold">
-                                Gap: {Number(admin.gapPct ?? 100).toFixed(2)}%
+                                Gap: {admin.gapPct}%
                               </span>
                             </div>
                           </div>
@@ -3634,7 +3634,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                                   : 'text-blue-600 dark:text-blue-400'
                               }`}
                             >
-                              {isInactive ? 'Dikecualikan' : `${Number(admin.avgMonthlyPct || 0).toFixed(2)}%`}
+                              {isInactive ? 'Dikecualikan' : `${admin.avgMonthlyPct}%`}
                             </div>
                             <div
                               className={`text-xs font-semibold ${
@@ -3646,7 +3646,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                               }`}
                             >
                               {isInactive
-                                ? `Input ${Number(admin.avgMonthlyPct || 0).toFixed(2)}%`
+                                ? `Input ${admin.avgMonthlyPct}%`
                                 : `Diskon: ${admin.discountErrorsCount}x`}
                             </div>
                           </div>
@@ -3689,10 +3689,10 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                               onClick={ev => {
                                 ev.stopPropagation();
                                 setManualKpiAdmin(admin.adminName);
-                                setManualKpiPrevPct(admin.prevMonthPct > 0 ? Number(admin.prevMonthPct).toFixed(2) : '');
-                                setManualKpiValidasi(admin.validasiSoWeb > 0 ? Number(admin.validasiSoWeb).toFixed(2) : '');
-                                setManualKpiPembuatan(admin.pembuatanFaktur > 0 ? Number(admin.pembuatanFaktur).toFixed(2) : '');
-                                setManualKpiPengecekan(admin.pengecekanFaktur > 0 ? Number(admin.pengecekanFaktur).toFixed(2) : '');
+                                setManualKpiPrevPct(admin.prevMonthPct > 0 ? String(admin.prevMonthPct) : '');
+                                setManualKpiValidasi(admin.validasiSoWeb > 0 ? String(admin.validasiSoWeb) : '');
+                                setManualKpiPembuatan(admin.pembuatanFaktur > 0 ? String(admin.pembuatanFaktur) : '');
+                                setManualKpiPengecekan(admin.pengecekanFaktur > 0 ? String(admin.pengecekanFaktur) : '');
                                 setManualKpiOrders(admin.totalOrders > 0 ? String(admin.totalOrders) : '');
                                 setManualKpiIsInactive(Boolean(admin.isInactive));
                                 setIsManualKpiOpen(true);
@@ -3727,7 +3727,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                       {focusedAdminKpi.isInactive
                         ? `Status Tidak Aktif pada ${selectedMonth} ${selectedYear}`
-                        : `Peringkat #${focusedAdminKpi.rank} • Aktual ${Number(focusedAdminKpi.avgMonthlyPct || 0).toFixed(2)}% • Gap ${Number(focusedAdminKpi.gapPct ?? 100).toFixed(2)}%`}
+                        : `Peringkat #${focusedAdminKpi.rank} • Aktual ${focusedAdminKpi.avgMonthlyPct}% • Gap ${focusedAdminKpi.gapPct}%`}
                     </p>
                   </div>
 
@@ -3758,7 +3758,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                       </button>
                     )}
                     <span className="px-3 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-xs font-bold tabular-nums">
-                      Aktual: {Number(focusedAdminKpi.avgMonthlyPct || 0).toFixed(2)}%
+                      Aktual: {focusedAdminKpi.avgMonthlyPct}%
                     </span>
                   </div>
                 </div>
@@ -3768,25 +3768,25 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                   <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
                     <span className="text-xs font-medium text-slate-500 block">Bulan Lalu</span>
                     <span className="text-lg font-bold text-slate-900 dark:text-white mt-0.5 block tabular-nums">
-                      {Number(focusedAdminKpi.prevMonthPct || 0).toFixed(2)}%
+                      {focusedAdminKpi.prevMonthPct}%
                     </span>
                   </div>
                   <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
                     <span className="text-xs font-medium text-slate-500 block">Target</span>
                     <span className="text-lg font-bold text-slate-900 dark:text-white mt-0.5 block tabular-nums">
-                      100.00%
+                      100%
                     </span>
                   </div>
                   <div className="p-3 rounded-lg bg-blue-50/60 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800">
                     <span className="text-xs font-medium text-blue-700 dark:text-blue-400 block">Aktual</span>
                     <span className="text-lg font-bold text-blue-700 dark:text-blue-300 mt-0.5 block tabular-nums">
-                      {Number(focusedAdminKpi.avgMonthlyPct || 0).toFixed(2)}%
+                      {focusedAdminKpi.avgMonthlyPct}%
                     </span>
                   </div>
                   <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
                     <span className="text-xs font-medium text-slate-500 block">Selisih Gap</span>
                     <span className="text-lg font-bold text-amber-600 dark:text-amber-400 mt-0.5 block tabular-nums">
-                      {Number(focusedAdminKpi.gapPct ?? 100).toFixed(2)}%
+                      {focusedAdminKpi.gapPct}%
                     </span>
                   </div>
                 </div>
@@ -3824,7 +3824,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
                       <div className="flex justify-between text-xs font-semibold text-slate-700 dark:text-slate-300">
                         <span>Validasi Sales Order &amp; Website</span>
-                        <span className="text-blue-600 dark:text-blue-400 font-bold tabular-nums">{Number(focusedAdminKpi.validasiSoWeb || 0).toFixed(2)}%</span>
+                        <span className="text-blue-600 dark:text-blue-400 font-bold tabular-nums">{focusedAdminKpi.validasiSoWeb}%</span>
                       </div>
                       <div className="w-full bg-slate-200 dark:bg-slate-800 h-2 rounded-full mt-1.5 overflow-hidden">
                         <div className="bg-blue-600 h-full rounded-full" style={{ width: `${focusedAdminKpi.validasiSoWeb}%` }} />
@@ -3834,7 +3834,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
                       <div className="flex justify-between text-xs font-semibold text-slate-700 dark:text-slate-300">
                         <span>Pembuatan Faktur Penjualan</span>
-                        <span className="text-emerald-600 dark:text-emerald-400 font-bold tabular-nums">{Number(focusedAdminKpi.pembuatanFaktur || 0).toFixed(2)}%</span>
+                        <span className="text-emerald-600 dark:text-emerald-400 font-bold tabular-nums">{focusedAdminKpi.pembuatanFaktur}%</span>
                       </div>
                       <div className="w-full bg-slate-200 dark:bg-slate-800 h-2 rounded-full mt-1.5 overflow-hidden">
                         <div className="bg-emerald-500 h-full rounded-full" style={{ width: `${focusedAdminKpi.pembuatanFaktur}%` }} />
@@ -3844,7 +3844,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                     <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
                       <div className="flex justify-between text-xs font-semibold text-slate-700 dark:text-slate-300">
                         <span>Pengecekan Faktur Penjualan</span>
-                        <span className="text-slate-700 dark:text-slate-200 font-bold tabular-nums">{Number(focusedAdminKpi.pengecekanFaktur || 0).toFixed(2)}%</span>
+                        <span className="text-slate-700 dark:text-slate-200 font-bold tabular-nums">{focusedAdminKpi.pengecekanFaktur}%</span>
                       </div>
                       <div className="w-full bg-slate-200 dark:bg-slate-800 h-2 rounded-full mt-1.5 overflow-hidden">
                         <div className="bg-slate-600 h-full rounded-full" style={{ width: `${focusedAdminKpi.pengecekanFaktur}%` }} />
@@ -3856,7 +3856,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                         Selisih Gap terhadap Target
                       </span>
                       <span className="text-sm font-bold text-amber-600 dark:text-amber-400 tabular-nums">
-                        {Number(focusedAdminKpi.gapPct ?? 100).toFixed(2)}%
+                        {focusedAdminKpi.gapPct}%
                       </span>
                     </div>
                   </div>
@@ -4203,7 +4203,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                   const terkirim = Math.max(0, Math.round(parseNum(reoTerkirimFaktur)));
                   const belum = Math.max(0, Math.round(parseNum(reoBelumTerkirimSo)));
                   const total = terkirim + belum;
-                  const customPrevPct = Math.min(100, Math.max(0, Number(parseNum(reoPrevMonthPctInput).toFixed(1))));
+                  const customPrevPct = Math.min(100, Math.max(0, Number(parseNum(reoPrevMonthPctInput).toFixed(2))));
 
                   const nextUnitPrev = {
                     ...unitPrevMonthPct,
@@ -4590,7 +4590,7 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                             ...r,
                             pctTerkirim:
                               r.totalReorder > 0
-                                ? Number(((r.terkirimFaktur / r.totalReorder) * 100).toFixed(1))
+                                ? Number(((r.terkirimFaktur / r.totalReorder) * 100).toFixed(2))
                                 : 0
                           }))}
                           margin={{ top: 5, right: 5, left: -20, bottom: 5 }}
@@ -4631,8 +4631,8 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                           </tr>
                         ) : (
                           panel.data.rows.map(r => {
-                            const pKirim = r.totalReorder > 0 ? Number(((r.terkirimFaktur / r.totalReorder) * 100).toFixed(1)) : 0;
-                            const pGap = Number(Math.max(0, 100 - pKirim).toFixed(1));
+                            const pKirim = r.totalReorder > 0 ? Number(((r.terkirimFaktur / r.totalReorder) * 100).toFixed(2)) : 0;
+                            const pGap = Number(Math.max(0, 100 - pKirim).toFixed(2));
                             return (
                               <tr key={r.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
                                 <td className="py-2 px-3 font-bold whitespace-nowrap">{r.weekLabel}</td>
@@ -5160,9 +5160,9 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                   {synchronizedOmsetRows.map((adm, idx) => {
                     const maxOmzet = Math.max(...synchronizedOmsetRows.map(x => x.omzetNetto), 1);
                     const widthPct = adm.omzetNetto > 0 ? Math.max(8, Math.round((adm.omzetNetto / maxOmzet) * 100)) : 0;
-                    const vsLastRatio = adm.lastMonthOmzet > 0 ? ((adm.omzetNetto / adm.lastMonthOmzet) * 100).toFixed(1) : '0.0';
+                    const vsLastRatio = adm.lastMonthOmzet > 0 ? ((adm.omzetNetto / adm.lastMonthOmzet) * 100).toFixed(2) : '0.0';
                     const diffVsLast = adm.omzetNetto - adm.lastMonthOmzet;
-                    const diffVsLastPct = adm.lastMonthOmzet > 0 ? ((diffVsLast / adm.lastMonthOmzet) * 100).toFixed(1) : '0.0';
+                    const diffVsLastPct = adm.lastMonthOmzet > 0 ? ((diffVsLast / adm.lastMonthOmzet) * 100).toFixed(2) : '0.0';
                     return (
                       <div key={adm.id} className={idx > 0 ? 'pt-3.5 space-y-2' : 'space-y-2'}>
                         <div className="flex items-center justify-between gap-2">
@@ -5446,11 +5446,11 @@ export const SalesKpi: React.FC<SalesKpiProps> = ({ defaultTab = 'sales_kpi_indi
                 {synchronizedOmsetRows.map((adm, idx) => {
                   const sharePct =
                     omsetSummary.omzetNetto > 0
-                      ? ((adm.omzetNetto / omsetSummary.omzetNetto) * 100).toFixed(1)
+                      ? ((adm.omzetNetto / omsetSummary.omzetNetto) * 100).toFixed(2)
                       : '0.0';
                   const vsLastPct =
                     adm.lastMonthOmzet > 0
-                      ? ((adm.omzetNetto / adm.lastMonthOmzet) * 100).toFixed(1)
+                      ? ((adm.omzetNetto / adm.lastMonthOmzet) * 100).toFixed(2)
                       : '0.0';
                   return (
                     <div
