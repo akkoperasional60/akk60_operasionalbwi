@@ -233,6 +233,7 @@ export interface Schedule {
   crewOdometerEndAt?: string;
   departureValidation?: {
     summary: {
+      branchId?: string;
       branchName?: string;
       driverName: string;
       helperName: string;
@@ -246,19 +247,18 @@ export interface Schedule {
       waybillMatch: boolean;
       documentsReady: boolean;
     };
-    signerSelections?: {
+    signerNames?: {
       spvLogistik?: string;
       spvOperasional?: string;
       security?: string;
       crew?: string;
     };
-    signatures?: {
+    signatures: {
       spvLogistik: string;
       spvOperasional: string;
       security: string;
       crew: string;
     };
-    signaturesAttached?: boolean;
     signedAt: string;
     signedBy?: string;
     gps?: { latitude: number; longitude: number; accuracy: number };
@@ -647,7 +647,9 @@ export interface SparePart {
   storageLocation: string;
   lastRestockDate: string;
   notes?: string;
+  branchId?: string;
   createdBy?: string;
+  updatedAt?: string;
 }
 
 export interface SparePartUsage {
@@ -668,6 +670,8 @@ export interface SparePartUsage {
   totalCost: number;
   notes?: string;
   performedBy: string;
+  branchId?: string;
+  updatedAt?: string;
 }
 
 export type MaintenanceCategory =

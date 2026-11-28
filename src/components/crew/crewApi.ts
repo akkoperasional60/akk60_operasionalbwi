@@ -1,18 +1,51 @@
 import type { DriverVehicleChecklist, UserProfile, VehicleChecklistItem } from '../../types';
 import { logisticsStore } from '../../services/store';
 import { branchStore } from '../../services/branchStore';
+import { fetchWithTimeout } from '../../utils/fetchWithTimeout';
 import { driverChecklistService, STANDARD_CHECKLIST_ITEMS } from '../../services/driverChecklistService';
 import { driverShiftService } from '../../services/driverShiftService';
 import { driverReportService, getLocalDateStr } from '../../services/driverReportService';
 import {
   assertTripVisible, fetchLiveTrips, fetchQaTrips, freshGps, getAuthHeaders, isQaAccount,
-  QA_EVENT, slotForUser, isCompleted, validateVehicleChecklist,
-  type CrewSlot, type DepartureValidationData, type FieldTrip, type FuelStationChoice,
+  normalizeLiveSchedule, quickGpsForAction, QA_EVENT, slotForUser, isCompleted, validateVehicleChecklist,
+  type CrewSlot, type DepartureValidationData, type FieldReport, type FieldTrip, type FuelStationChoice,
   type InspectionChecklistEntry, type WorkAction
 } from './crewModel';
-export { freshGps };
+export { freshGps, quickGpsForAction };
 import { validateCameraEvidence, type CameraEvidence } from './crewCaptureEvidence';
-import { fetchWithTimeout } from '../../utils/fetchWithTimeout';
+
+const CREW_TRIPS_CACHE_PREFIX = 'akk_crew_trips_cache_v1_';
+
+export function readCachedTripsForUser(userId: string): FieldTrip[] {
+  if (!userId || typeof localStorage === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(`${CREW_TRIPS_CACHE_PREFIX}${userId}`);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function writeCachedTripsForUser(userId: string, trips: FieldTrip[]): void {
+  if (!userId || typeof localStorage === 'undefined') return;
+  try {
+    const slim = trips.slice(0, 60).map(t => ({
+      ...t,
+      inspectionChecklist: Array.isArray(t.inspectionChecklist)
+        ? t.inspectionChecklist.map(({ photo: _p, ...rest }) => rest)
+        : undefined,
+      departureValidation: t.departureValidation
+        ? {
+            ...t.departureValidation,
+            signatures: { spvLogistik: '', spvOperasional: '', security: '', crew: '' }
+          }
+        : undefined
+    }));
+    localStorage.setItem(`${CREW_TRIPS_CACHE_PREFIX}${userId}`, JSON.stringify(slim));
+  } catch {}
+}
 
 const CREW_CLAIM_LIVE_ENABLED = import.meta.env.VITE_AKK_ENABLE_CREW_CLAIM !== 'false';
 const syncListeners = new Set<() => void>();
@@ -178,22 +211,29 @@ export function listenCrewChanged(listener: () => void): () => void {
 }
 
 export async function getTripsForUser(user: UserProfile): Promise<FieldTrip[]> {
-  const all = isQaAccount(user)
-    ? await fetchQaTrips()
-    : (await Promise.all([
+  if (!isQaAccount(user)) {
+    if (branchStore.getActiveBranches().length > 0) {
+      void branchStore.syncFromServer().catch(() => {});
+    } else {
+      await Promise.race([
         branchStore.syncFromServer().catch(() => {}),
-        fetchLiveTrips()
-      ]))[1];
+        new Promise<void>(resolve => setTimeout(resolve, 3500))
+      ]);
+    }
+  }
+  const all = isQaAccount(user) ? await fetchQaTrips() : await fetchLiveTrips();
   const today = new Date();
   const earliest = new Date(today.getTime() - 90 * 86400000);
   const latest = new Date(today.getTime() + 60 * 86400000);
-  return all.filter(t => {
+  const filtered = all.filter(t => {
     if (!assertTripVisible(user, t)) return false;
-    if (isQaAccount(user) || (slotForUser(t,user) && !isCompleted(t))) return true;
+    if (isQaAccount(user) || (slotForUser(t, user) && (!isCompleted(t) || !t.odometerEnd))) return true;
     if (!t.date) return false;
     const d = new Date(t.date + 'T12:00:00');
     return d >= earliest && d <= latest;
   }).sort((a, b) => (a.date === b.date ? a.departureTime.localeCompare(b.departureTime) : b.date.localeCompare(a.date)));
+  writeCachedTripsForUser(user.id, filtered);
+  return filtered;
 }
 
 function sameDayClaimed(all: FieldTrip[], user: UserProfile, date?: string): boolean {
@@ -201,36 +241,66 @@ function sameDayClaimed(all: FieldTrip[], user: UserProfile, date?: string): boo
   return all.some(t => t.date === date && Boolean(slotForUser(t, user)));
 }
 
-async function claimLiveTrip(user: UserProfile, tripId: string, slot: CrewSlot): Promise<void> {
+function extractTripFromPayload(res: any, existing?: FieldTrip): FieldTrip | null {
+  if (res?.trip && typeof res.trip === 'object') {
+    return {
+      ...res.trip,
+      source: 'qa' as const,
+      reports: Array.isArray(res.trip.reports) ? res.trip.reports : (existing?.reports || [])
+    };
+  }
+  if (res?.schedule && typeof res.schedule === 'object') {
+    const normalized = normalizeLiveSchedule(res.schedule);
+    if (normalized) {
+      return {
+        ...normalized,
+        reports: existing?.reports || normalized.reports || []
+      };
+    }
+  }
+  return null;
+}
+
+async function claimLiveTrip(user: UserProfile, tripId: string, slot: CrewSlot, tripSnapshot?: FieldTrip): Promise<FieldTrip | null> {
   // Existing server /api/schedules/persist is a merge writer, NOT an atomic claim endpoint.
   // Never silently substitute it: concurrent phones could overwrite each other.
   if (!CREW_CLAIM_LIVE_ENABLED) {
     throw new Error('Ambil Kiriman nyata belum aktif. Penguncian slot di server harus dipasang sebelum digunakan.');
   }
-  const all = await fetchLiveTrips();
-  if (all.some(t => !isCompleted(t) && slotForUser(t,user))) throw new Error('Selesaikan kiriman aktif sebelum mengambil kiriman lain.');
-  const live = all.find(t => t.id === tripId);
-  if (!live?.schedule || !assertTripVisible(user, live)) throw new Error('Kiriman tidak tersedia untuk akun ini.');
-  if (sameDayClaimed(all, user, live.date)) {
-    throw new Error('Sudah memilih kiriman pada hari ini. Reset oleh Super Admin diperlukan untuk mengganti.');
+  if (!tripSnapshot) {
+    const all = await fetchLiveTrips();
+    if (all.some(t => !isCompleted(t) && slotForUser(t, user))) throw new Error('Selesaikan kiriman aktif sebelum mengambil kiriman lain.');
+    const live = all.find(t => t.id === tripId);
+    if (!live?.schedule || !assertTripVisible(user, live)) throw new Error('Kiriman tidak tersedia untuk akun ini.');
+    if (sameDayClaimed(all, user, live.date)) {
+      throw new Error('Sudah memilih kiriman pada hari ini. Reset oleh Super Admin diperlukan untuk mengganti.');
+    }
+    if (live.phase !== 'waiting') throw new Error('Kiriman sudah berjalan atau selesai.');
+    if (slotForUser(live, user)) throw new Error('Kamu sudah mengambil posisi lain di kiriman ini.');
+    if (live[slot]) throw new Error('Posisi sudah diambil. Muat ulang daftar kiriman.');
   }
-  if (live.phase !== 'waiting') throw new Error('Kiriman sudah berjalan atau selesai.');
-  if (slotForUser(live, user)) throw new Error('Kamu sudah mengambil posisi lain di kiriman ini.');
-  if (live[slot]) throw new Error('Posisi sudah diambil. Muat ulang daftar kiriman.');
   // Intentionally use a DEDICATED endpoint: the server must implement atomic CAS and server-side branch/RBAC checks.
-  await jsonRequest(`/api/crew-assignments/${encodeURIComponent(tripId)}/claim`, 'POST', { slot, confirmed: true });
+  const res = await jsonRequest(`/api/crew-assignments/${encodeURIComponent(tripId)}/claim`, 'POST', { slot, confirmed: true });
+  return extractTripFromPayload(res, tripSnapshot);
 }
 
-export async function claimTrip(user: UserProfile, tripId: string, slot: CrewSlot): Promise<void> {
-  if (!isQaAccount(user)) { await claimLiveTrip(user, tripId, slot); notifyCrewChanged(); return; }
-  const all = await fetchQaTrips();
-  if (all.some(t => !isCompleted(t) && slotForUser(t,user))) throw new Error('Selesaikan kiriman aktif sebelum mengambil kiriman lain.');
-  const target = all.find(t => t.id === tripId);
-  if (target && sameDayClaimed(all, user, target.date)) {
-    throw new Error('Sudah memilih kiriman pada hari ini. Reset oleh Super Admin diperlukan untuk mengganti.');
+export async function claimTrip(user: UserProfile, tripId: string, slot: CrewSlot, tripSnapshot?: FieldTrip): Promise<FieldTrip | null> {
+  if (!isQaAccount(user)) {
+    const updated = await claimLiveTrip(user, tripId, slot, tripSnapshot);
+    notifyCrewChanged();
+    return updated;
   }
-  await jsonRequest(`/api/crew-qa/trips/${encodeURIComponent(tripId)}/claim`, 'POST', { slot, confirmed: true });
+  if (!tripSnapshot) {
+    const all = await fetchQaTrips();
+    if (all.some(t => !isCompleted(t) && slotForUser(t, user))) throw new Error('Selesaikan kiriman aktif sebelum mengambil kiriman lain.');
+    const target = all.find(t => t.id === tripId);
+    if (target && sameDayClaimed(all, user, target.date)) {
+      throw new Error('Sudah memilih kiriman pada hari ini. Reset oleh Super Admin diperlukan untuk mengganti.');
+    }
+  }
+  const res = await jsonRequest(`/api/crew-qa/trips/${encodeURIComponent(tripId)}/claim`, 'POST', { slot, confirmed: true });
   notifyCrewChanged();
+  return extractTripFromPayload(res, tripSnapshot);
 }
 
 export async function resetTripAssignment(user: UserProfile, tripId: string): Promise<void> {
@@ -244,20 +314,22 @@ export async function resetTripAssignment(user: UserProfile, tripId: string): Pr
   notifyCrewChanged();
 }
 
-export async function recordKm(user: UserProfile, tripId: string, value: string): Promise<void> {
+export async function recordKm(user: UserProfile, tripId: string, value: string, tripSnapshot?: FieldTrip): Promise<FieldTrip | null> {
   const num = Number(value);
   if (!Number.isFinite(num) || num <= 0 || num > 99999999) throw new Error('KM harus berupa angka yang benar.');
   if (!isQaAccount(user)) {
-    const gps = await freshGps();
-    await jsonRequest(`/api/crew-assignments/${encodeURIComponent(tripId)}/task`, 'POST', { action:'km', value:String(num), gps });
+    const gps = await quickGpsForAction(tripSnapshot?.branchId);
+    const res = await jsonRequest(`/api/crew-assignments/${encodeURIComponent(tripId)}/task`, 'POST', { action: 'km', value: String(num), gps });
+    void logisticsStore.hydrateOperationalDataFromHostinger(true);
     notifyCrewChanged();
-    return;
+    return extractTripFromPayload(res, tripSnapshot);
   }
-  await jsonRequest(`/api/crew-qa/trips/${encodeURIComponent(tripId)}/action`, 'POST', { action: 'km', value: String(num) });
+  const res = await jsonRequest(`/api/crew-qa/trips/${encodeURIComponent(tripId)}/action`, 'POST', { action: 'km', value: String(num) });
   notifyCrewChanged();
+  return extractTripFromPayload(res, tripSnapshot);
 }
 
-export async function recordEndKm(user: UserProfile, tripId: string, value: string, minStartKm?: number): Promise<void> {
+export async function recordEndKm(user: UserProfile, tripId: string, value: string, minStartKm?: number, tripSnapshot?: FieldTrip): Promise<FieldTrip | null> {
   const num = Number(value);
   if (!Number.isFinite(num) || num <= 0 || num > 99999999) {
     throw new Error('KM akhir harus berupa angka yang valid.');
@@ -266,13 +338,15 @@ export async function recordEndKm(user: UserProfile, tripId: string, value: stri
     throw new Error(`KM akhir harus lebih besar dari KM awal (${minStartKm.toLocaleString('id-ID')} km).`);
   }
   if (!isQaAccount(user)) {
-    const gps = await freshGps();
-    await jsonRequest(`/api/crew-assignments/${encodeURIComponent(tripId)}/task`, 'POST', { action: 'km_end', value: String(num), gps });
+    const gps = await quickGpsForAction(tripSnapshot?.branchId);
+    const res = await jsonRequest(`/api/crew-assignments/${encodeURIComponent(tripId)}/task`, 'POST', { action: 'km_end', value: String(num), gps });
+    void logisticsStore.hydrateOperationalDataFromHostinger(true);
     notifyCrewChanged();
-    return;
+    return extractTripFromPayload(res, tripSnapshot);
   }
-  await jsonRequest(`/api/crew-qa/trips/${encodeURIComponent(tripId)}/action`, 'POST', { action: 'km_end', value: String(num) });
+  const res = await jsonRequest(`/api/crew-qa/trips/${encodeURIComponent(tripId)}/action`, 'POST', { action: 'km_end', value: String(num) });
   notifyCrewChanged();
+  return extractTripFromPayload(res, tripSnapshot);
 }
 
 function buildChecklistFromCrewInspection(
@@ -405,15 +479,16 @@ export async function markTask(
   tripId: string,
   task: 'inspection' | 'waybill',
   checklist?: InspectionChecklistEntry[],
-  departureValidation?: DepartureValidationData
-): Promise<void> {
+  departureValidation?: DepartureValidationData,
+  tripSnapshot?: FieldTrip
+): Promise<FieldTrip | null> {
   if (task === 'inspection') {
     const checklistError = validateVehicleChecklist(checklist);
     if (checklistError) throw new Error(checklistError);
   }
   if (task === 'waybill') {
     if (!departureValidation) {
-      throw new Error('Data Form Keluar belum lengkap.');
+      throw new Error('Lengkapi Form Keluar & 4 tanda tangan digital terlebih dahulu.');
     }
     const sigKeys: Array<keyof DepartureValidationData['signatures']> = [
       'spvLogistik',
@@ -423,46 +498,47 @@ export async function markTask(
     ];
     for (const key of sigKeys) {
       const val = String(departureValidation.signatures?.[key] || '');
-      if (!val.startsWith('data:image/') || val.length < 60) {
+      if (!val.startsWith('data:image/') || val.length < 120) {
         throw new Error('Seluruh 4 tanda tangan digital pada Form Keluar wajib diisi lengkap.');
       }
     }
   }
   if (!isQaAccount(user)) {
-    const gps = await freshGps();
-    await jsonRequest(`/api/crew-assignments/${encodeURIComponent(tripId)}/task`, 'POST', {
+    const gps = await quickGpsForAction(tripSnapshot?.branchId);
+    const res = await jsonRequest(`/api/crew-assignments/${encodeURIComponent(tripId)}/task`, 'POST', {
       action: task,
       gps,
       ...(task === 'inspection' ? { checklist } : {}),
       ...(task === 'waybill' && departureValidation ? { departureValidation } : {})
-    });
+    }, 10000);
     if (task === 'inspection') {
       void driverChecklistService.syncFromServer(true);
     }
     notifyCrewChanged();
-    return;
+    return extractTripFromPayload(res, tripSnapshot);
   }
   const res = await jsonRequest(`/api/crew-qa/trips/${encodeURIComponent(tripId)}/action`, 'POST', {
     action: task,
     ...(task === 'inspection' ? { checklist } : {}),
     ...(task === 'waybill' && departureValidation ? { departureValidation } : {})
-  });
+  }, 10000);
   if (task === 'inspection' && checklist) {
-    const qaTrip = (await fetchQaTrips()).find(t => t.id === tripId) || res?.trip;
+    const qaTrip = res?.trip || tripSnapshot;
     if (qaTrip) {
       const mapped = buildChecklistFromCrewInspection(qaTrip, user, checklist);
       driverChecklistService.saveChecklist(mapped);
     }
   }
   notifyCrewChanged();
+  return extractTripFromPayload(res, tripSnapshot);
 }
 
 export async function moveTrip(
   user: UserProfile,
   tripId: string,
   next: 'going' | 'returned',
-  tripContext?: FieldTrip
-): Promise<void> {
+  tripSnapshot?: FieldTrip
+): Promise<FieldTrip | null> {
   if (isQaAccount(user)) {
     const qaRes = await jsonRequest(`/api/crew-qa/trips/${encodeURIComponent(tripId)}/action`, 'POST', {
       action: next === 'going' ? 'depart' : 'arrive'
@@ -476,7 +552,7 @@ export async function moveTrip(
       const qaDriverName = qaTrip.driver?.name || user.fullName || 'Driver QA';
       if (next === 'going') {
         const pin = driverShiftService.getPin(qaDriverId, qaDriverName);
-        await driverShiftService.checkInDriver({
+        void driverShiftService.checkInDriver({
           driverId: qaDriverId,
           driverName: qaDriverName,
           helper1Id: qaTrip.helper?.id,
@@ -490,7 +566,7 @@ export async function moveTrip(
           notes: `Berangkat via Portal Kru QA · ${qaTrip.area}`
         });
       } else {
-        await driverShiftService.checkOutDriver(
+        void driverShiftService.checkOutDriver(
           qaDriverId,
           `Tiba di gudang via Portal Kru QA · ${wibTime}`,
           {
@@ -499,7 +575,7 @@ export async function moveTrip(
             areaName: qaTrip.area
           }
         );
-        await driverShiftService.checkOutCrewTeamForTrip({
+        void driverShiftService.checkOutCrewTeamForTrip({
           actorDriverId: qaDriverId,
           actorName: user.fullName || qaDriverName,
           plateNumber: rawPlate,
@@ -512,22 +588,24 @@ export async function moveTrip(
       }
     }
     notifyCrewChanged();
-    return;
+    return extractTripFromPayload(qaRes, tripSnapshot);
   }
-  const live = tripContext || (await fetchLiveTrips()).find(t => t.id === tripId);
+  const live = tripSnapshot || (await fetchLiveTrips()).find(t => t.id === tripId);
   if (!live || !assertTripVisible(user, live)) throw new Error('Kiriman tidak ditemukan.');
   if (!slotForUser(live, user)) throw new Error('Kamu belum mengambil posisi pada kiriman ini.');
   if (!live.driver || !live.helper) throw new Error('Tim belum lengkap.');
   if (next === 'going' && live.phase !== 'waiting') throw new Error('Kiriman sudah berjalan.');
   if (next === 'returned' && live.phase !== 'going') throw new Error('Kiriman belum berjalan.');
-  const gps = await freshGps();
+  const gps = await quickGpsForAction(live.branchId);
   // One authenticated MySQL transaction updates the shared trip and shift check-in/out for both accounts.
-  await jsonRequest(`/api/crew-assignments/${encodeURIComponent(tripId)}/action`, 'POST', {
-    action: next === 'going' ? 'depart' : 'arrive', gps
+  const res = await jsonRequest(`/api/crew-assignments/${encodeURIComponent(tripId)}/action`, 'POST', {
+    action: next === 'going' ? 'depart' : 'arrive',
+    gps
   });
   void driverShiftService.syncFromServer();
   void driverReportService.syncWithServer(true);
   notifyCrewChanged();
+  return extractTripFromPayload(res, live);
 }
 
 export interface WorkReportExtra {
@@ -539,7 +617,6 @@ export interface WorkReportExtra {
   issueItemName?: string;
   issueQty?: string;
   kendalaSubType?: 'jalan_rute' | 'antri_customer';
-  tripContext?: FieldTrip;
 }
 
 export async function submitWorkReport(
@@ -548,8 +625,9 @@ export async function submitWorkReport(
   kind: WorkAction,
   note: string,
   evidence?: CameraEvidence | null,
-  extra?: WorkReportExtra
-): Promise<void> {
+  extra?: WorkReportExtra,
+  tripSnapshot?: FieldTrip
+): Promise<FieldReport | null> {
   if (note.trim().length < 3) throw new Error('Keterangan minimal 3 huruf.');
   const isManifestForm = kind === 'form_kirim';
   if (!isManifestForm) {
@@ -583,7 +661,7 @@ export async function submitWorkReport(
     ? extraPhotos
     : (evidence?.photo ? [evidence.photo] : []);
 
-  const gpsFix = evidence?.gps || (isManifestForm ? await freshGps().catch(() => ({ latitude: -8.1906, longitude: 114.3708, accuracy: 20 })) : undefined);
+  const gpsFix = evidence?.gps || (isManifestForm ? await quickGpsForAction(tripSnapshot?.branchId) : undefined);
   const manifestCapturedAt = new Date().toISOString();
   const cleanOutlet = extra?.customerOutletName?.trim() || undefined;
   const cleanInvoice = extra?.invoiceNumber?.trim() || undefined;
@@ -593,7 +671,7 @@ export async function submitWorkReport(
 
   if (isQaAccount(user)) {
     // QA receives the actual capture for validation, or manifest confirmation metadata when kind === 'form_kirim'.
-    await jsonRequest(`/api/crew-qa/trips/${encodeURIComponent(tripId)}/action`, 'POST', {
+    const qaRes = await jsonRequest(`/api/crew-qa/trips/${encodeURIComponent(tripId)}/action`, 'POST', {
       action: 'report',
       kind,
       note: note.trim(),
@@ -609,9 +687,9 @@ export async function submitWorkReport(
       ...(cleanItemQty ? { issueQty: cleanItemQty } : {}),
       ...(cleanKendalaSub ? { kendalaSubType: cleanKendalaSub } : {}),
       ...(evidence ? { evidence } : { manifestGps: gpsFix, capturedAt: manifestCapturedAt })
-    });
+    }, 10000);
 
-    const qaTrip = (await fetchQaTrips()).find(t => t.id === tripId);
+    const qaTrip = qaRes?.trip || tripSnapshot || (await fetchQaTrips()).find(t => t.id === tripId);
     const slotRole = qaTrip ? slotForUser(qaTrip, user) : null;
     const qaCategoryMap: Record<WorkAction, 'isi_bbm' | 'kendala_jalan' | 'istirahat' | 'retur' | 'akhir_kiriman'> = {
       bbm: 'isi_bbm',
@@ -659,12 +737,13 @@ export async function submitWorkReport(
       status: kind === 'kendala' || kind === 'retur' ? 'pending' : 'verified'
     });
     notifyCrewChanged();
-    return;
+    const latestReport = Array.isArray(qaRes?.trip?.reports) ? qaRes.trip.reports[qaRes.trip.reports.length - 1] : null;
+    return latestReport || null;
   }
-  const live = extra?.tripContext || (await fetchLiveTrips()).find(t => t.id === tripId);
+  const live = tripSnapshot || (await fetchLiveTrips()).find(t => t.id === tripId);
   if (!live || !assertTripVisible(user, live) || !slotForUser(live, user)) throw new Error('Kiriman tidak tersedia untuk akun ini.');
   const slot = slotForUser(live, user)!;
-  const allowed = slot === 'driver' ? ['bbm','kendala'] : ['toko','kendala','retur','form_kirim'];
+  const allowed = slot === 'driver' ? ['bbm', 'kendala'] : ['toko', 'kendala', 'retur', 'form_kirim'];
   if (!allowed.includes(kind)) throw new Error('Jenis laporan tidak sesuai posisi kiriman.');
   if (!isManifestForm) {
     const expired = validateCameraEvidence(evidence);
@@ -672,9 +751,9 @@ export async function submitWorkReport(
   }
   const gps = evidence?.gps || gpsFix!;
   const resolvedPlate = live.schedule?.fleet?.plateNumber || live.fleetLabel;
-  await jsonRequest(`/api/crew-assignments/${encodeURIComponent(tripId)}/report`, 'POST', {
+  const res = await jsonRequest(`/api/crew-assignments/${encodeURIComponent(tripId)}/report`, 'POST', {
     report: {
-      id: `crew-v68-${Date.now()}-${Math.random().toString(36).slice(2,8)}`,
+      id: `crew-v68-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       scheduleId: tripId,
       trackingNumber: live.trackingNumber,
       driverName: live.driver?.name || '-',
@@ -708,7 +787,8 @@ export async function submitWorkReport(
       status: 'submitted',
       source: 'crew_v65'
     }
-  }, 14000);
+  }, 10000);
   void driverReportService.syncWithServer(true);
   notifyCrewChanged();
+  return res?.report || null;
 }

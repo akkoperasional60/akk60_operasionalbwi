@@ -19,9 +19,8 @@ import {
   type FormKirimRecord
 } from '../../services/formKirimStore';
 import { listenCrewChanged, notifyCrewChanged, submitWorkReport } from './crewApi';
-import { freshGps, type FieldTrip } from './crewModel';
+import { quickGpsForAction, type FieldTrip } from './crewModel';
 import { Button } from './CrewFieldUI';
-import { exportCompactSignatureDataUrl } from '../../utils/imageCompression';
 
 interface CrewFormKirimManifestProps {
   user: UserProfile;
@@ -141,7 +140,7 @@ const MiniSignaturePad: React.FC<MiniSignaturePadProps> = ({ value, disabled, on
     drawingRef.current = false;
     lastRef.current = null;
     if (canvasRef.current && hasStrokeRef.current) {
-      onChange(exportCompactSignatureDataUrl(canvasRef.current));
+      onChange(canvasRef.current.toDataURL('image/png'));
     }
   };
 
@@ -321,7 +320,7 @@ export const CrewFormKirimManifest: React.FC<CrewFormKirimManifestProps> = ({
 
     setSavingItem(true);
     try {
-      const gps = await freshGps().catch(() => ({ latitude: -8.1906, longitude: 114.3708, accuracy: 25 }));
+      const gps = await quickGpsForAction(trip.branchId);
       const nowIso = new Date().toISOString();
       const actorName = user.fullName || trip.helper?.name || trip.driver?.name || 'Kru Pengiriman';
       const actorRole = trip.helper && user.id === trip.helper.id ? 'Helper' : 'Driver';
@@ -412,7 +411,7 @@ export const CrewFormKirimManifest: React.FC<CrewFormKirimManifestProps> = ({
           noteText
         );
       }
-      await submitWorkReport(user, trip.id, 'form_kirim', noteText, null);
+      await submitWorkReport(user, trip.id, 'form_kirim', noteText, null, undefined, trip);
       notifyCrewChanged();
       onSuccess('Rekap Form Kirim tersimpan & tersinkron ke Menu Keuangan.');
     } catch (err: any) {

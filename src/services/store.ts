@@ -39,7 +39,6 @@ import {
   SecurityGateLog,
   ChatMessage
 } from '../types';
-import { fetchWithTimeout } from '../utils/fetchWithTimeout';
 
 export const INITIAL_CHAT_MESSAGES: ChatMessage[] = [
   {
@@ -549,6 +548,10 @@ class LogisticsStore {
   private systemActivities: SystemActivity[] = [];
   private spareParts: SparePart[] = [];
   private sparePartUsages: SparePartUsage[] = [];
+  private pendingSparePartDeletes: Set<string> = new Set();
+  private pendingSparePartUsageDeletes: Set<string> = new Set();
+  private lastSparePartsSyncAt: number = 0;
+  private sparePartsSyncPromise: Promise<boolean> | null = null;
   private fuelLogs: FuelLog[] = [];
   private pendingFuelLogUpserts: Map<string, FuelLog> = new Map();
   private pendingFuelLogDeletes: Set<string> = new Set();
@@ -3765,9 +3768,9 @@ class LogisticsStore {
     return existing;
   }
 
-  private lastAuthError: { status: number; message: string; code?: string; circuitBreakerOpen?: boolean } | null = null;
+  private lastAuthError: { status: number; message: string } | null = null;
 
-  public getLastAuthError(): { status: number; message: string; code?: string; circuitBreakerOpen?: boolean } | null {
+  public getLastAuthError(): { status: number; message: string } | null {
     return this.lastAuthError;
   }
 
@@ -3822,11 +3825,10 @@ class LogisticsStore {
   public async loginUserRemote(identifier: string, password: string): Promise<UserProfile | null> {
     this.lastAuthError = null;
     try {
-      const response = await fetchWithTimeout('/api/auth/login', {
+      const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        timeoutMs: 9000,
         body: JSON.stringify({ identifier: identifier.trim(), password })
       });
       const payload = await response.json().catch(() => ({}));
@@ -3836,8 +3838,6 @@ class LogisticsStore {
 
         this.lastAuthError = {
           status: response.status,
-          code: payload?.code ? String(payload.code) : undefined,
-          circuitBreakerOpen: Boolean(payload?.circuitBreaker?.isOpen || payload?.code === 'DB_CIRCUIT_OPEN'),
           message: String(payload?.error || 'Gagal memproses login ke server.')
         };
         return null;
@@ -3846,10 +3846,6 @@ class LogisticsStore {
       if (!remote?.id) {
         const previewFallback = this.tryPreviewLoginFallback(identifier, password);
         if (previewFallback) return previewFallback;
-        this.lastAuthError = {
-          status: 500,
-          message: 'Respons akun dari server tidak lengkap. Silakan coba lagi.'
-        };
         return null;
       }
 
@@ -3904,13 +3900,9 @@ class LogisticsStore {
       const previewFallback = this.tryPreviewLoginFallback(identifier, password);
       if (previewFallback) return previewFallback;
 
-      const isTimeout = Boolean(err?.name === 'AbortError' || String(err?.message || '').toLowerCase().includes('timeout'));
       this.lastAuthError = {
-        status: isTimeout ? 504 : 503,
-        code: isTimeout ? 'REQUEST_TIMEOUT' : 'NETWORK_ERROR',
-        message: isTimeout
-          ? 'Permintaan login melebihi batas waktu (9 detik). Periksa koneksi lalu coba lagi.'
-          : 'Tidak dapat terhubung ke server autentikasi. Periksa koneksi jaringan atau status server.'
+        status: 503,
+        message: 'Tidak dapat terhubung ke server autentikasi. Periksa koneksi jaringan atau status server.'
       };
       console.warn('[Hostinger Auth] Login gagal:', err);
       return null;
@@ -3938,10 +3930,10 @@ class LogisticsStore {
 
         // Priority 1: muat 4 data inti operasional terlebih dahulu agar UI tampil cepat tanpa membanjiri koneksi server
         let [fleetRes, crewRes, storeRes, scheduleRes] = await Promise.all([
-          fetchWithTimeout('/api/fleets', { credentials: 'same-origin', headers: authHeaders, timeoutMs: 9000 }),
-          fetchWithTimeout('/api/crews', { credentials: 'same-origin', headers: authHeaders, timeoutMs: 9000 }),
-          fetchWithTimeout('/api/stores', { credentials: 'same-origin', headers: authHeaders, timeoutMs: 9000 }),
-          fetchWithTimeout('/api/schedules/persisted', { credentials: 'same-origin', headers: authHeaders, timeoutMs: 9000 })
+          fetch('/api/fleets', { credentials: 'same-origin', headers: authHeaders }),
+          fetch('/api/crews', { credentials: 'same-origin', headers: authHeaders }),
+          fetch('/api/stores', { credentials: 'same-origin', headers: authHeaders }),
+          fetch('/api/schedules/persisted', { credentials: 'same-origin', headers: authHeaders })
         ]);
 
         if (
@@ -3952,10 +3944,10 @@ class LogisticsStore {
           if (recovered) {
             authHeaders = this.buildSessionAuthHeaders();
             [fleetRes, crewRes, storeRes, scheduleRes] = await Promise.all([
-              fetchWithTimeout('/api/fleets', { credentials: 'same-origin', headers: authHeaders, timeoutMs: 9000 }),
-              fetchWithTimeout('/api/crews', { credentials: 'same-origin', headers: authHeaders, timeoutMs: 9000 }),
-              fetchWithTimeout('/api/stores', { credentials: 'same-origin', headers: authHeaders, timeoutMs: 9000 }),
-              fetchWithTimeout('/api/schedules/persisted', { credentials: 'same-origin', headers: authHeaders, timeoutMs: 9000 })
+              fetch('/api/fleets', { credentials: 'same-origin', headers: authHeaders }),
+              fetch('/api/crews', { credentials: 'same-origin', headers: authHeaders }),
+              fetch('/api/stores', { credentials: 'same-origin', headers: authHeaders }),
+              fetch('/api/schedules/persisted', { credentials: 'same-origin', headers: authHeaders })
             ]);
           }
         }
@@ -3982,21 +3974,25 @@ class LogisticsStore {
           setTimeout(() => {
             void (async () => {
               try {
-                const [fuelRes, scanRes, rotationRes, adminSchedRes, spareRes] = await Promise.all([
-                  fetchWithTimeout('/api/fuel-logs', { credentials: 'same-origin', headers: authHeaders, timeoutMs: 9000 }),
-                  fetchWithTimeout('/api/scanned-documents', { credentials: 'same-origin', headers: authHeaders, timeoutMs: 9000 }),
-                  fetchWithTimeout('/api/logistics/crew-rotation-state', { credentials: 'same-origin', headers: authHeaders, timeoutMs: 9000 }),
-                  fetchWithTimeout('/api/admin-schedules', { credentials: 'same-origin', headers: authHeaders, timeoutMs: 9000 }),
-                  fetchWithTimeout('/api/spare-parts', { credentials: 'same-origin', headers: authHeaders, timeoutMs: 9000 }).catch(() => null)
+                const [fuelRes, scanRes, rotationRes, adminSchedRes, sparePartRes] = await Promise.all([
+                  fetch('/api/fuel-logs', { credentials: 'same-origin', headers: authHeaders }),
+                  fetch('/api/scanned-documents', { credentials: 'same-origin', headers: authHeaders }),
+                  fetch('/api/logistics/crew-rotation-state', { credentials: 'same-origin', headers: authHeaders }),
+                  fetch('/api/admin-schedules', { credentials: 'same-origin', headers: authHeaders }),
+                  fetch('/api/spare-parts', { credentials: 'same-origin', headers: authHeaders })
                 ]);
-                const [fuelPayload, scanPayload, rotationPayload, adminSchedPayload, sparePayload] = await Promise.all([
+                const [fuelPayload, scanPayload, rotationPayload, adminSchedPayload, sparePartPayload] = await Promise.all([
                   fuelRes.ok ? fuelRes.json().catch(() => ({})) : Promise.resolve({}),
                   scanRes.ok ? scanRes.json().catch(() => ({})) : Promise.resolve({}),
                   rotationRes.ok ? rotationRes.json().catch(() => ({})) : Promise.resolve({}),
                   adminSchedRes.ok ? adminSchedRes.json().catch(() => ({})) : Promise.resolve({}),
-                  spareRes && spareRes.ok ? spareRes.json().catch(() => ({})) : Promise.resolve({})
+                  sparePartRes.ok ? sparePartRes.json().catch(() => ({})) : Promise.resolve({})
                 ]);
                 let secondaryUpdated = false;
+                if (sparePartRes.ok && sparePartPayload?.success) {
+                  this.applyRemoteSparePartsPayload(sparePartPayload);
+                  secondaryUpdated = true;
+                }
                 if (fuelRes.ok && Array.isArray(fuelPayload?.data)) {
                   const serverLogs: FuelLog[] = (fuelPayload.data as FuelLog[]).filter(
                     l => !this.pendingFuelLogDeletes.has(l.id)
@@ -4050,10 +4046,6 @@ class LogisticsStore {
                 }
                 if (adminSchedRes.ok && Array.isArray(adminSchedPayload?.schedules)) {
                   this.lastAdminScheduleWeeksList = adminSchedPayload.schedules;
-                  secondaryUpdated = true;
-                }
-                if (spareRes && spareRes.ok && sparePayload?.success) {
-                  this.applyRemoteSparePartsSnapshot(sparePayload);
                   secondaryUpdated = true;
                 }
                 if (secondaryUpdated) {
@@ -4373,24 +4365,15 @@ class LogisticsStore {
     department?: string;
     password: string;
   }): Promise<UserProfile | null> {
-    this.lastAuthError = null;
     try {
-      const response = await fetchWithTimeout('/api/auth/register', {
+      const response = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        timeoutMs: 9000,
         body: JSON.stringify(data)
       });
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload?.user?.id) {
-        this.lastAuthError = {
-          status: response.status,
-          code: payload?.code ? String(payload.code) : undefined,
-          message: String(payload?.error || 'Pendaftaran akun gagal diproses oleh server.')
-        };
-        return null;
-      }
+      if (!response.ok || !payload?.user?.id) return null;
       const remote = payload.user;
       const user: UserProfile = {
         id: remote.id,
@@ -4407,14 +4390,7 @@ class LogisticsStore {
       this.saveToStorage(STORAGE_KEYS.USERS, this.users);
       this.notify();
       return user;
-    } catch (err: any) {
-      const isTimeout = Boolean(err?.name === 'AbortError' || String(err?.message || '').toLowerCase().includes('timeout'));
-      this.lastAuthError = {
-        status: isTimeout ? 504 : 503,
-        message: isTimeout
-          ? 'Permintaan pendaftaran melebihi batas waktu. Silakan coba lagi.'
-          : 'Tidak dapat terhubung ke server pendaftaran.'
-      };
+    } catch (err) {
       console.warn('[Hostinger Auth] Registrasi gagal:', err);
       return null;
     }
@@ -6872,48 +6848,110 @@ class LogisticsStore {
   // ==========================================
   // SPARE PARTS & ROUTINE MAINTENANCE METHODS
   // ==========================================
-  private applyRemoteSparePartsSnapshot(payload: any): void {
-    const isMysql = payload?.source === 'hostinger_mysql';
-    if (Array.isArray(payload?.parts)) {
-      if (isMysql) {
-        this.spareParts = payload.parts;
-      } else {
-        const partMap = new Map<string, SparePart>();
-        (payload.parts as SparePart[]).forEach(p => { if (p?.id) partMap.set(p.id, p); });
-        this.spareParts.forEach(p => { if (p?.id && !partMap.has(p.id)) partMap.set(p.id, p); });
-        this.spareParts = Array.from(partMap.values());
-      }
-      this.saveToStorage(STORAGE_KEYS.SPARE_PARTS, this.spareParts, true);
+  private applyRemoteSparePartsPayload(payload: any): void {
+    const serverDeletedParts = new Set<string>(
+      Array.isArray(payload?.deletedPartIds) ? payload.deletedPartIds.map((x: any) => String(x)) : []
+    );
+    const serverDeletedUsages = new Set<string>(
+      Array.isArray(payload?.deletedUsageIds) ? payload.deletedUsageIds.map((x: any) => String(x)) : []
+    );
+    this.pendingSparePartDeletes.forEach(id => serverDeletedParts.add(id));
+    this.pendingSparePartUsageDeletes.forEach(id => serverDeletedUsages.add(id));
+
+    const remoteParts: SparePart[] = Array.isArray(payload?.spareParts) ? payload.spareParts : [];
+    const remoteUsages: SparePartUsage[] = Array.isArray(payload?.usages) ? payload.usages : [];
+
+    const partMap = new Map<string, SparePart>();
+    for (const p of this.spareParts) {
+      if (p?.id && !serverDeletedParts.has(p.id)) partMap.set(p.id, p);
     }
-    if (Array.isArray(payload?.usages)) {
-      if (isMysql) {
-        this.sparePartUsages = payload.usages;
-      } else {
-        const usageMap = new Map<string, SparePartUsage>();
-        (payload.usages as SparePartUsage[]).forEach(u => { if (u?.id) usageMap.set(u.id, u); });
-        this.sparePartUsages.forEach(u => { if (u?.id && !usageMap.has(u.id)) usageMap.set(u.id, u); });
-        this.sparePartUsages = Array.from(usageMap.values());
+    for (const rp of remoteParts) {
+      if (!rp?.id || serverDeletedParts.has(rp.id)) continue;
+      const loc = partMap.get(rp.id);
+      const locTs = loc?.updatedAt ? Date.parse(loc.updatedAt) : 0;
+      const remTs = rp.updatedAt ? Date.parse(rp.updatedAt) : 0;
+      if (!loc || !locTs || remTs >= locTs) {
+        partMap.set(rp.id, rp);
       }
-      this.saveToStorage(STORAGE_KEYS.SPARE_PART_USAGES, this.sparePartUsages, true);
     }
+
+    const usageMap = new Map<string, SparePartUsage>();
+    for (const u of this.sparePartUsages) {
+      if (u?.id && !serverDeletedUsages.has(u.id)) usageMap.set(u.id, u);
+    }
+    for (const ru of remoteUsages) {
+      if (!ru?.id || serverDeletedUsages.has(ru.id)) continue;
+      const loc = usageMap.get(ru.id);
+      const locTs = loc?.updatedAt ? Date.parse(loc.updatedAt) : 0;
+      const remTs = ru.updatedAt ? Date.parse(ru.updatedAt) : 0;
+      if (!loc || !locTs || remTs >= locTs) {
+        usageMap.set(ru.id, ru);
+      }
+    }
+
+    this.spareParts = Array.from(partMap.values());
+    this.sparePartUsages = Array.from(usageMap.values());
+    this.lastSparePartsSyncAt = Date.now();
   }
 
-  public async refreshSparePartsFromServer(): Promise<void> {
-    if (typeof window === 'undefined' || !this.isAuthenticated()) return;
+  public async syncSparePartsFromServer(force: boolean = false): Promise<boolean> {
+    if (this.sparePartsSyncPromise) return this.sparePartsSyncPromise;
+    if (!force && Date.now() - this.lastSparePartsSyncAt < 8000) return true;
+    this.sparePartsSyncPromise = (async () => {
+      try {
+        if (this.isPreviewEnvironment()) {
+          await this.ensurePreviewServerSession(false);
+        }
+        const res = await fetch('/api/spare-parts', {
+          credentials: 'same-origin',
+          headers: this.buildSessionAuthHeaders({ Accept: 'application/json' })
+        });
+        if (!res.ok) return false;
+        const payload = await res.json().catch(() => ({}));
+        if (!payload?.success) return false;
+        this.applyRemoteSparePartsPayload(payload);
+        this.notify();
+        return true;
+      } catch {
+        return false;
+      } finally {
+        this.sparePartsSyncPromise = null;
+      }
+    })();
+    return this.sparePartsSyncPromise;
+  }
+
+  private async persistSparePartsToServer(
+    partsToPush: SparePart[],
+    usagesToPush: SparePartUsage[],
+    deletedPartIds: string[] = [],
+    deletedUsageIds: string[] = []
+  ): Promise<void> {
     try {
-      const res = await fetchWithTimeout('/api/spare-parts', {
+      if (this.isPreviewEnvironment()) {
+        await this.ensurePreviewServerSession(false);
+      }
+      const res = await fetch('/api/spare-parts', {
+        method: 'PUT',
         credentials: 'same-origin',
-        headers: this.buildSessionAuthHeaders(),
-        timeoutMs: 8000
+        headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          spareParts: partsToPush,
+          usages: usagesToPush,
+          deletedPartIds,
+          deletedUsageIds
+        })
       });
       if (!res.ok) return;
-      const payload = await res.json().catch(() => null);
+      const payload = await res.json().catch(() => ({}));
       if (payload?.success) {
-        this.applyRemoteSparePartsSnapshot(payload);
+        deletedPartIds.forEach(id => this.pendingSparePartDeletes.delete(id));
+        deletedUsageIds.forEach(id => this.pendingSparePartUsageDeletes.delete(id));
+        this.applyRemoteSparePartsPayload(payload);
         this.notify();
       }
     } catch {
-      // ignore background refresh error
+      // ignore transient network failure; remains in memory & retries on next sync
     }
   }
 
@@ -6922,13 +6960,18 @@ class LogisticsStore {
   }
 
   public addSparePart(part: Omit<SparePart, 'id'>): SparePart {
+    const nowIso = new Date().toISOString();
+    const actorName = this.currentUser?.fullName || this.currentUser?.email || 'Admin';
     const newPart: SparePart = {
       ...part,
-      createdBy: part.createdBy || this.currentUser.fullName,
-      id: 'sp-' + Date.now().toString(36) + '-' + Math.random().toString(36).substring(2, 6)
+      id: 'sp-' + Math.random().toString(36).substring(2, 9),
+      createdBy: part.createdBy || actorName,
+      updatedAt: nowIso
     };
+    this.pendingSparePartDeletes.delete(newPart.id);
     this.spareParts = [newPart, ...this.spareParts];
     this.saveToStorage(STORAGE_KEYS.SPARE_PARTS, this.spareParts);
+    void this.persistSparePartsToServer([newPart], []);
     this.logActivity(
       'Tambah Sparepart Baru',
       newPart.name,
@@ -6936,23 +6979,24 @@ class LogisticsStore {
       'tambah'
     );
     this.notify();
-
-    void fetchWithTimeout('/api/spare-parts', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(newPart),
-      timeoutMs: 8000
-    }).catch(() => {});
-
     return newPart;
   }
 
   public updateSparePart(id: string, updated: Partial<SparePart>): void {
+    const nowIso = new Date().toISOString();
     const existing = this.spareParts.find(p => p.id === id);
-    const merged = existing ? { ...existing, ...updated } : { ...updated, id };
-    this.spareParts = this.spareParts.map(p => (p.id === id ? { ...p, ...updated } : p));
+    let savedItem: SparePart | null = null;
+    this.spareParts = this.spareParts.map(p => {
+      if (p.id === id) {
+        savedItem = { ...p, ...updated, updatedAt: nowIso };
+        return savedItem;
+      }
+      return p;
+    });
     this.saveToStorage(STORAGE_KEYS.SPARE_PARTS, this.spareParts);
+    if (savedItem) {
+      void this.persistSparePartsToServer([savedItem], []);
+    }
     if (existing) {
       this.logActivity(
         'Ubah Data Sparepart',
@@ -6962,20 +7006,14 @@ class LogisticsStore {
       );
     }
     this.notify();
-
-    void fetchWithTimeout(`/api/spare-parts/${encodeURIComponent(id)}`, {
-      method: 'PUT',
-      credentials: 'same-origin',
-      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(merged),
-      timeoutMs: 8000
-    }).catch(() => {});
   }
 
   public deleteSparePart(id: string): void {
     const part = this.spareParts.find(p => p.id === id);
+    this.pendingSparePartDeletes.add(id);
     this.spareParts = this.spareParts.filter(p => p.id !== id);
     this.saveToStorage(STORAGE_KEYS.SPARE_PARTS, this.spareParts);
+    void this.persistSparePartsToServer([], [], [id], []);
     if (part) {
       this.logActivity(
         'Hapus Master Sparepart',
@@ -6984,38 +7022,30 @@ class LogisticsStore {
       );
     }
     this.notify();
-
-    void fetchWithTimeout(`/api/spare-parts/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-      credentials: 'same-origin',
-      headers: this.buildSessionAuthHeaders(),
-      timeoutMs: 8000
-    }).catch(() => {});
   }
 
   public restockSparePart(id: string, amount: number, notes?: string): void {
     const part = this.spareParts.find(p => p.id === id);
     if (!part) return;
+    const nowIso = new Date().toISOString();
     const newStock = part.stock + amount;
-    const today = new Date().toISOString().substring(0, 10);
-    this.spareParts = this.spareParts.map(p =>
-      p.id === id ? { ...p, stock: newStock, lastRestockDate: today, notes: notes || p.notes } : p
-    );
+    const today = nowIso.substring(0, 10);
+    const updatedPart: SparePart = {
+      ...part,
+      stock: newStock,
+      lastRestockDate: today,
+      notes: notes || part.notes,
+      updatedAt: nowIso
+    };
+    this.spareParts = this.spareParts.map(p => (p.id === id ? updatedPart : p));
     this.saveToStorage(STORAGE_KEYS.SPARE_PARTS, this.spareParts);
+    void this.persistSparePartsToServer([updatedPart], []);
     this.logActivity(
       'Restock Sparepart Masuk',
       part.name,
       `Penambahan +${amount} ${part.unit} (Total kini: ${newStock} ${part.unit}). Catatan: ${notes || '-'}`
     );
     this.notify();
-
-    void fetchWithTimeout(`/api/spare-parts/${encodeURIComponent(id)}/restock`, {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ amount, notes }),
-      timeoutMs: 8000
-    }).catch(() => {});
   }
 
   public getSparePartUsages(fleetId?: string): SparePartUsage[] {
@@ -7026,27 +7056,33 @@ class LogisticsStore {
   }
 
   public recordSparePartUsage(usage: Omit<SparePartUsage, 'id'>): SparePartUsage {
+    const nowIso = new Date().toISOString();
     const newUsage: SparePartUsage = {
       ...usage,
-      performedBy: usage.performedBy || this.currentUser.fullName,
-      id: 'usg-' + Date.now().toString(36) + '-' + Math.random().toString(36).substring(2, 6)
+      id: 'usg-' + Math.random().toString(36).substring(2, 9),
+      updatedAt: nowIso
     };
 
     // 1. Simpan ke daftar riwayat pemakaian
+    this.pendingSparePartUsageDeletes.delete(newUsage.id);
     this.sparePartUsages = [newUsage, ...this.sparePartUsages];
     this.saveToStorage(STORAGE_KEYS.SPARE_PART_USAGES, this.sparePartUsages);
 
     // 2. Potong stok otomatis di master inventaris gudang jika partId cocok
+    let updatedPart: SparePart | null = null;
     if (usage.partId) {
       this.spareParts = this.spareParts.map(p => {
         if (p.id === usage.partId) {
           const reducedStock = Math.max(0, p.stock - usage.quantity);
-          return { ...p, stock: reducedStock };
+          updatedPart = { ...p, stock: reducedStock, updatedAt: nowIso };
+          return updatedPart;
         }
         return p;
       });
       this.saveToStorage(STORAGE_KEYS.SPARE_PARTS, this.spareParts);
     }
+
+    void this.persistSparePartsToServer(updatedPart ? [updatedPart] : [], [newUsage]);
 
     // 3. Sinkronisasi tanggal servis terakhir pada armada
     if (usage.fleetId) {
@@ -7071,22 +7107,15 @@ class LogisticsStore {
     );
 
     this.notify();
-
-    void fetchWithTimeout('/api/spare-part-usages', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(newUsage),
-      timeoutMs: 8000
-    }).catch(() => {});
-
     return newUsage;
   }
 
   public deleteSparePartUsage(id: string): void {
     const item = this.sparePartUsages.find(u => u.id === id);
+    this.pendingSparePartUsageDeletes.add(id);
     this.sparePartUsages = this.sparePartUsages.filter(u => u.id !== id);
     this.saveToStorage(STORAGE_KEYS.SPARE_PART_USAGES, this.sparePartUsages);
+    void this.persistSparePartsToServer([], [], [], [id]);
     if (item) {
       this.logActivity(
         'Hapus Log Ganti Sparepart',
@@ -7095,13 +7124,6 @@ class LogisticsStore {
       );
     }
     this.notify();
-
-    void fetchWithTimeout(`/api/spare-part-usages/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-      credentials: 'same-origin',
-      headers: this.buildSessionAuthHeaders(),
-      timeoutMs: 8000
-    }).catch(() => {});
   }
 
   public getFleetRoutineComponentsStatus(fleetId: string) {
@@ -7433,12 +7455,11 @@ class LogisticsStore {
     data: Omit<FuelLog, 'id' | 'createdAt' | 'ratioKmPerLiter' | 'costPerKm' | 'efficiencyStatus' | 'totalCost' | 'distanceKm' | 'targetRatio'>
   ): Promise<FuelLog> {
     const { newLog, fleet } = this.buildComputedNewFuelLog(data);
-    const res = await fetchWithTimeout('/api/fuel-logs', {
+    const res = await fetch('/api/fuel-logs', {
       method: 'POST',
       credentials: 'same-origin',
       headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(newLog),
-      timeoutMs: 9000
+      body: JSON.stringify(newLog)
     });
     const json = await res.json().catch(() => ({}));
     if (!res.ok || json?.success === false) {
@@ -7461,7 +7482,7 @@ class LogisticsStore {
     this.logActivity(
       'Pencatatan BBM Armada',
       `${savedLog.plateNumber} (${savedLog.initialCode || 'Armada'})`,
-      `Pengisian ${savedLog.liters.toFixed(2)} L ${savedLog.fuelType} (Rp ${savedLog.totalCost.toLocaleString('id-ID')}) - Rasio: ${savedLog.ratioKmPerLiter} KM/L [${savedLog.efficiencyStatus}]`,
+      `Pengisian ${savedLog.liters} L ${savedLog.fuelType} (Rp ${savedLog.totalCost.toLocaleString('id-ID')}) - Rasio: ${savedLog.ratioKmPerLiter} KM/L [${savedLog.efficiencyStatus}]`,
       'tambah'
     );
 
@@ -7475,12 +7496,11 @@ class LogisticsStore {
       throw new Error('Data catatan BBM tidak ditemukan.');
     }
 
-    const res = await fetchWithTimeout(`/api/fuel-logs/${encodeURIComponent(id)}`, {
+    const res = await fetch(`/api/fuel-logs/${encodeURIComponent(id)}`, {
       method: 'PUT',
       credentials: 'same-origin',
       headers: this.buildSessionAuthHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(updatedLog),
-      timeoutMs: 9000
+      body: JSON.stringify(updatedLog)
     });
     const json = await res.json().catch(() => ({}));
     if (!res.ok || json?.success === false) {
@@ -7505,11 +7525,10 @@ class LogisticsStore {
 
   public async deleteFuelLogAsync(id: string): Promise<void> {
     const item = this.fuelLogs.find(l => l.id === id);
-    const res = await fetchWithTimeout(`/api/fuel-logs/${encodeURIComponent(id)}`, {
+    const res = await fetch(`/api/fuel-logs/${encodeURIComponent(id)}`, {
       method: 'DELETE',
       credentials: 'same-origin',
-      headers: this.buildSessionAuthHeaders(),
-      timeoutMs: 8000
+      headers: this.buildSessionAuthHeaders()
     });
     const json = await res.json().catch(() => ({}));
     if (!res.ok || json?.success === false) {

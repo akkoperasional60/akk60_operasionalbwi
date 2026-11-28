@@ -6,14 +6,7 @@ import zlib from "zlib";
 import dotenv from "dotenv";
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import * as XLSX from "xlsx";
-import {
-  query as mysqlQuery,
-  testConnection as testMysqlConnection,
-  isDatabaseConfigured,
-  isCircuitOpen,
-  getCircuitBreakerStatus,
-  resetCircuitBreaker
-} from "./server/db";
+import { query as mysqlQuery, testConnection as testMysqlConnection, isDatabaseConfigured } from "./server/db";
 import { registerCrewClaimRoutes } from './server/crewClaims';
 import { registerCrewQaRoutes, setCrewQaChangedListener } from './server/crewQa';
 
@@ -340,72 +333,16 @@ async function startServer() {
   });
 
   // Hostinger MySQL Connection & Health Check API
-  const buildDbHealthPayload = async (forceCheck: boolean = true) => {
-    const cbStatus = getCircuitBreakerStatus();
-    if (!forceCheck && cbStatus.isOpen) {
-      return {
-        dbEngine: "Hostinger MySQL/MariaDB (mysql2)",
-        configured: cbStatus.configured,
-        dbHost: cbStatus.host,
-        dbPort: cbStatus.port,
-        dbName: cbStatus.database || '-',
-        hasUserConfigured: Boolean(String(process.env.DB_USER || '').trim()),
-        hasPasswordConfigured: Boolean(String(process.env.DB_PASSWORD || '').trim()),
-        missingEnvVars: cbStatus.missingEnvVars,
-        circuitBreaker: {
-          isOpen: cbStatus.isOpen,
-          remainingSeconds: cbStatus.remainingSeconds,
-          consecutiveFailures: cbStatus.consecutiveFailures
-        },
-        success: false,
-        message: cbStatus.localLoopbackRefusedInPreview
-          ? 'Mode preview aktif tanpa server MySQL lokal.'
-          : 'Database sedang dalam mode pemulihan sementara (circuit breaker aktif).'
-      };
-    }
-
-    const testResult = cbStatus.configured || forceCheck ? await testMysqlConnection() : {
-      success: false,
-      configured: false,
-      circuitOpen: cbStatus.isOpen,
-      remainingSeconds: cbStatus.remainingSeconds,
-      missingEnvVars: cbStatus.missingEnvVars,
-      message: 'Database belum dikonfigurasi: DB_NAME, DB_USER, DB_PASSWORD belum diisi di environment variables.'
-    };
-    const updatedCb = getCircuitBreakerStatus();
-    return {
-      dbEngine: "Hostinger MySQL/MariaDB (mysql2)",
-      configured: testResult.configured,
-      dbHost: updatedCb.host,
-      dbPort: updatedCb.port,
-      dbName: updatedCb.database || '-',
-      hasUserConfigured: Boolean(String(process.env.DB_USER || '').trim()),
-      hasPasswordConfigured: Boolean(String(process.env.DB_PASSWORD || '').trim()),
-      missingEnvVars: testResult.missingEnvVars,
-      circuitBreaker: {
-        isOpen: updatedCb.isOpen,
-        remainingSeconds: updatedCb.remainingSeconds,
-        consecutiveFailures: updatedCb.consecutiveFailures
-      },
-      success: testResult.success,
-      message: testResult.success ? 'Database terhubung normal' : (testResult.message || 'Database belum dapat diakses')
-    };
-  };
-
   app.get("/api/db-status", async (_req, res) => {
-    const payload = await buildDbHealthPayload(false);
-    res.status(200).json(payload);
-  });
-
-  app.get("/api/health/db", async (_req, res) => {
-    const payload = await buildDbHealthPayload(true);
-    res.status(payload.success ? 200 : 503).json(payload);
-  });
-
-  app.post("/api/db-reconnect", async (_req, res) => {
-    await resetCircuitBreaker(true);
-    const payload = await buildDbHealthPayload(true);
-    res.status(payload.success ? 200 : 503).json(payload);
+    const configured = isDatabaseConfigured();
+    const testResult = configured ? await testMysqlConnection() : { success: false, configured: false, message: 'Hostinger MySQL belum dikonfigurasi: DB_NAME, DB_USER, DB_PASSWORD belum diisi di environment variables.' };
+    res.status(200).json({
+      dbEngine: "Hostinger MySQL/MariaDB (mysql2)",
+      configured,
+      hasPasswordConfigured: Boolean(process.env.DB_PASSWORD),
+      success: testResult.success,
+      message: testResult.success ? 'Database Hostinger terhubung' : (testResult.message || 'Database Hostinger belum dapat diakses')
+    });
   });
 
   const parseJsonColumn = (raw: any): any => {
@@ -1325,23 +1262,6 @@ async function startServer() {
         used_at DATETIME NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         INDEX idx_prt_user_active (user_id, used_at, expires_at)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
-      `CREATE TABLE IF NOT EXISTS spare_part_usages (
-        id VARCHAR(64) NOT NULL PRIMARY KEY,
-        fleet_id VARCHAR(64) NOT NULL,
-        plate_number VARCHAR(32) NOT NULL,
-        part_id VARCHAR(64) NULL,
-        part_name VARCHAR(191) NOT NULL,
-        category VARCHAR(64) NOT NULL,
-        quantity INT NOT NULL DEFAULT 1,
-        replacement_date VARCHAR(32) NOT NULL,
-        odometer_km INT NOT NULL DEFAULT 0,
-        total_cost DECIMAL(14,2) DEFAULT 0.00,
-        performed_by VARCHAR(191) NULL,
-        payload_json LONGTEXT NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        INDEX idx_spu_fleet_date (fleet_id, replacement_date),
-        INDEX idx_spu_category (category)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
     ];
     for (const sql of statements) {
@@ -1357,29 +1277,6 @@ async function startServer() {
         await mysqlQuery("ALTER TABLE fuel_logs ADD COLUMN payload_json LONGTEXT NULL");
       }
     } catch {}
-    try {
-      const spCols = await mysqlQuery<any[]>("SHOW COLUMNS FROM spare_parts LIKE 'payload_json'");
-      if (!Array.isArray(spCols) || spCols.length === 0) {
-        await mysqlQuery("ALTER TABLE spare_parts ADD COLUMN payload_json LONGTEXT NULL");
-      }
-    } catch {}
-    const indexStatements = [
-      "CREATE INDEX idx_schedules_status_date ON schedules (status, departure_date)",
-      "CREATE INDEX idx_fuel_logs_fleet_logged ON fuel_logs (fleet_id, logged_at)",
-      "CREATE INDEX idx_tracking_logs_fleet_created ON tracking_logs (fleet_id, created_at)",
-      "CREATE INDEX idx_scanned_docs_type_date ON scanned_documents (document_type, doc_date)",
-      "CREATE INDEX idx_spare_parts_category ON spare_parts (category)"
-    ];
-    for (const idxSql of indexStatements) {
-      try {
-        await mysqlQuery(idxSql);
-      } catch (err: any) {
-        const msg = String(err?.message || '');
-        if (!msg.includes('Duplicate key name') && err?.code !== 'ER_DUP_KEYNAME') {
-          console.warn('[Database Index Warning]', msg);
-        }
-      }
-    }
   };
 
   const ensureBootstrapAdmin = async (): Promise<void> => {
@@ -1575,20 +1472,10 @@ async function startServer() {
       if (isPreviewEnv && (errMsg.includes('ECONNREFUSED') || errMsg.includes('ENOTFOUND') || errMsg.includes('ETIMEDOUT') || errMsg.includes('circuit breaker'))) {
         return handlePreviewLogin(loginIdentifier, cleanPass, req, res);
       }
-      const cbStatus = getCircuitBreakerStatus();
       console.warn('[Auth MySQL Warning]', errMsg);
       return res.status(503).json({
         success: false,
-        code: isCircuitOpen() ? 'DB_CIRCUIT_OPEN' : 'DB_UNAVAILABLE',
-        circuitBreaker: {
-          isOpen: cbStatus.isOpen,
-          remainingSeconds: cbStatus.remainingSeconds,
-          consecutiveFailures: cbStatus.consecutiveFailures,
-          missingEnvVars: cbStatus.missingEnvVars
-        },
-        error: isCircuitOpen()
-          ? 'Koneksi database sedang memulihkan diri. Klik "Coba Hubungkan Ulang" atau tunggu beberapa detik.'
-          : 'Database belum dapat diakses saat ini. Periksa konfigurasi DB_NAME, DB_USER, dan DB_PASSWORD.'
+        error: `Database Hostinger belum dapat diakses (${errMsg || 'Koneksi MySQL gagal'}). Periksa DB_NAME, DB_USER, dan DB_PASSWORD di Hostinger.`
       });
     }
   });
@@ -3707,7 +3594,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     return inMemoryDriverReports;
   };
 
-  const persistDriverReportsToDb = async (reportsList: any[]) => {
+  const persistDriverReportsToDb = async (reportsList: any[], strict = false) => {
     inMemoryDriverReports = reportsList;
     if (!isDatabaseConfigured()) {
       writePersistentAppState('driver_reports_payload', reportsList.slice(0, 100));
@@ -3729,6 +3616,9 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       const reportBytes = Buffer.byteLength(encoded, 'utf8') + 1;
       if (reportBytes > maxPersistBytes) {
         console.warn('[Driver Reports Persist Warning] Satu laporan terlalu besar untuk snapshot MySQL:', report?.id || '-');
+        if (strict && reportsList[0]?.id === report?.id) {
+          throw new Error('Ukuran lampiran foto laporan terlalu besar untuk disimpan ke database.');
+        }
         continue;
       }
       if (trimmed.length > 0 && estimatedBytes + reportBytes > maxPersistBytes) break;
@@ -3751,7 +3641,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
       ]);
     } catch (err: any) {
       console.warn('[Driver Reports Persist Warning]', err?.message || err);
-      throw err;
+      if (strict) throw err;
     }
   };
 
@@ -4245,6 +4135,273 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     }
 
     return res.json({ success: true, savedKeys: keys });
+  });
+
+  // =========================================================================
+  // SPARE PARTS & USAGES PERSISTENCE (Hostinger MySQL cross-user sync)
+  // =========================================================================
+  let inMemorySpareParts: any[] = [];
+  let inMemorySparePartUsages: any[] = [];
+  const inMemoryDeletedSparePartIds = new Set<string>();
+  const inMemoryDeletedSparePartUsageIds = new Set<string>();
+
+  const readSparePartsAppState = async (key: string): Promise<any[] | null> => {
+    if (!isDatabaseConfigured()) return null;
+    try {
+      const rows = await mysqlQuery<any[]>(
+        `SELECT state_json FROM app_state WHERE state_key = ? LIMIT 1`,
+        [key]
+      ).catch(() => []);
+      const raw = Array.isArray(rows) && rows[0] ? rows[0].state_json : null;
+      if (raw == null) return null;
+      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      return Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const writeSparePartsAppState = async (key: string, payload: unknown): Promise<void> => {
+    if (!isDatabaseConfigured()) return;
+    await mysqlQuery(
+      `INSERT INTO app_state (state_key, state_json, updated_at) VALUES (?, ?, NOW())
+       ON DUPLICATE KEY UPDATE state_json = VALUES(state_json), updated_at = NOW()`,
+      [key, JSON.stringify(payload ?? [])]
+    ).catch((err: any) => {
+      console.warn('[Spare Parts AppState Save Warning]', key, err?.message || err);
+    });
+  };
+
+  const normalizeSparePartRecord = (item: any, fallbackCreator?: string) => {
+    if (!item || typeof item !== 'object') return null;
+    const id = String(item.id || '').trim().slice(0, 64);
+    const name = String(item.name || '').trim().slice(0, 191);
+    if (!id || !name) return null;
+    return {
+      ...item,
+      id,
+      name,
+      category: String(item.category || 'lainnya').trim().slice(0, 50),
+      partNumber: String(item.partNumber || id).trim().slice(0, 64),
+      unit: String(item.unit || 'pcs').trim().slice(0, 32),
+      stock: Math.max(0, Number(item.stock) || 0),
+      minStock: Math.max(0, Number(item.minStock) || 0),
+      costPerUnit: Math.max(0, Number(item.costPerUnit) || 0),
+      compatibleVehicles: String(item.compatibleVehicles || '').trim().slice(0, 255),
+      storageLocation: String(item.storageLocation || '').trim().slice(0, 191),
+      lastRestockDate: String(item.lastRestockDate || '').trim().slice(0, 32),
+      notes: item.notes ? String(item.notes).slice(0, 500) : '',
+      branchId: item.branchId ? String(item.branchId).trim().slice(0, 64) : undefined,
+      createdBy: item.createdBy ? String(item.createdBy).trim().slice(0, 140) : fallbackCreator,
+      updatedAt: String(item.updatedAt || new Date().toISOString())
+    };
+  };
+
+  const normalizeSparePartUsageRecord = (item: any, fallbackCreator?: string) => {
+    if (!item || typeof item !== 'object') return null;
+    const id = String(item.id || '').trim().slice(0, 64);
+    const partName = String(item.partName || '').trim().slice(0, 191);
+    if (!id || !partName) return null;
+    return {
+      ...item,
+      id,
+      fleetId: String(item.fleetId || '').trim().slice(0, 64),
+      plateNumber: String(item.plateNumber || '').trim().slice(0, 64),
+      initialCode: item.initialCode ? String(item.initialCode).trim().slice(0, 64) : undefined,
+      partId: String(item.partId || '').trim().slice(0, 64),
+      partName,
+      category: String(item.category || 'lainnya').trim().slice(0, 50),
+      quantity: Math.max(0, Number(item.quantity) || 0),
+      unit: String(item.unit || 'pcs').trim().slice(0, 32),
+      replacementDate: String(item.replacementDate || '').trim().slice(0, 32),
+      odometerKm: Math.max(0, Number(item.odometerKm) || 0),
+      nextReplacementKm: item.nextReplacementKm != null ? Math.max(0, Number(item.nextReplacementKm) || 0) : undefined,
+      nextReplacementDate: item.nextReplacementDate ? String(item.nextReplacementDate).trim().slice(0, 32) : undefined,
+      mechanicOrWorkshop: String(item.mechanicOrWorkshop || '').trim().slice(0, 191),
+      totalCost: Math.max(0, Number(item.totalCost) || 0),
+      notes: item.notes ? String(item.notes).slice(0, 500) : '',
+      performedBy: String(item.performedBy || fallbackCreator || 'Admin').trim().slice(0, 140),
+      branchId: item.branchId ? String(item.branchId).trim().slice(0, 64) : undefined,
+      updatedAt: String(item.updatedAt || new Date().toISOString())
+    };
+  };
+
+  const mergeByIdWithTimestamp = (existing: any[], incoming: any[], deletedSet: Set<string>) => {
+    const map = new Map<string, any>();
+    for (const item of existing) {
+      if (item?.id && !deletedSet.has(String(item.id))) {
+        map.set(String(item.id), item);
+      }
+    }
+    for (const item of incoming) {
+      if (!item?.id || deletedSet.has(String(item.id))) continue;
+      const prev = map.get(String(item.id));
+      if (!prev) {
+        map.set(String(item.id), item);
+      } else {
+        const prevTs = prev.updatedAt ? Date.parse(String(prev.updatedAt)) : 0;
+        const incTs = item.updatedAt ? Date.parse(String(item.updatedAt)) : 0;
+        if (!prevTs || incTs >= prevTs) {
+          map.set(String(item.id), { ...prev, ...item });
+        }
+      }
+    }
+    return Array.from(map.values());
+  };
+
+  app.get("/api/spare-parts", requireAuth, async (_req, res) => {
+    let spareParts = [...inMemorySpareParts];
+    let usages = [...inMemorySparePartUsages];
+    let source = 'memory';
+
+    if (isDatabaseConfigured()) {
+      try {
+        const [dbParts, dbUsages, dbDelParts, dbDelUsages] = await Promise.all([
+          readSparePartsAppState('spare_parts_v1'),
+          readSparePartsAppState('spare_part_usages_v1'),
+          readSparePartsAppState('spare_parts_deleted_v1'),
+          readSparePartsAppState('spare_part_usages_deleted_v1')
+        ]);
+        if (Array.isArray(dbDelParts)) {
+          dbDelParts.forEach((id: any) => { if (id) inMemoryDeletedSparePartIds.add(String(id)); });
+        }
+        if (Array.isArray(dbDelUsages)) {
+          dbDelUsages.forEach((id: any) => { if (id) inMemoryDeletedSparePartUsageIds.add(String(id)); });
+        }
+        if (Array.isArray(dbParts)) {
+          spareParts = mergeByIdWithTimestamp(dbParts, inMemorySpareParts, inMemoryDeletedSparePartIds);
+          inMemorySpareParts = spareParts;
+        } else {
+          // Fallback: check legacy SQL spare_parts table if app_state not yet populated
+          const sqlRows = await mysqlQuery<any[]>(
+            `SELECT id, code, name, category, stock, min_stock, unit_price, supplier, created_at FROM spare_parts ORDER BY created_at DESC LIMIT 500`
+          ).catch(() => []);
+          if (Array.isArray(sqlRows) && sqlRows.length > 0) {
+            const legacyMapped = sqlRows
+              .map(r => normalizeSparePartRecord({
+                id: r.id,
+                partNumber: r.code,
+                name: r.name,
+                category: r.category,
+                stock: Number(r.stock || 0),
+                minStock: Number(r.min_stock || 0),
+                costPerUnit: Number(r.unit_price || 0),
+                storageLocation: r.supplier || 'Gudang Utama',
+                unit: 'pcs',
+                compatibleVehicles: 'Semua Armada',
+                lastRestockDate: r.created_at ? String(r.created_at).slice(0, 10) : ''
+              }))
+              .filter(Boolean);
+            spareParts = mergeByIdWithTimestamp(legacyMapped as any[], inMemorySpareParts, inMemoryDeletedSparePartIds);
+            inMemorySpareParts = spareParts;
+          }
+        }
+        if (Array.isArray(dbUsages)) {
+          usages = mergeByIdWithTimestamp(dbUsages, inMemorySparePartUsages, inMemoryDeletedSparePartUsageIds);
+          inMemorySparePartUsages = usages;
+        }
+        source = 'hostinger_mysql';
+      } catch (err: any) {
+        console.warn('[Spare Parts GET Warning]', err?.message || err);
+      }
+    }
+
+    return res.json({
+      success: true,
+      source,
+      spareParts: spareParts.filter(p => p?.id && !inMemoryDeletedSparePartIds.has(String(p.id))),
+      usages: usages.filter(u => u?.id && !inMemoryDeletedSparePartUsageIds.has(String(u.id))),
+      deletedPartIds: Array.from(inMemoryDeletedSparePartIds),
+      deletedUsageIds: Array.from(inMemoryDeletedSparePartUsageIds)
+    });
+  });
+
+  app.put("/api/spare-parts", requireAuth, express.json({ limit: '10mb' }), async (req: any, res) => {
+    const actorName = String(req.authUser?.full_name || req.authUser?.fullName || req.authUser?.email || 'User').slice(0, 140);
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+
+    const incomingDelParts = Array.isArray(body.deletedPartIds) ? body.deletedPartIds.map((x: any) => String(x || '').trim()).filter(Boolean) : [];
+    const incomingDelUsages = Array.isArray(body.deletedUsageIds) ? body.deletedUsageIds.map((x: any) => String(x || '').trim()).filter(Boolean) : [];
+    incomingDelParts.forEach((id: string) => inMemoryDeletedSparePartIds.add(id));
+    incomingDelUsages.forEach((id: string) => inMemoryDeletedSparePartUsageIds.add(id));
+
+    const incomingParts = (Array.isArray(body.spareParts) ? body.spareParts : [])
+      .slice(0, 1000)
+      .map((item: any) => normalizeSparePartRecord(item, actorName))
+      .filter(Boolean) as any[];
+    const incomingUsages = (Array.isArray(body.usages) ? body.usages : [])
+      .slice(0, 3000)
+      .map((item: any) => normalizeSparePartUsageRecord(item, actorName))
+      .filter(Boolean) as any[];
+
+    let baseParts = [...inMemorySpareParts];
+    let baseUsages = [...inMemorySparePartUsages];
+
+    if (isDatabaseConfigured()) {
+      const [dbParts, dbUsages, dbDelParts, dbDelUsages] = await Promise.all([
+        readSparePartsAppState('spare_parts_v1'),
+        readSparePartsAppState('spare_part_usages_v1'),
+        readSparePartsAppState('spare_parts_deleted_v1'),
+        readSparePartsAppState('spare_part_usages_deleted_v1')
+      ]);
+      if (Array.isArray(dbDelParts)) dbDelParts.forEach((id: any) => { if (id) inMemoryDeletedSparePartIds.add(String(id)); });
+      if (Array.isArray(dbDelUsages)) dbDelUsages.forEach((id: any) => { if (id) inMemoryDeletedSparePartUsageIds.add(String(id)); });
+      if (Array.isArray(dbParts)) baseParts = dbParts;
+      if (Array.isArray(dbUsages)) baseUsages = dbUsages;
+    }
+
+    const mergedParts = mergeByIdWithTimestamp(baseParts, incomingParts, inMemoryDeletedSparePartIds);
+    const mergedUsages = mergeByIdWithTimestamp(baseUsages, incomingUsages, inMemoryDeletedSparePartUsageIds);
+
+    inMemorySpareParts = mergedParts;
+    inMemorySparePartUsages = mergedUsages;
+
+    if (isDatabaseConfigured()) {
+      await Promise.all([
+        writeSparePartsAppState('spare_parts_v1', mergedParts),
+        writeSparePartsAppState('spare_part_usages_v1', mergedUsages),
+        writeSparePartsAppState('spare_parts_deleted_v1', Array.from(inMemoryDeletedSparePartIds).slice(-500)),
+        writeSparePartsAppState('spare_part_usages_deleted_v1', Array.from(inMemoryDeletedSparePartUsageIds).slice(-500))
+      ]);
+
+      // Mirror master spare parts into relational spare_parts table safely
+      for (const p of incomingParts) {
+        const codeVal = String(p.partNumber || p.id).slice(0, 50);
+        await mysqlQuery(
+          `INSERT INTO spare_parts (id, code, name, category, stock, min_stock, unit_price, supplier)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE
+             name = VALUES(name),
+             category = VALUES(category),
+             stock = VALUES(stock),
+             min_stock = VALUES(min_stock),
+             unit_price = VALUES(unit_price),
+             supplier = VALUES(supplier)`,
+          [
+            p.id,
+            codeVal,
+            p.name,
+            p.category,
+            Math.round(Number(p.stock) || 0),
+            Math.round(Number(p.minStock) || 0),
+            Number(p.costPerUnit) || 0,
+            p.storageLocation || null
+          ]
+        ).catch(() => {});
+      }
+      for (const delId of incomingDelParts) {
+        await mysqlQuery(`DELETE FROM spare_parts WHERE id = ?`, [delId]).catch(() => {});
+      }
+    }
+
+    return res.json({
+      success: true,
+      source: isDatabaseConfigured() ? 'hostinger_mysql' : 'memory',
+      spareParts: mergedParts,
+      usages: mergedUsages,
+      deletedPartIds: Array.from(inMemoryDeletedSparePartIds),
+      deletedUsageIds: Array.from(inMemoryDeletedSparePartUsageIds)
+    });
   });
 
   // =========================================================================
@@ -4897,7 +5054,7 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     saveReport: async (report: any) => {
       await loadDriverReportsFromDbIfNeeded();
       const rows = [report, ...inMemoryDriverReports.filter((entry: any) => entry.id !== report.id)].slice(0, 1500);
-      await persistDriverReportsToDb(rows);
+      await persistDriverReportsToDb(rows, true);
       broadcastDriverReportEvent('report_upserted', report);
       broadcastCrewSyncEvent('crew_report', report?.scheduleId);
     },
@@ -6486,398 +6643,6 @@ Berikan 3 rekomendasi optimasi tata letak dan pengelompokan kategori barang saat
     } catch (err: any) {
       console.error('[MySQL fuel_logs DELETE error]:', err?.message || err);
       return res.status(503).json({ success: false, error: err?.message || 'Gagal menghapus log BBM di MySQL' });
-    }
-  });
-
-  // REST API for Spare Parts & Component Usages (Centralized MySQL + cross-user visibility for Super Admin)
-  const requireSparePartsWrite = requireModuleWrite(
-    'logistics',
-    ['spareparts', 'maintenance_costs', 'fleets'],
-    ['super_admin', 'dispatcher', 'spv_logistik', 'operasional', 'koordinator_driver', 'pengiriman', 'warehouse_admin', 'koordinator_gudang']
-  );
-  let inMemorySpareParts: any[] = [];
-  let inMemorySparePartUsages: any[] = [];
-
-  const hydratePreviewSparePartsFromDisk = () => {
-    const savedParts = readPersistentAppState('spare_parts_v1');
-    if (inMemorySpareParts.length === 0 && Array.isArray(savedParts)) {
-      inMemorySpareParts = savedParts;
-    }
-    const savedUsages = readPersistentAppState('spare_part_usages_v1');
-    if (inMemorySparePartUsages.length === 0 && Array.isArray(savedUsages)) {
-      inMemorySparePartUsages = savedUsages;
-    }
-  };
-
-  app.get("/api/spare-parts", requireAuth, async (_req, res) => {
-    try {
-      if (isDatabaseConfigured()) {
-        const [partRows, usageRows] = await Promise.all([
-          mysqlQuery<any[]>("SELECT * FROM spare_parts ORDER BY created_at DESC"),
-          mysqlQuery<any[]>("SELECT * FROM spare_part_usages ORDER BY replacement_date DESC, created_at DESC")
-        ]);
-        const parts = (Array.isArray(partRows) ? partRows : []).map((r) => {
-          const extra = parseJsonColumn(r.payload_json) || {};
-          return {
-            ...extra,
-            id: r.id,
-            partNumber: extra.partNumber || r.code || '',
-            name: extra.name || r.name || '',
-            category: extra.category || r.category || 'lainnya',
-            stock: Number(extra.stock ?? r.stock ?? 0),
-            minStock: Number(extra.minStock ?? r.min_stock ?? 3),
-            costPerUnit: Number(extra.costPerUnit ?? r.unit_price ?? 0),
-            unit: extra.unit || 'Unit',
-            compatibleVehicles: extra.compatibleVehicles || 'Semua Armada',
-            storageLocation: extra.storageLocation || r.supplier || 'Gudang Logistik',
-            lastRestockDate: extra.lastRestockDate || (r.created_at ? String(r.created_at).slice(0, 10) : '')
-          };
-        });
-        const usages = (Array.isArray(usageRows) ? usageRows : []).map((r) => {
-          const extra = parseJsonColumn(r.payload_json) || {};
-          return {
-            ...extra,
-            id: r.id,
-            fleetId: extra.fleetId || r.fleet_id,
-            plateNumber: extra.plateNumber || r.plate_number,
-            partId: extra.partId || r.part_id || '',
-            partName: extra.partName || r.part_name,
-            category: extra.category || r.category,
-            quantity: Number(extra.quantity ?? r.quantity ?? 1),
-            replacementDate: extra.replacementDate || r.replacement_date,
-            odometerKm: Number(extra.odometerKm ?? r.odometer_km ?? 0),
-            totalCost: Number(extra.totalCost ?? r.total_cost ?? 0),
-            performedBy: extra.performedBy || r.performed_by || '-'
-          };
-        });
-        inMemorySpareParts = parts;
-        inMemorySparePartUsages = usages;
-        return res.json({ success: true, source: 'hostinger_mysql', parts, usages });
-      }
-      hydratePreviewSparePartsFromDisk();
-      return res.json({
-        success: true,
-        source: 'disk_fallback',
-        parts: inMemorySpareParts,
-        usages: inMemorySparePartUsages
-      });
-    } catch (err: any) {
-      if (isDatabaseConfigured()) {
-        return res.status(503).json({
-          success: false,
-          error: err?.message || 'Gagal membaca data sparepart dari MySQL'
-        });
-      }
-      hydratePreviewSparePartsFromDisk();
-      return res.json({
-        success: true,
-        source: 'disk_fallback',
-        parts: inMemorySpareParts,
-        usages: inMemorySparePartUsages
-      });
-    }
-  });
-
-  app.post("/api/spare-parts", requireSparePartsWrite, express.json({ limit: '5mb' }), async (req, res) => {
-    const body = req.body || {};
-    const name = String(body.name || '').trim();
-    if (!name) {
-      return res.status(400).json({ success: false, error: 'Nama sparepart wajib diisi.' });
-    }
-    const id = String(body.id || `sp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`).trim().slice(0, 64);
-    const code = String(body.partNumber || id).trim().slice(0, 50) || id.slice(0, 50);
-    const authUser = (req as any).authUser;
-    const actorName = String(authUser?.full_name || authUser?.fullName || body.createdBy || 'Staff Logistik').trim();
-    const record = {
-      ...body,
-      id,
-      name,
-      partNumber: code,
-      category: String(body.category || 'lainnya'),
-      unit: String(body.unit || 'Unit'),
-      stock: Math.max(0, Math.round(Number(body.stock) || 0)),
-      minStock: Math.max(0, Math.round(Number(body.minStock) || 0)),
-      costPerUnit: Math.max(0, Number(body.costPerUnit) || 0),
-      compatibleVehicles: String(body.compatibleVehicles || 'Semua Armada'),
-      storageLocation: String(body.storageLocation || 'Gudang Logistik'),
-      lastRestockDate: String(body.lastRestockDate || new Date().toISOString().slice(0, 10)),
-      createdBy: body.createdBy || actorName,
-      updatedAt: new Date().toISOString()
-    };
-
-    if (!isDatabaseConfigured()) {
-      hydratePreviewSparePartsFromDisk();
-      inMemorySpareParts = [record, ...inMemorySpareParts.filter((p) => p.id !== id)];
-      writePersistentAppState('spare_parts_v1', inMemorySpareParts);
-      return res.json({ success: true, source: 'disk_fallback', data: record });
-    }
-
-    try {
-      await mysqlQuery(
-        `INSERT INTO spare_parts (id, code, name, category, stock, min_stock, unit_price, supplier, payload_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE
-           code=VALUES(code),
-           name=VALUES(name),
-           category=VALUES(category),
-           stock=VALUES(stock),
-           min_stock=VALUES(min_stock),
-           unit_price=VALUES(unit_price),
-           supplier=VALUES(supplier),
-           payload_json=VALUES(payload_json)`,
-        [
-          id,
-          code,
-          name.slice(0, 191),
-          record.category.slice(0, 100),
-          record.stock,
-          record.minStock,
-          record.costPerUnit,
-          record.storageLocation.slice(0, 191),
-          JSON.stringify(record)
-        ]
-      );
-      inMemorySpareParts = [record, ...inMemorySpareParts.filter((p) => p.id !== id)];
-      return res.json({ success: true, source: 'hostinger_mysql', data: record });
-    } catch (err: any) {
-      return res.status(503).json({ success: false, error: err?.message || 'Gagal menyimpan sparepart ke MySQL' });
-    }
-  });
-
-  app.put("/api/spare-parts/:id", requireSparePartsWrite, express.json({ limit: '5mb' }), async (req, res) => {
-    const id = String(req.params.id || '').trim().slice(0, 64);
-    const body = req.body || {};
-    if (!id) return res.status(400).json({ success: false, error: 'ID sparepart tidak valid.' });
-
-    if (!isDatabaseConfigured()) {
-      hydratePreviewSparePartsFromDisk();
-      const existing = inMemorySpareParts.find((p) => p.id === id) || {};
-      const updated = { ...existing, ...body, id, updatedAt: new Date().toISOString() };
-      inMemorySpareParts = inMemorySpareParts.some((p) => p.id === id)
-        ? inMemorySpareParts.map((p) => (p.id === id ? updated : p))
-        : [updated, ...inMemorySpareParts];
-      writePersistentAppState('spare_parts_v1', inMemorySpareParts);
-      return res.json({ success: true, source: 'disk_fallback', data: updated });
-    }
-
-    try {
-      const existingRows = await mysqlQuery<any[]>("SELECT * FROM spare_parts WHERE id = ? LIMIT 1", [id]);
-      const existingRow = Array.isArray(existingRows) && existingRows[0] ? existingRows[0] : null;
-      const existingPayload = existingRow ? (parseJsonColumn(existingRow.payload_json) || {}) : {};
-      const updated = {
-        ...existingPayload,
-        ...body,
-        id,
-        name: String(body.name ?? existingPayload.name ?? existingRow?.name ?? 'Sparepart').slice(0, 191),
-        partNumber: String(body.partNumber ?? existingPayload.partNumber ?? existingRow?.code ?? id).slice(0, 50),
-        category: String(body.category ?? existingPayload.category ?? existingRow?.category ?? 'lainnya').slice(0, 100),
-        stock: Math.max(0, Math.round(Number(body.stock ?? existingPayload.stock ?? existingRow?.stock ?? 0))),
-        minStock: Math.max(0, Math.round(Number(body.minStock ?? existingPayload.minStock ?? existingRow?.min_stock ?? 0))),
-        costPerUnit: Math.max(0, Number(body.costPerUnit ?? existingPayload.costPerUnit ?? existingRow?.unit_price ?? 0)),
-        storageLocation: String(body.storageLocation ?? existingPayload.storageLocation ?? existingRow?.supplier ?? 'Gudang Logistik').slice(0, 191),
-        updatedAt: new Date().toISOString()
-      };
-      await mysqlQuery(
-        `INSERT INTO spare_parts (id, code, name, category, stock, min_stock, unit_price, supplier, payload_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE
-           code=VALUES(code),
-           name=VALUES(name),
-           category=VALUES(category),
-           stock=VALUES(stock),
-           min_stock=VALUES(min_stock),
-           unit_price=VALUES(unit_price),
-           supplier=VALUES(supplier),
-           payload_json=VALUES(payload_json)`,
-        [
-          id,
-          updated.partNumber,
-          updated.name,
-          updated.category,
-          updated.stock,
-          updated.minStock,
-          updated.costPerUnit,
-          updated.storageLocation,
-          JSON.stringify(updated)
-        ]
-      );
-      inMemorySpareParts = inMemorySpareParts.some((p) => p.id === id)
-        ? inMemorySpareParts.map((p) => (p.id === id ? updated : p))
-        : [updated, ...inMemorySpareParts];
-      return res.json({ success: true, source: 'hostinger_mysql', data: updated });
-    } catch (err: any) {
-      return res.status(503).json({ success: false, error: err?.message || 'Gagal memperbarui sparepart di MySQL' });
-    }
-  });
-
-  app.post("/api/spare-parts/:id/restock", requireSparePartsWrite, express.json({ limit: '2mb' }), async (req, res) => {
-    const id = String(req.params.id || '').trim().slice(0, 64);
-    const amount = Math.round(Number(req.body?.amount) || 0);
-    const notes = String(req.body?.notes || '').trim();
-    if (!id || amount <= 0) {
-      return res.status(400).json({ success: false, error: 'Jumlah restock harus lebih dari 0.' });
-    }
-    const today = new Date().toISOString().slice(0, 10);
-
-    if (!isDatabaseConfigured()) {
-      hydratePreviewSparePartsFromDisk();
-      let updatedPart: any = null;
-      inMemorySpareParts = inMemorySpareParts.map((p) => {
-        if (p.id !== id) return p;
-        updatedPart = { ...p, stock: Math.max(0, Number(p.stock || 0) + amount), lastRestockDate: today, notes: notes || p.notes };
-        return updatedPart;
-      });
-      writePersistentAppState('spare_parts_v1', inMemorySpareParts);
-      return res.json({ success: true, source: 'disk_fallback', data: updatedPart });
-    }
-
-    try {
-      const rows = await mysqlQuery<any[]>("SELECT * FROM spare_parts WHERE id = ? LIMIT 1", [id]);
-      const row = Array.isArray(rows) && rows[0] ? rows[0] : null;
-      if (!row) return res.status(404).json({ success: false, error: 'Master sparepart tidak ditemukan.' });
-      const extra = parseJsonColumn(row.payload_json) || {};
-      const nextStock = Math.max(0, Number(extra.stock ?? row.stock ?? 0) + amount);
-      const updated = {
-        ...extra,
-        id,
-        name: extra.name || row.name,
-        partNumber: extra.partNumber || row.code,
-        category: extra.category || row.category,
-        stock: nextStock,
-        lastRestockDate: today,
-        notes: notes || extra.notes || ''
-      };
-      await mysqlQuery(
-        "UPDATE spare_parts SET stock = ?, payload_json = ? WHERE id = ?",
-        [nextStock, JSON.stringify(updated), id]
-      );
-      inMemorySpareParts = inMemorySpareParts.map((p) => (p.id === id ? updated : p));
-      return res.json({ success: true, source: 'hostinger_mysql', data: updated });
-    } catch (err: any) {
-      return res.status(503).json({ success: false, error: err?.message || 'Gagal restock sparepart di MySQL' });
-    }
-  });
-
-  app.delete("/api/spare-parts/:id", requireSparePartsWrite, async (req, res) => {
-    const id = String(req.params.id || '').trim();
-    if (!isDatabaseConfigured()) {
-      hydratePreviewSparePartsFromDisk();
-      inMemorySpareParts = inMemorySpareParts.filter((p) => p.id !== id);
-      writePersistentAppState('spare_parts_v1', inMemorySpareParts);
-      return res.json({ success: true, source: 'disk_fallback' });
-    }
-    try {
-      await mysqlQuery("DELETE FROM spare_parts WHERE id = ?", [id]);
-      inMemorySpareParts = inMemorySpareParts.filter((p) => p.id !== id);
-      return res.json({ success: true, source: 'hostinger_mysql' });
-    } catch (err: any) {
-      return res.status(503).json({ success: false, error: err?.message || 'Gagal menghapus sparepart di MySQL' });
-    }
-  });
-
-  app.post("/api/spare-part-usages", requireSparePartsWrite, express.json({ limit: '5mb' }), async (req, res) => {
-    const body = req.body || {};
-    const id = String(body.id || `usg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`).trim().slice(0, 64);
-    const authUser = (req as any).authUser;
-    const actorName = String(authUser?.full_name || authUser?.fullName || body.performedBy || 'Staff Logistik').trim();
-    const record = {
-      ...body,
-      id,
-      fleetId: String(body.fleetId || ''),
-      plateNumber: String(body.plateNumber || '-'),
-      partId: String(body.partId || ''),
-      partName: String(body.partName || 'Komponen Rutin'),
-      category: String(body.category || 'lainnya'),
-      quantity: Math.max(1, Math.round(Number(body.quantity) || 1)),
-      unit: String(body.unit || 'Unit'),
-      replacementDate: String(body.replacementDate || new Date().toISOString().slice(0, 10)),
-      odometerKm: Math.max(0, Math.round(Number(body.odometerKm) || 0)),
-      totalCost: Math.max(0, Number(body.totalCost) || 0),
-      performedBy: String(body.performedBy || actorName),
-      createdAt: body.createdAt || new Date().toISOString()
-    };
-
-    if (!isDatabaseConfigured()) {
-      hydratePreviewSparePartsFromDisk();
-      inMemorySparePartUsages = [record, ...inMemorySparePartUsages.filter((u) => u.id !== id)];
-      if (record.partId) {
-        inMemorySpareParts = inMemorySpareParts.map((p) =>
-          p.id === record.partId ? { ...p, stock: Math.max(0, Number(p.stock || 0) - record.quantity) } : p
-        );
-        writePersistentAppState('spare_parts_v1', inMemorySpareParts);
-      }
-      writePersistentAppState('spare_part_usages_v1', inMemorySparePartUsages);
-      return res.json({ success: true, source: 'disk_fallback', data: record });
-    }
-
-    try {
-      await mysqlQuery(
-        `INSERT INTO spare_part_usages (id, fleet_id, plate_number, part_id, part_name, category, quantity, replacement_date, odometer_km, total_cost, performed_by, payload_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE
-           fleet_id=VALUES(fleet_id),
-           plate_number=VALUES(plate_number),
-           part_id=VALUES(part_id),
-           part_name=VALUES(part_name),
-           category=VALUES(category),
-           quantity=VALUES(quantity),
-           replacement_date=VALUES(replacement_date),
-           odometer_km=VALUES(odometer_km),
-           total_cost=VALUES(total_cost),
-           performed_by=VALUES(performed_by),
-           payload_json=VALUES(payload_json)`,
-        [
-          id,
-          record.fleetId.slice(0, 64),
-          record.plateNumber.slice(0, 32),
-          record.partId ? record.partId.slice(0, 64) : null,
-          record.partName.slice(0, 191),
-          record.category.slice(0, 64),
-          record.quantity,
-          record.replacementDate.slice(0, 32),
-          record.odometerKm,
-          record.totalCost,
-          record.performedBy.slice(0, 191),
-          JSON.stringify(record)
-        ]
-      );
-
-      if (record.partId) {
-        const partRows = await mysqlQuery<any[]>("SELECT * FROM spare_parts WHERE id = ? LIMIT 1", [record.partId]);
-        if (Array.isArray(partRows) && partRows[0]) {
-          const pRow = partRows[0];
-          const extra = parseJsonColumn(pRow.payload_json) || {};
-          const nextStock = Math.max(0, Number(extra.stock ?? pRow.stock ?? 0) - record.quantity);
-          const nextPayload = { ...extra, id: record.partId, stock: nextStock };
-          await mysqlQuery("UPDATE spare_parts SET stock = ?, payload_json = ? WHERE id = ?", [
-            nextStock,
-            JSON.stringify(nextPayload),
-            record.partId
-          ]);
-        }
-      }
-
-      inMemorySparePartUsages = [record, ...inMemorySparePartUsages.filter((u) => u.id !== id)];
-      return res.json({ success: true, source: 'hostinger_mysql', data: record });
-    } catch (err: any) {
-      return res.status(503).json({ success: false, error: err?.message || 'Gagal menyimpan pemakaian sparepart ke MySQL' });
-    }
-  });
-
-  app.delete("/api/spare-part-usages/:id", requireSparePartsWrite, async (req, res) => {
-    const id = String(req.params.id || '').trim();
-    if (!isDatabaseConfigured()) {
-      hydratePreviewSparePartsFromDisk();
-      inMemorySparePartUsages = inMemorySparePartUsages.filter((u) => u.id !== id);
-      writePersistentAppState('spare_part_usages_v1', inMemorySparePartUsages);
-      return res.json({ success: true, source: 'disk_fallback' });
-    }
-    try {
-      await mysqlQuery("DELETE FROM spare_part_usages WHERE id = ?", [id]);
-      inMemorySparePartUsages = inMemorySparePartUsages.filter((u) => u.id !== id);
-      return res.json({ success: true, source: 'hostinger_mysql' });
-    } catch (err: any) {
-      return res.status(503).json({ success: false, error: err?.message || 'Gagal menghapus log sparepart di MySQL' });
     }
   });
 

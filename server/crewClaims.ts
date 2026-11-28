@@ -335,6 +335,13 @@ function validateAndNormalizeDepartureForm(raw: unknown, trip: any, actor: any, 
     }
     signatures[key] = val;
   }
+  const signerNames: Record<string, string> = {};
+  for (const key of DEPARTURE_SIGNATURE_KEYS) {
+    const rawName = clean(input.signerNames?.[key]);
+    if (rawName) {
+      signerNames[key] = rawName.slice(0, 140);
+    }
+  }
   const wibTime = new Date(now).toLocaleTimeString('id-ID', {
     hour: '2-digit',
     minute: '2-digit',
@@ -347,27 +354,23 @@ function validateAndNormalizeDepartureForm(raw: unknown, trip: any, actor: any, 
     year: 'numeric',
     timeZone: 'Asia/Jakarta'
   });
-  const branchRaw = clean(input.summary?.branchName) || (scheduleBranch(trip) === 'cab-sidoarjo' ? 'Cabang Sidoarjo' : 'Cabang Nusantara');
-  const depTimeRaw = clean(input.summary?.departureTime) || clean(trip?.departureTime) || wibTime;
   return {
     summary: {
-      branchName: branchRaw,
+      branchId: clean(input.summary?.branchId) || clean(trip?.branchId) || undefined,
+      branchName: clean(input.summary?.branchName) || undefined,
       driverName: clean(input.summary?.driverName) || clean(trip?.portalCrew?.name || trip?.crew?.name) || '-',
       helperName: clean(input.summary?.helperName) || clean(trip?.portalCrewHelper?.name || trip?.crewHelper?.name) || '-',
       fleetLabel: clean(input.summary?.fleetLabel) || clean(trip?.fleet?.initialCode || trip?.armada || trip?.fleet?.plateNumber) || '-',
-      departureTime: depTimeRaw,
+      departureTime: clean(input.summary?.departureTime) || clean(trip?.departureTime) || '-',
       areaName: clean(input.summary?.areaName) || clean(trip?.areaName || trip?.store?.storeName) || '-',
       recordedAt: now,
       recordedAtWib: clean(input.summary?.recordedAtWib) || `${wibTime} WIB · ${wibDate}`
     },
-    signerSelections: input.signerSelections && typeof input.signerSelections === 'object'
-      ? {
-          spvLogistik: clean(input.signerSelections.spvLogistik),
-          spvOperasional: clean(input.signerSelections.spvOperasional),
-          security: clean(input.signerSelections.security),
-          crew: clean(input.signerSelections.crew)
-        }
-      : undefined,
+    checks: {
+      waybillMatch: true,
+      documentsReady: true
+    },
+    signerNames,
     signatures,
     signedAt: now,
     signedBy: clean(actor?.full_name || actor?.fullName) || 'Kru AKK',
@@ -376,6 +379,12 @@ function validateAndNormalizeDepartureForm(raw: unknown, trip: any, actor: any, 
 }
 
 export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): void {
+  const hasDirectBranchPerms = (actor: any): boolean => {
+    const permissions = jsonValue(actor?.permissions_json ?? actor?.permissions) || {};
+    const rawPerBranch = permissions.branchPermissions;
+    return Boolean(rawPerBranch && typeof rawPerBranch === 'object' && Object.keys(rawPerBranch).length > 0);
+  };
+
   const readBranchStateUserPerms = async (userId: string): Promise<Record<string, any> | null> => {
     if (!userId) return null;
     try {
@@ -393,6 +402,11 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
       }
     } catch {}
     return null;
+  };
+
+  const resolveActorBranchPerms = async (actor: any): Promise<Record<string, any> | null> => {
+    if (actor?.role === 'super_admin' || hasDirectBranchPerms(actor)) return null;
+    return readBranchStateUserPerms(clean(actor?.id));
   };
 
   const readSchedulesPayload = async (): Promise<any> => {
@@ -466,8 +480,13 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
         const branch = scheduleBranch(s);
         // V70 prebuild anchor: branchAllowed(actor, branch)
         if (!branch || !checkBranch(branch)) return false;
-        // Do not hide an unfinished assignment merely because it is outside the normal date window.
-        if (ALLOWED_CREW_ROLES.has(String(actor.role)) && clean(s.status).toLowerCase() !== 'delivered' && currentCrewPosition(s, actor)) return true;
+        // Always include active assignments and recently arrived / pending-KM-end assignments for the actor.
+        if (ALLOWED_CREW_ROLES.has(String(actor.role)) && currentCrewPosition(s, actor)) {
+          if (clean(s.status).toLowerCase() !== 'delivered') return true;
+          if (!clean(s.crewOdometerEnd)) return true;
+          const arrivedMs = s.actualArrival ? new Date(s.actualArrival).getTime() : 0;
+          if (arrivedMs > Date.now() - 14 * 86400000) return true;
+        }
         const date = new Date(s.departureDate || s.deliveryDate || 0).getTime();
         return date > earliest && date < latest;
       });
@@ -490,33 +509,7 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
             latitude: Number(r.gpsLatitude), longitude: Number(r.gpsLongitude), accuracy: Number(r.gpsAccuracy || 0)
           } : undefined
         }));
-      const isSuperAdmin = String(actor.role || '') === 'super_admin';
-      const portalSchedules = ownBranch.map((row: any) => {
-        const sanitized = sanitizeScheduleForPortal(row);
-        if (isSuperAdmin) return sanitized;
-        const compactEvents = Array.isArray(sanitized.crewFieldEvents)
-          ? sanitized.crewFieldEvents.slice(-10)
-          : undefined;
-        const compactChecklist = Array.isArray(sanitized.crewInspectionChecklist)
-          ? sanitized.crewInspectionChecklist.map((c: any) =>
-              c && typeof c === 'object' ? { ...c, photo: undefined } : c
-            )
-          : undefined;
-        const compactDeparture = sanitized.departureValidation && typeof sanitized.departureValidation === 'object'
-          ? {
-              ...sanitized.departureValidation,
-              signatures: undefined,
-              signaturesAttached: Boolean(sanitized.departureValidation.signatures)
-            }
-          : undefined;
-        return {
-          ...sanitized,
-          crewFieldEvents: compactEvents,
-          crewInspectionChecklist: compactChecklist,
-          departureValidation: compactDeparture,
-          podPhotoUrl: undefined
-        };
-      });
+      const portalSchedules = ownBranch.map(sanitizeScheduleForPortal);
       return res.json({ success: true, schedules: portalSchedules, reports: reportMeta });
     } catch (error: any) { return res.status(Number(error?.status) || 503).json({ success: false, error: 'Jadwal tidak dapat dibaca dari database.' }); }
   });
@@ -585,7 +578,13 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
           await conn.execute('UPDATE schedules SET crew_id=?,crew_helper_id=?,payload_json=?,updated_at=NOW() WHERE id=?',
             [trip.crewId || null, trip.crewHelperId || null, JSON.stringify(trip), trip.id]);
         }
-        return { scheduleId: trip.id, slot, crew: { id: crew.id, name: crew.name }, version: trip.crewClaimVersion };
+        return {
+          scheduleId: trip.id,
+          slot,
+          crew: { id: crew.id, name: crew.name },
+          version: trip.crewClaimVersion,
+          schedule: sanitizeScheduleForPortal(trip)
+        };
       });
       return res.json({ success: true, ...result });
     } catch (error: any) {
@@ -603,11 +602,12 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
     if (!gps) return res.status(422).json({ success: false, error: 'GPS aktual diperlukan. Aktifkan izin lokasi.' });
     if (!isDatabaseConfigured() && !isPreviewRuntime) return res.status(503).json({ success: false, error: 'Database belum siap.' });
     try {
+      const actorBranchStatePerms = await resolveActorBranchPerms(actor);
       const { result } = await mutateSchedulesPayload(async (payload, conn) => {
         const trip = payload.schedules.find((s: any) => clean(s?.id) === clean(req.params.id));
         if (!trip) throw Object.assign(new Error('Kiriman tidak ditemukan.'), { status: 404 });
         const branchId = scheduleBranch(trip);
-        if (!branchId || !branchAllowed(actor, branchId, true)) throw Object.assign(new Error('Akses cabang tidak sesuai.'), { status: 403 });
+        if (!branchId || !branchAllowed(actor, branchId, true, actorBranchStatePerms)) throw Object.assign(new Error('Akses cabang tidak sesuai.'), { status: 403 });
         const role = currentCrewPosition(trip, actor);
         if (!role) throw Object.assign(new Error('Kamu belum terdaftar di kiriman ini.'), { status: 403 });
         if (!trip.crewId || !trip.crewHelperId) throw Object.assign(new Error('Driver dan Helper harus lengkap.'), { status: 409 });
@@ -621,6 +621,7 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
         trip.status = action === 'depart' ? 'in_transit' : 'delivered';
         if (action === 'depart') trip.actualDeparture = now;
         else trip.actualArrival = now;
+        trip.crewClaimVersion = Number(trip.crewClaimVersion || 0) + 1;
         trip.crewFieldEvents = (Array.isArray(trip.crewFieldEvents) ? trip.crewFieldEvents : []).slice(-(MAX_REPORT_EVENTS - 1));
         trip.crewFieldEvents.push({ action, actorId: clean(actor.id), actorName: clean(actor.full_name), position: role, gps, at: now });
         trip.updatedAt = now;
@@ -629,17 +630,26 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
           await conn.execute('UPDATE schedules SET status=?,actual_arrival=?,payload_json=?,updated_at=NOW() WHERE id=?',
             [trip.status, trip.actualArrival ? new Date(trip.actualArrival).toISOString().slice(0, 19).replace('T', ' ') : null, JSON.stringify(trip), trip.id]);
         }
-        return { scheduleId: trip.id, action, status: trip.status, at: now, gpsAccuracy: gps.accuracy, tripSnapshot: JSON.parse(JSON.stringify(trip)) };
+        const sanitized = sanitizeScheduleForPortal(trip);
+        return {
+          scheduleId: trip.id,
+          action,
+          status: trip.status,
+          at: now,
+          gpsAccuracy: gps.accuracy,
+          schedule: sanitized,
+          tripSnapshot: JSON.parse(JSON.stringify(trip))
+        };
       });
       if (opts.upsertDepartureShift && result.tripSnapshot) {
         const snapshot = result.tripSnapshot;
-        const actionAt = result.at;
+        const atTime = result.at;
         setImmediate(() => {
-          void opts.upsertDepartureShift!({
+          opts.upsertDepartureShift?.({
             trip: snapshot,
             action,
             actor,
-            now: actionAt,
+            now: atTime,
             gps
           }).catch(err => console.warn('[Crew Shift Sync Warning]', err?.message || err));
         });
@@ -661,11 +671,12 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
     if (!gps) return res.status(422).json({ success: false, error: 'Lokasi GPS aktual wajib diperoleh sebelum menyimpan.' });
     if (!isDatabaseConfigured() && !isPreviewRuntime) return res.status(503).json({ success: false, error: 'Database belum terhubung.' });
     try {
+      const actorBranchStatePerms = await resolveActorBranchPerms(actor);
       const { result } = await mutateSchedulesPayload(async (payload, conn) => {
         const trip = payload.schedules.find((s: any) => clean(s?.id) === clean(req.params.id));
         if (!trip) throw Object.assign(new Error('Kiriman tidak ditemukan.'), { status: 404 });
         const branch = scheduleBranch(trip);
-        if (!branch || !branchAllowed(actor, branch, true)) throw Object.assign(new Error('Akses cabang ditolak.'), { status: 403 });
+        if (!branch || !branchAllowed(actor, branch, true, actorBranchStatePerms)) throw Object.assign(new Error('Akses cabang ditolak.'), { status: 403 });
         const slot = currentCrewPosition(trip, actor);
         if (!slot) throw Object.assign(new Error('Belum mengambil posisi pada kiriman ini.'), { status: 403 });
         const tripStatusLower = String(trip.status || 'scheduled').toLowerCase();
@@ -713,6 +724,7 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
           }
           trip.crewWaybillValidated = true;
         }
+        trip.crewClaimVersion = Number(trip.crewClaimVersion || 0) + 1;
         trip.crewFieldEvents = (Array.isArray(trip.crewFieldEvents) ? trip.crewFieldEvents : []).slice(-(MAX_REPORT_EVENTS - 1));
         trip.crewFieldEvents.push({
           action: task, actorId: clean(actor.id), actorName: clean(actor.full_name), position: slot,
@@ -723,28 +735,37 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
         if (conn) {
           await conn.execute('UPDATE schedules SET payload_json=?,updated_at=NOW() WHERE id=?', [JSON.stringify(trip), trip.id]);
         }
+        const lightweightSchedule = sanitizeScheduleForPortal(trip);
+        if (Array.isArray(lightweightSchedule.crewInspectionChecklist)) {
+          lightweightSchedule.crewInspectionChecklist = lightweightSchedule.crewInspectionChecklist.map((it: any) => {
+            if (!it || typeof it !== 'object') return it;
+            const { photo: _omitPhoto, ...restItem } = it;
+            return restItem;
+          });
+        }
         return {
           task,
           at: now,
+          schedule: lightweightSchedule,
           normalizedChecklist,
           tripSnapshot: task === 'inspection' ? JSON.parse(JSON.stringify(trip)) : undefined
         };
       });
       if (task === 'inspection' && opts.syncFleetChecklist && result.tripSnapshot && result.normalizedChecklist) {
         const snapshot = result.tripSnapshot;
-        const normalizedChecklist = result.normalizedChecklist;
-        const taskAt = result.at;
+        const checklistCopy = result.normalizedChecklist;
+        const atTime = result.at;
         setImmediate(() => {
-          void opts.syncFleetChecklist!({
+          opts.syncFleetChecklist?.({
             trip: snapshot,
             actor,
-            checklist: normalizedChecklist,
+            checklist: checklistCopy,
             odometerKm: Number(snapshot.crewOdometerStart || 0),
-            now: taskAt
+            now: atTime
           }).catch(err => console.warn('[Crew Checklist Sync Warning]', err?.message || err));
         });
       }
-      return res.json({ success: true, task: result.task, at: result.at });
+      return res.json({ success: true, task: result.task, at: result.at, schedule: result.schedule });
     } catch (e: any) {
       const status = Number(e?.status) || 503;
       return res.status(status).json({ success: false, error: status === 503 ? 'Gagal menyimpan tugas di database.' : e.message });
@@ -805,11 +826,14 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
     const finalPhotoUrls = validatedPhotoUrls.length > 0 ? validatedPhotoUrls : (photo ? [photo] : []);
     if (!isDatabaseConfigured() && !isPreviewRuntime) return res.status(503).json({ success: false, error: 'Database belum terhubung.' });
     try {
-      const payload = await readSchedulesPayload();
+      const [payload, actorBranchStatePerms] = await Promise.all([
+        readSchedulesPayload(),
+        resolveActorBranchPerms(actor)
+      ]);
       const trip = (Array.isArray(payload?.schedules) ? payload.schedules : []).find((s: any) => clean(s?.id) === clean(req.params.id));
       if (!trip) return res.status(404).json({ success: false, error: 'Kiriman tidak ditemukan.' });
       const branch = scheduleBranch(trip);
-      if (!branch || !branchAllowed(actor, branch, true)) return res.status(403).json({ success: false, error: 'Cabang tidak sesuai akun.' });
+      if (!branch || !branchAllowed(actor, branch, true, actorBranchStatePerms)) return res.status(403).json({ success: false, error: 'Cabang tidak sesuai akun.' });
       const position = currentCrewPosition(trip, actor);
       if (!position) return res.status(403).json({ success: false, error: 'Belum mengambil posisi pada kiriman.' });
       if (position === 'driver' && ['toko', 'retur', 'form_kirim'].includes(kind) || position === 'helper' && kind === 'bbm') {
@@ -873,7 +897,20 @@ export function registerCrewClaimRoutes(app: Express, opts: CrewApiOptions): voi
         source: 'crew_v65'
       };
       await opts.saveReport(row);
-      return res.json({ success: true, reportId: row.id });
+      return res.json({
+        success: true,
+        reportId: row.id,
+        report: {
+          id: row.id,
+          scheduleId: trip.id,
+          type: kind,
+          note: reportNotes,
+          by: row.actorName,
+          at: timestamp,
+          photoAttached: finalPhotoUrls.length > 0,
+          gps
+        }
+      });
     } catch (error: any) { return res.status(503).json({ success: false, error: 'Laporan gagal disimpan.' }); }
   });
 

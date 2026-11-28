@@ -1016,7 +1016,16 @@ export const DriverReportsManagement: React.FC = () => {
   // Data Laporan Check-In & Check-Out Terpadu + Ketepatan Waktu vs Target Jadwal (Terintegrasi dengan Modal Buat Kiriman)
   const checkinCheckoutSummary = useMemo(() => {
     const parseClockMinutes = (raw?: string): number | null => {
-      if (!raw || raw === '-' || raw === 'Belum Check-Out' || raw === 'Belum Check-In') return null;
+      if (
+        !raw ||
+        raw === '-' ||
+        raw === 'Belum Check-Out' ||
+        raw === 'Belum Check-In' ||
+        raw === 'Belum Berangkat' ||
+        raw === 'Belum Tiba'
+      ) {
+        return null;
+      }
       const trimmed = String(raw).trim();
       // 1. Format HH:MM atau HH.MM langsung (tanpa T / timestamp ISO)
       if (!trimmed.includes('T')) {
@@ -1059,6 +1068,29 @@ export const DriverReportsManagement: React.FC = () => {
       const hh = Math.floor(normalized / 60);
       const mm = normalized % 60;
       return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+    };
+
+    const formatIsoOrClockToWib = (raw?: string): string => {
+      if (
+        !raw ||
+        raw === '-' ||
+        raw === 'Belum Check-Out' ||
+        raw === 'Belum Check-In' ||
+        raw === 'Belum Berangkat' ||
+        raw === 'Belum Tiba'
+      ) {
+        return '-';
+      }
+      const trimmed = String(raw).trim();
+      if (!trimmed.includes('T') && !/(?:Z|[+-]\d{2}:?\d{2})$/i.test(trimmed)) {
+        const clockMatch = trimmed.match(/^(\d{1,2})[:.](\d{2})(?:\s*WIB)?$/i);
+        if (clockMatch) {
+          return `${clockMatch[1].padStart(2, '0')}:${clockMatch[2]} WIB`;
+        }
+      }
+      const mins = parseClockMinutes(trimmed);
+      if (mins !== null) return `${formatMinutesHHMM(mins)} WIB`;
+      return '-';
     };
 
     const formatDiffMinutes = (diffMins: number): string => {
@@ -1280,6 +1312,32 @@ export const DriverReportsManagement: React.FC = () => {
       const targetDepartureLabel = `${formatMinutesHHMM(targetDepMinutes)} WIB`;
       const targetReturnLabel = `${formatMinutesHHMM(targetArrMinutes)} WIB`;
 
+      const scheduleActualDepWib = formatIsoOrClockToWib(matchedSchedule?.actualDeparture);
+      const scheduleActualArrWib = formatIsoOrClockToWib(matchedSchedule?.actualArrival);
+
+      const resolvedCheckinTime =
+        base.checkinTime && base.checkinTime !== '-'
+          ? base.checkinTime
+          : scheduleActualDepWib !== '-'
+          ? scheduleActualDepWib
+          : '-';
+
+      const resolvedCheckoutTime =
+        base.checkoutTime && base.checkoutTime !== '-'
+          ? base.checkoutTime
+          : scheduleActualArrWib !== '-'
+          ? scheduleActualArrWib
+          : '-';
+
+      const resolvedStatus: CheckinRow['status'] =
+        resolvedCheckoutTime !== '-' || matchedSchedule?.status === 'delivered'
+          ? 'selesai_shift'
+          : resolvedCheckinTime !== '-' || matchedSchedule?.status === 'in_transit' || base.status === 'sedang_bertugas'
+          ? 'sedang_bertugas'
+          : 'belum_checkin';
+
+      const isNightTrip = sopTiming.isNightDeparture || targetDepMinutes >= 18 * 60;
+
       return {
         ...base,
         scheduleId: base.scheduleId || matchedSchedule?.id,
@@ -1287,10 +1345,13 @@ export const DriverReportsManagement: React.FC = () => {
         plateNumber: resolvedPlate,
         areaName: resolvedArea,
         helperName: helperName || '-',
+        checkinTime: resolvedCheckinTime,
+        checkoutTime: resolvedCheckoutTime,
+        status: resolvedStatus,
         targetDepartureLabel,
         targetReturnLabel,
-        checkinPunctuality: evalPunctuality(base.checkinTime, targetDepMinutes, sopTiming.isNightDeparture || targetDepMinutes >= 18 * 60),
-        checkoutPunctuality: evalPunctuality(base.checkoutTime, targetArrMinutes, false)
+        checkinPunctuality: evalPunctuality(resolvedCheckinTime, targetDepMinutes, isNightTrip),
+        checkoutPunctuality: evalPunctuality(resolvedCheckoutTime, targetArrMinutes, isNightTrip)
       };
     };
 
@@ -1389,6 +1450,15 @@ export const DriverReportsManagement: React.FC = () => {
       const schArea = sch.areaName || sch.store?.storeName || 'Operasional DC';
       const key = `sched-${sch.id}`;
       if (combinedMap.has(key)) return;
+      const schCheckin = formatIsoOrClockToWib(sch.actualDeparture);
+      const schCheckout = formatIsoOrClockToWib(sch.actualArrival);
+      const schStatus: CheckinRow['status'] =
+        schCheckout !== '-' || sch.status === 'delivered'
+          ? 'selesai_shift'
+          : schCheckin !== '-' || sch.status === 'in_transit'
+          ? 'sedang_bertugas'
+          : 'belum_checkin';
+
       combinedMap.set(
         key,
         buildRecord({
@@ -1402,9 +1472,9 @@ export const DriverReportsManagement: React.FC = () => {
           userRole: schDriver !== 'Belum Ditentukan' ? 'Driver' : 'Menunggu Kru',
           plateNumber: schPlate,
           areaName: schArea,
-          checkinTime: '-',
-          checkoutTime: '-',
-          status: sch.status === 'delivered' ? 'selesai_shift' : 'belum_checkin',
+          checkinTime: schCheckin,
+          checkoutTime: schCheckout,
+          status: schStatus,
           notes: sch.notes || `Jadwal terbit (${sch.trackingNumber})`
         })
       );
@@ -1519,25 +1589,24 @@ export const DriverReportsManagement: React.FC = () => {
     id: typeof activeSubMenu;
     label: string;
     count?: number;
-    Icon: React.ElementType;
+    icon: React.ReactNode;
   }> = [
-    { id: 'operasional', label: 'Kendala Lapangan', count: totalCount, Icon: AlertTriangle },
-    { id: 'absen_tim_kiriman', label: 'Absen Tim', count: absenTimKirimanCount, Icon: UserCheck },
-    { id: 'checkin_checkout', label: 'Check-In & Out', count: checkinCheckoutList.length, Icon: Clock },
-    { id: 'pengisian_bbm', label: 'Pengisian BBM', count: totalFuelReportsCount, Icon: Fuel },
-    { id: 'checklist_armada', label: 'Checklist Armada', Icon: ShieldCheck },
-    { id: 'peringatan_offline', label: 'GPS Form Kirim', count: formKirimGpsReportsList.length, Icon: Navigation },
-    { id: 'validasi_jadwal_portal', label: 'Validasi Jadwal', Icon: FileCheck2 },
-    { id: 'validasi_rute_form', label: 'Validasi Rute & Form', Icon: ShieldCheck },
-    { id: 'retur_muat_salah', label: 'Retur & Muat', count: returMuatCount, Icon: ShieldCheck }
+    { id: 'operasional', label: 'Kendala Lapangan', count: totalCount, icon: <AlertTriangle className="w-4 h-4 text-rose-500 shrink-0" /> },
+    { id: 'absen_tim_kiriman', label: 'Absen Tim', count: absenTimKirimanCount, icon: <UserCheck className="w-4 h-4 text-blue-600 shrink-0" /> },
+    { id: 'checkin_checkout', label: 'Check-In & Out', count: checkinCheckoutList.length, icon: <Clock className="w-4 h-4 text-sky-600 shrink-0" /> },
+    { id: 'pengisian_bbm', label: 'Pengisian BBM', count: totalFuelReportsCount, icon: <Fuel className="w-4 h-4 text-amber-600 shrink-0" /> },
+    { id: 'checklist_armada', label: 'Checklist Armada', icon: <ShieldCheck className="w-4 h-4 text-green-600 shrink-0" /> },
+    { id: 'peringatan_offline', label: 'GPS Form Kirim', count: formKirimGpsReportsList.length, icon: <Navigation className="w-4 h-4 text-indigo-600 shrink-0" /> },
+    { id: 'validasi_jadwal_portal', label: 'Validasi Jadwal', icon: <FileCheck2 className="w-4 h-4 text-indigo-600 shrink-0" /> },
+    { id: 'validasi_rute_form', label: 'Validasi Rute & Form', icon: <ShieldCheck className="w-4 h-4 text-blue-600 shrink-0" /> },
+    { id: 'retur_muat_salah', label: 'Retur & Muat', count: returMuatCount, icon: <ShieldCheck className="w-4 h-4 text-rose-500 shrink-0" /> }
   ];
 
   const activeLogisticsMenu = logisticsMenuItems.find(m => m.id === activeSubMenu) || logisticsMenuItems[0];
-  const ActiveLogisticsIcon = activeLogisticsMenu.Icon;
 
   return (
     <div className="akk-flat-reports w-full max-w-full bg-slate-50 dark:bg-[#0F172A] px-3 sm:px-6 py-5 space-y-5 animate-in fade-in duration-200">
-      {/* 1. Header Utama & Logo Minimalis */}
+      {/* 1. Header Utama & Menu Logistik (Flat / Modern Clean Design) */}
       <div className="bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] rounded-xl px-5 py-3.5 flex items-center justify-between gap-4 relative z-30">
         <div className="flex items-center gap-3 min-w-0">
           <AkkLogo size="md" showSubtitle subtitle="AKK Pengiriman · Logistik DC" />
@@ -1548,15 +1617,15 @@ export const DriverReportsManagement: React.FC = () => {
             type="button"
             onClick={() => setIsLogisticsMenuOpen(prev => !prev)}
             aria-expanded={isLogisticsMenuOpen}
-            className={`inline-flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-white dark:bg-[#162234] hover:bg-slate-50 dark:hover:bg-slate-800 border text-xs sm:text-sm font-semibold text-slate-800 dark:text-slate-100 transition-colors cursor-pointer whitespace-nowrap ${
+            className={`inline-flex items-center gap-2.5 px-4 py-2 rounded-xl border text-xs sm:text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
               isLogisticsMenuOpen
-                ? 'border-blue-600 text-blue-700 dark:text-blue-300'
-                : 'border-slate-200 dark:border-[#24344D]'
+                ? 'bg-slate-50 dark:bg-slate-800 border-blue-600 text-slate-900 dark:text-white'
+                : 'bg-white dark:bg-[#162234] hover:bg-slate-50 dark:hover:bg-slate-800 border-slate-200 dark:border-[#24344D] text-slate-800 dark:text-slate-100'
             }`}
           >
-            <ActiveLogisticsIcon className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+            {activeLogisticsMenu.icon}
             <span>Menu Logistik</span>
-            <span className="hidden sm:inline text-xs font-medium text-slate-300 dark:text-slate-600">|</span>
+            <span className="hidden sm:inline text-slate-300 dark:text-slate-600" aria-hidden="true">/</span>
             <span className="hidden sm:inline text-xs font-semibold text-blue-600 dark:text-blue-400">
               {activeLogisticsMenu.label}
             </span>
@@ -1566,14 +1635,13 @@ export const DriverReportsManagement: React.FC = () => {
           </button>
 
           {isLogisticsMenuOpen && (
-            <div className="absolute right-0 mt-2 w-72 rounded-xl bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] p-1.5 z-50">
-              <div className="px-3 py-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400 border-b border-slate-200/70 dark:border-slate-800 mb-1">
+            <div className="absolute right-0 mt-1.5 w-72 rounded-xl bg-white dark:bg-[#162234] border border-slate-200 dark:border-[#24344D] p-1.5 z-50">
+              <div className="px-3 py-2 text-xs font-semibold text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-800 mb-1">
                 Pilih Modul Laporan Logistik
               </div>
               <div className="space-y-0.5">
                 {logisticsMenuItems.map(item => {
                   const isActive = item.id === activeSubMenu;
-                  const ItemIcon = item.Icon;
                   return (
                     <button
                       key={item.id}
@@ -1582,33 +1650,27 @@ export const DriverReportsManagement: React.FC = () => {
                         setActiveSubMenu(item.id);
                         setIsLogisticsMenuOpen(false);
                       }}
-                      className={`w-full flex items-center justify-between gap-2.5 px-3 py-2 rounded-lg text-left text-xs font-semibold transition-colors cursor-pointer ${
+                      className={`w-full flex items-center justify-between gap-2.5 px-3 py-2 rounded-lg text-left text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
                         isActive
-                          ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-200/70 dark:border-blue-500/30'
-                          : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/70 border border-transparent'
+                          ? 'bg-blue-600 text-white [&_svg]:text-white'
+                          : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/70'
                       }`}
                     >
                       <span className="flex items-center gap-2.5 min-w-0">
-                        <ItemIcon
-                          className={`w-4 h-4 shrink-0 ${
-                            isActive ? 'text-blue-600 dark:text-blue-400' : 'text-slate-400 dark:text-slate-500'
-                          }`}
-                        />
+                        {item.icon}
                         <span className="truncate">{item.label}</span>
                       </span>
-                      <span className="flex items-center gap-1.5 shrink-0">
-                        {typeof item.count === 'number' && (
-                          <span
-                            className={`text-[11px] px-2 py-0.5 rounded-md font-mono tabular-nums ${
-                              isActive
-                                ? 'bg-blue-600 text-white'
-                                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-                            }`}
-                          >
-                            {item.count}
-                          </span>
-                        )}
-                      </span>
+                      {typeof item.count === 'number' && (
+                        <span
+                          className={`text-xs font-mono tabular-nums shrink-0 ${
+                            isActive
+                              ? 'text-blue-100'
+                              : 'text-slate-500 dark:text-slate-400'
+                          }`}
+                        >
+                          {item.count}
+                        </span>
+                      )}
                     </button>
                   );
                 })}
@@ -1670,9 +1732,9 @@ export const DriverReportsManagement: React.FC = () => {
                     'Area / Lokasi',
                     'Target Berangkat (WIB)',
                     'Target Pulang (WIB)',
-                    'Waktu Berangkat (Check-In)',
+                    'Waktu Berangkat',
                     'Ketepatan & Selisih Berangkat',
-                    'Waktu Tiba (Check-Out)',
+                    'Waktu Tiba',
                     'Ketepatan & Selisih Tiba',
                     'Status Shift'
                   ];
@@ -1693,7 +1755,7 @@ export const DriverReportsManagement: React.FC = () => {
                       ? 'Selesai Shift'
                       : item.status === 'sedang_bertugas'
                       ? 'Sedang Bertugas'
-                      : 'Terjadwal / Belum Check-In'
+                      : 'Terjadwal / Belum Berangkat'
                   ]);
                   const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
                   const link = document.createElement('a');
@@ -1703,7 +1765,7 @@ export const DriverReportsManagement: React.FC = () => {
                   link.click();
                   document.body.removeChild(link);
                 }}
-                className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold flex items-center gap-2 cursor-pointer transition"
+                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold flex items-center gap-2 cursor-pointer transition whitespace-nowrap"
               >
                 <FileSpreadsheet className="w-4 h-4" />
                 <span>Ekspor Excel</span>
@@ -1749,13 +1811,13 @@ export const DriverReportsManagement: React.FC = () => {
             >
               <div>
                 <span className="text-sm font-semibold text-slate-600 dark:text-slate-400 block">
-                  Terjadwal / Belum Check-In
+                  Terjadwal / Belum Berangkat
                 </span>
                 <div className="text-3xl font-bold text-blue-600 dark:text-blue-400 font-mono tabular-nums mt-1.5">
                   {checkinCheckoutSummary.counts.belumCheckin}
                 </div>
                 <span className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 block">
-                  Jadwal terbit menunggu absen kru
+                  Jadwal terbit menunggu keberangkatan
                 </span>
               </div>
               <div className="w-11 h-11 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
@@ -1780,7 +1842,7 @@ export const DriverReportsManagement: React.FC = () => {
                   {checkinCheckoutSummary.counts.sedangBertugas}
                 </div>
                 <span className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 block">
-                  Sudah Check-In, belum Check-Out
+                  Sudah berangkat, belum tiba
                 </span>
               </div>
               <div className="w-11 h-11 rounded-xl bg-amber-50 dark:bg-amber-500/15 border border-amber-200 dark:border-amber-500/30 flex items-center justify-center text-amber-600 dark:text-amber-400 shrink-0">
@@ -1805,7 +1867,7 @@ export const DriverReportsManagement: React.FC = () => {
                   {checkinCheckoutSummary.counts.selesaiShift}
                 </div>
                 <span className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 block">
-                  Check-In &amp; Check-Out lengkap
+                  Berangkat &amp; Tiba lengkap
                 </span>
               </div>
               <div className="w-11 h-11 rounded-xl bg-emerald-50 dark:bg-emerald-500/15 border border-emerald-200 dark:border-emerald-500/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
@@ -1833,7 +1895,7 @@ export const DriverReportsManagement: React.FC = () => {
               className="px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-sm font-semibold text-slate-800 dark:text-slate-200 focus:outline-none focus:border-blue-600 cursor-pointer"
             >
               <option value="all">Semua Status ({checkinCheckoutSummary.counts.total})</option>
-              <option value="belum_checkin">Terjadwal / Belum Check-In ({checkinCheckoutSummary.counts.belumCheckin})</option>
+              <option value="belum_checkin">Terjadwal / Belum Berangkat ({checkinCheckoutSummary.counts.belumCheckin})</option>
               <option value="sedang_bertugas">Sedang Bertugas ({checkinCheckoutSummary.counts.sedangBertugas})</option>
               <option value="selesai_shift">Selesai Shift ({checkinCheckoutSummary.counts.selesaiShift})</option>
             </select>
@@ -1844,15 +1906,15 @@ export const DriverReportsManagement: React.FC = () => {
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-sm">
                 <thead>
-                  <tr className="bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
+                  <tr className="bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 text-xs font-semibold text-slate-600 dark:text-slate-400">
                     <th className="py-3.5 px-4 w-12 text-center">#</th>
                     <th className="py-3.5 px-4">Tanggal</th>
                     <th className="py-3.5 px-4">Nama Kru (Driver &amp; Helper)</th>
                     <th className="py-3.5 px-4">Nomor Kendaraan</th>
                     <th className="py-3.5 px-4">Area / Lokasi</th>
                     <th className="py-3.5 px-4 text-center">Target Berangkat &amp; Pulang</th>
-                    <th className="py-3.5 px-4 text-center">Waktu Berangkat (Check-In)</th>
-                    <th className="py-3.5 px-4 text-center">Waktu Tiba (Check-Out)</th>
+                    <th className="py-3.5 px-4 text-center">Waktu Berangkat</th>
+                    <th className="py-3.5 px-4 text-center">Waktu Tiba</th>
                     <th className="py-3.5 px-4 text-center">Ketepatan Waktu &amp; Selisih</th>
                     <th className="py-3.5 px-4 text-center">Status Shift</th>
                     {isSuperAdmin && <th className="py-3.5 px-4 text-center">Tindakan</th>}
@@ -1868,89 +1930,87 @@ export const DriverReportsManagement: React.FC = () => {
                   ) : (
                     checkinCheckoutList.map((item, idx) => (
                       <tr key={item.id || idx} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition">
-                        <td className="py-3.5 px-4 text-center font-mono text-slate-500 font-bold tabular-nums">{idx + 1}</td>
-                        <td className="py-3.5 px-4 font-mono font-bold text-slate-900 dark:text-white whitespace-nowrap tabular-nums">
+                        <td className="py-3.5 px-4 text-center font-mono text-slate-500 font-semibold tabular-nums">{idx + 1}</td>
+                        <td className="py-3.5 px-4 font-mono font-semibold text-slate-900 dark:text-white whitespace-nowrap tabular-nums">
                           <div>{item.date}</div>
                           {item.trackingNumber && (
-                            <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mt-0.5">
+                            <div className="text-xs font-medium text-slate-500 dark:text-slate-400 mt-0.5">
                               {item.trackingNumber}
                             </div>
                           )}
                         </td>
                         <td className="py-3.5 px-4">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-[15px] font-bold text-slate-900 dark:text-white">
+                            <span className="text-sm font-bold text-slate-900 dark:text-white">
                               {item.driverName}
                             </span>
-                            <span className="px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-500/30 text-xs font-semibold">
-                              {item.userRole}
+                            <span className="text-xs font-medium text-blue-600 dark:text-blue-400">
+                              · {item.userRole}
                             </span>
                           </div>
                           {item.helperName &&
                             item.helperName !== '-' &&
                             !String(item.userRole || '').toLowerCase().includes('helper') &&
                             item.helperName.trim().toLowerCase() !== (item.driverName || '').trim().toLowerCase() && (
-                              <div className="text-[13px] text-amber-700 dark:text-amber-300 mt-1 font-semibold">
+                              <div className="text-xs text-slate-600 dark:text-slate-300 mt-0.5 font-medium">
                                 Helper: {item.helperName}
                               </div>
                             )}
                         </td>
-                        <td className="py-3.5 px-4 whitespace-nowrap">
-                          <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-mono text-sm font-bold text-slate-900 dark:text-slate-100">
-                            {formatPlateWithInitial(item.plateNumber)}
-                          </span>
+                        <td className="py-3.5 px-4 whitespace-nowrap font-mono text-sm font-semibold text-slate-900 dark:text-slate-100 tabular-nums">
+                          {formatPlateWithInitial(item.plateNumber)}
                         </td>
                         <td className="py-3.5 px-4 text-sm font-semibold text-slate-800 dark:text-slate-200">
                           {item.areaName}
                         </td>
                         <td className="py-3.5 px-4 text-center whitespace-nowrap">
-                          <div className="text-[13px] font-mono text-slate-700 dark:text-slate-200 tabular-nums">
+                          <div className="text-xs font-mono text-slate-700 dark:text-slate-200 tabular-nums">
                             <span className="text-slate-500 font-sans font-medium">Berangkat:</span>{' '}
                             <strong className="text-emerald-700 dark:text-emerald-400">{item.targetDepartureLabel}</strong>
                           </div>
-                          <div className="text-[13px] font-mono text-slate-700 dark:text-slate-200 mt-1 tabular-nums">
+                          <div className="text-xs font-mono text-slate-700 dark:text-slate-200 mt-1 tabular-nums">
                             <span className="text-slate-500 font-sans font-medium">Pulang:</span>{' '}
                             <strong className="text-blue-700 dark:text-blue-400">{item.targetReturnLabel}</strong>
                           </div>
                         </td>
                         <td className="py-3.5 px-4 text-center whitespace-nowrap">
                           {item.checkinTime && item.checkinTime !== '-' ? (
-                            <span className="inline-flex items-center px-3 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30 font-mono font-bold text-sm tabular-nums">
+                            <span className="font-mono font-bold text-sm text-emerald-700 dark:text-emerald-400 tabular-nums">
                               {item.checkinTime}
                             </span>
                           ) : (
-                            <span className="text-slate-400 italic text-xs">Belum Berangkat</span>
+                            <span className="text-slate-400 text-xs">Belum Berangkat</span>
                           )}
                         </td>
                         <td className="py-3.5 px-4 text-center whitespace-nowrap">
                           {item.checkoutTime && item.checkoutTime !== '-' ? (
-                            <span className="inline-flex items-center px-3 py-1 rounded-lg bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-500/30 font-mono font-bold text-sm tabular-nums">
+                            <span className="font-mono font-bold text-sm text-blue-700 dark:text-blue-400 tabular-nums">
                               {item.checkoutTime}
                             </span>
                           ) : (
-                            <span className="text-slate-400 italic text-xs">Belum Tiba</span>
+                            <span className="text-slate-400 text-xs">Belum Tiba</span>
                           )}
                         </td>
                         <td className="py-3.5 px-4 text-center whitespace-nowrap">
-                          <div className="flex flex-col items-center gap-1.5">
+                          <div className="flex flex-col items-center gap-1 text-xs tabular-nums">
                             <span
-                              className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-bold border ${
+                              className={`font-semibold ${
                                 item.checkinPunctuality.status === 'terlambat'
-                                  ? 'bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-500/30'
+                                  ? 'text-rose-700 dark:text-rose-400'
                                   : item.checkinPunctuality.status === 'tepat' || item.checkinPunctuality.status === 'awal'
-                                  ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/30'
-                                  : 'bg-slate-100 dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700'
+                                  ? 'text-emerald-700 dark:text-emerald-400'
+                                  : 'text-slate-400'
                               }`}
                             >
                               Berangkat: {item.checkinPunctuality.label}
                             </span>
                             <span
-                              className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-bold border ${
+                              className={`font-semibold ${
                                 item.checkoutPunctuality.status === 'terlambat'
-                                  ? 'bg-amber-50 dark:bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-500/30'
+                                  ? 'text-amber-700 dark:text-amber-400'
                                   : item.checkoutPunctuality.status === 'tepat' || item.checkoutPunctuality.status === 'awal'
-                                  ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-500/30'
-                                  : 'bg-slate-100 dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700'
+                                  ? 'text-blue-700 dark:text-blue-400'
+                                  : 'text-slate-400'
                               }`}
                             >
                               Tiba: {item.checkoutPunctuality.label}
@@ -1959,16 +2019,16 @@ export const DriverReportsManagement: React.FC = () => {
                         </td>
                         <td className="py-3.5 px-4 text-center whitespace-nowrap">
                           {item.status === 'selesai_shift' ? (
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-[13px] font-bold bg-emerald-50 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/30">
+                            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
                               <CheckCircle2 className="w-3.5 h-3.5" /> Selesai Shift
                             </span>
                           ) : item.status === 'sedang_bertugas' ? (
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-[13px] font-bold bg-amber-50 dark:bg-amber-500/20 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-500/30">
+                            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-700 dark:text-amber-400">
                               <Clock className="w-3.5 h-3.5" /> Sedang Bertugas
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-[13px] font-bold bg-blue-50 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-500/30">
-                              <Calendar className="w-3.5 h-3.5" /> Terjadwal / Belum Check-In
+                            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-600 dark:text-blue-400">
+                              <Calendar className="w-3.5 h-3.5" /> Terjadwal / Belum Berangkat
                             </span>
                           )}
                         </td>
@@ -3192,13 +3252,13 @@ export const DriverReportsManagement: React.FC = () => {
                               <div className="space-y-1">
                                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-sky-50 dark:bg-cyan-500/15 text-sky-700 dark:text-cyan-300 border border-sky-200 dark:border-cyan-500/30">
                                   <Clock className="w-3.5 h-3.5 text-sky-600 shrink-0" />
-                                  <span>Berangkat &amp; Tiba</span>
+                                  <span>Check-In &amp; Out</span>
                                 </span>
-                                <div className="text-xs font-mono text-slate-600 dark:text-slate-300 tabular-nums">
-                                  <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Berangkat: {item.checkinTimeFormatted || '-'}</span>
+                                <div className="text-xs font-mono text-slate-600 dark:text-slate-300">
+                                  <span className="text-emerald-600 dark:text-emerald-400 font-semibold">In: {item.checkinTimeFormatted || '-'}</span>
                                   {' · '}
-                                  <span className={item.checkoutTimeFormatted ? 'text-blue-600 dark:text-blue-400 font-semibold' : 'text-slate-500'}>
-                                    Tiba: {item.checkoutTimeFormatted || 'Dinas'}
+                                  <span className={item.checkoutTimeFormatted ? 'text-amber-600 dark:text-amber-400 font-semibold' : 'text-slate-500'}>
+                                    Out: {item.checkoutTimeFormatted || 'Dinas'}
                                   </span>
                                 </div>
                               </div>

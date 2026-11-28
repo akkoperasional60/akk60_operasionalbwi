@@ -48,7 +48,7 @@ export function Button({ children, onClick, disabled, loading, variant = 'primar
   </motion.button>;
 }
 export function Status({trip}: {trip: FieldTrip}) {
-  const label = trip.phase === 'returned' ? 'Selesai' : trip.phase === 'going' ? 'Dalam perjalanan' : 'Belum berangkat';
+  const label = trip.phase === 'returned' ? 'Tiba di Gudang / Selesai' : trip.phase === 'going' ? 'Dalam perjalanan' : 'Belum berangkat';
   return <span className={`cv66-status cv66-status--${trip.phase}`}><span/>{label}</span>;
 }
 export function Heading({title, right}: {title: string; right?: React.ReactNode}) {
@@ -85,7 +85,7 @@ export function TripMeta({trip}: {trip: FieldTrip}) {
   return <div className="cv66-trip-meta"><span className="cv66-inline cv66-fleet"><Truck size={15}/>{trip.fleetLabel}</span><span className="cv66-inline cv66-time"><Clock3 size={14}/><span className="cv66-time-value">{trip.departureTime}</span><span className="cv66-time-zone">WIB</span></span></div>;
 }
 export function ActiveTrip({trip, slot}: {trip: FieldTrip; slot: CrewSlot}) {
-  return <section className="cv66-active-trip cv69-active-trip"><div className="cv66-active-top"><span className="cv66-role">{roleName(slot)}</span><span className="cv66-active-date">{shortDate(trip.date)}</span></div>
+  return <section className="cv66-active-trip cv69-active-trip"><div className="cv66-active-top"><div className="cv66-active-badges"><span className="cv66-role">{roleName(slot)}</span><Status trip={trip}/></div><span className="cv66-active-date">{shortDate(trip.date)}</span></div>
     <div className="cv69-active-main"><div className="cv69-active-text"><h2 className="cv66-active-title">{trip.area}</h2><TripMeta trip={trip}/></div><div className="cv69-active-art"><CrewArt name="truck" size={92} active={trip.phase==='going'}/></div></div>
     <div className="cv66-partner"><Users size={17}/><span>{slot === 'driver' ? 'Helper' : 'Driver'}</span><span className="cv66-partner-name">{(slot === 'driver' ? trip.helper?.name : trip.driver?.name) || 'Belum terisi'}</span></div>
   </section>;
@@ -99,13 +99,21 @@ export function TaskRow({icon, label, detail, done = false, disabled = false, on
 }
 export function Journey({trip, busy, onMove, readOnly = false}: {trip: FieldTrip; busy: boolean; onMove: (phase: 'going' | 'returned') => void; readOnly?: boolean}) {
   const missing = [!trip.driver || !trip.helper ? 'Kru' : '', !trip.odometerStart ? 'KM awal' : '', !trip.inspectionDone ? 'Cek armada' : '', !trip.waybillValidated ? 'Surat jalan' : ''].filter(Boolean);
-  const stage = trip.phase === 'returned' ? 2 : trip.phase === 'going' ? 1 : 0;
+  const stage = trip.phase === 'returned' ? 3 : trip.phase === 'going' ? 1 : 0;
+  const arrivedWib = trip.returnedAt
+    ? new Date(trip.returnedAt).toLocaleTimeString('id-ID', {
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: 'Asia/Jakarta',
+        hour12: false
+      }).replace('.', ':')
+    : '';
   return <Panel title="Perjalanan" right={<Status trip={trip}/>} className="cv69-journey">
-    <div className="cv66-steps" aria-label="Tahapan perjalanan">{['Persiapan', 'Berangkat', 'Selesai'].map((label, i) => <div key={label} className={`cv66-step ${i < stage ? 'cv66-step--done' : i === stage ? 'cv66-step--active' : ''}`} aria-current={i === stage ? 'step' : undefined}><span className="cv66-step-dot">{i < stage ? <Check size={13}/> : i+1}</span><span>{label}</span></div>)}</div>
+    <div className="cv66-steps" aria-label="Tahapan perjalanan">{['Persiapan', 'Berangkat', 'Tiba di Gudang'].map((label, i) => <div key={label} className={`cv66-step ${i < stage ? 'cv66-step--done' : i === stage ? 'cv66-step--active' : ''}`} aria-current={i === stage ? 'step' : undefined}><span className="cv66-step-dot">{i < stage ? <Check size={13}/> : i+1}</span><span>{label}</span></div>)}</div>
     {readOnly ? (trip.phase === 'waiting' && missing.length > 0 ? <p className="cv66-required"><span className="cv66-required-label">Belum lengkap:</span> {missing.join(', ')}</p> : null)
       : trip.phase === 'waiting' ? <><Button disabled={missing.length > 0 || busy} loading={busy} onClick={() => onMove('going')}><Navigation size={18}/>Berangkat</Button>{missing.length > 0 && <p className="cv66-required"><span className="cv66-required-label">Lengkapi:</span> {missing.join(', ')}</p>}</>
       : trip.phase === 'going' ? <Button disabled={busy} loading={busy} onClick={() => onMove('returned')}><CheckCircle2 size={18}/>Tiba di Gudang</Button>
-      : <div className="cv66-unavailable"><CheckCircle2 size={17}/>Kiriman selesai</div>}
+      : <div className="cv66-unavailable cv66-unavailable--done"><CheckCircle2 size={17}/>Tiba di Gudang / Selesai{arrivedWib ? ` · ${arrivedWib} WIB` : ''}</div>}
   </Panel>;
 }
 export function Dialog({title, children, busy, onClose, overlayClassName = ''}: {title: string; children: React.ReactNode; busy?: boolean; onClose: () => void; overlayClassName?: string}) {

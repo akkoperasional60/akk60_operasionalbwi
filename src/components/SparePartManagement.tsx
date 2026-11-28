@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Wrench,
   Package,
@@ -10,22 +10,18 @@ import {
   Search,
   AlertTriangle,
   CheckCircle2,
-  Calendar,
   Truck,
   FileSpreadsheet,
-  ArrowUpDown,
   History,
   Trash2,
   Edit3,
-  ExternalLink,
   ShieldCheck,
   AlertCircle,
-  TrendingDown,
   Warehouse,
-  FileText,
   ChevronDown,
   Check,
-  RefreshCw
+  RefreshCw,
+  X
 } from 'lucide-react';
 import { SparePart, SparePartUsage, SparePartCategory, Fleet } from '../types';
 import { logisticsStore } from '../services/store';
@@ -37,56 +33,37 @@ interface SparePartManagementProps {
 }
 
 export const SparePartManagement: React.FC<SparePartManagementProps> = ({
-  initialFleetId,
-  onNavigateToFleets
+  initialFleetId
 }) => {
-  const currentUser = logisticsStore.getCurrentUser();
-  const isSuperAdmin = String(currentUser?.role || '')
-    .toLowerCase()
-    .trim()
-    .replace(/[\s_-]+/g, '') === 'superadmin';
+  const [currentUser, setCurrentUser] = useState(() => logisticsStore.getCurrentUser());
+  const isSuperAdmin = useMemo(() => {
+    const r = String(currentUser?.role || '').toLowerCase().trim().replace(/[\s_-]+/g, '');
+    return r === 'superadmin';
+  }, [currentUser]);
 
   const [activeTab, setActiveTab] = useState<'inventory' | 'fleet_health' | 'history'>('fleet_health');
-  const [spareParts, setSpareParts] = useState<SparePart[]>(logisticsStore.getSpareParts());
-  const [usages, setUsages] = useState<SparePartUsage[]>(logisticsStore.getSparePartUsages());
-  const [allFleets, setAllFleets] = useState<Fleet[]>(logisticsStore.getFleets());
-  const [isRefreshingServer, setIsRefreshingServer] = useState(false);
-  const [confirmDeletePartId, setConfirmDeletePartId] = useState<string | null>(null);
-  const [confirmDeleteUsageId, setConfirmDeleteUsageId] = useState<string | null>(null);
+  const [spareParts, setSpareParts] = useState<SparePart[]>(() => logisticsStore.getSpareParts());
+  const [usages, setUsages] = useState<SparePartUsage[]>(() => logisticsStore.getSparePartUsages());
+  const [allFleets, setAllFleets] = useState<Fleet[]>(() => logisticsStore.getFleets());
+  const [isSyncing, setIsSyncing] = useState(false);
 
-  // Multi-Branch State (Super Admin defaults to ALL branches so cross-branch spareparts & logs are visible immediately)
-  const [selectedBranchId, setSelectedBranchId] = useState<string>(() =>
-    isSuperAdmin ? 'ALL' : branchStore.getSelectedOriginBranchId()
-  );
+  // Multi-Branch State: Super Admin default ke 'ALL' agar semua cabang & semua input user langsung terlihat
+  const [selectedBranchId, setSelectedBranchId] = useState<string>(() => {
+    const role = String(logisticsStore.getCurrentUser()?.role || '').toLowerCase().trim().replace(/[\s_-]+/g, '');
+    if (role === 'superadmin') return 'ALL';
+    return branchStore.getSelectedOriginBranchId();
+  });
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState<boolean>(false);
   const branches = branchStore.getBranches();
   const selectedBranch = branches.find((b: any) => b.id === selectedBranchId) || branches[0];
 
-  useEffect(() => {
-    if (isSuperAdmin) {
-      branchStore.setSelectedOriginBranchId('ALL');
-    }
-    return branchStore.subscribe(() => {
-      setSelectedBranchId(branchStore.getSelectedOriginBranchId());
-    });
-  }, [isSuperAdmin]);
-
-  const handleRefreshFromServer = async () => {
-    setIsRefreshingServer(true);
-    try {
-      await logisticsStore.refreshSparePartsFromServer();
-      setSpareParts(logisticsStore.getSpareParts());
-      setUsages(logisticsStore.getSparePartUsages());
-      setAllFleets(logisticsStore.getFleets());
-    } finally {
-      setIsRefreshingServer(false);
-    }
-  };
-
   // Filter fleets by selected branch
-  const fleets = selectedBranchId === 'ALL'
-    ? allFleets
-    : allFleets.filter(f => branchStore.getFleetBranch(f.id, f.plateNumber, f.initialCode, f.branchId).id === selectedBranchId);
+  const fleets = useMemo(() => {
+    if (selectedBranchId === 'ALL') return allFleets;
+    return allFleets.filter(
+      f => branchStore.getFleetBranch(f.id, f.plateNumber, f.initialCode, f.branchId).id === selectedBranchId
+    );
+  }, [allFleets, selectedBranchId]);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -103,6 +80,11 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
   const [isLogUsageOpen, setIsLogUsageOpen] = useState(false);
   const [isEditPartOpen, setIsEditPartOpen] = useState(false);
   const [editingPart, setEditingPart] = useState<SparePart | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<
+    | { type: 'part'; id: string; label: string }
+    | { type: 'usage'; id: string; label: string }
+    | null
+  >(null);
 
   // New Part Form State
   const [newPart, setNewPart] = useState<Omit<SparePart, 'id'>>({
@@ -116,7 +98,8 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
     compatibleVehicles: 'Semua Armada',
     storageLocation: 'Gudang Logistik Banyuwangi',
     lastRestockDate: new Date().toISOString().substring(0, 10),
-    notes: ''
+    notes: '',
+    branchId: undefined
   });
 
   // Log Usage Form State
@@ -147,12 +130,12 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
     color: string;
     icon: React.ElementType;
   }> = [
-    { value: 'oli', label: 'Oli Mesin & Pelumas', sub: 'Siklus 10.000 KM / 3 Bulan', color: 'text-amber-400 bg-amber-500/15 border-amber-500/30', icon: Droplets },
-    { value: 'ban', label: 'Ban & Velg', sub: 'Siklus 50.000 KM / 12 Bulan', color: 'text-emerald-400 bg-emerald-500/15 border-emerald-500/30', icon: Disc },
-    { value: 'aki', label: 'Aki & Baterai', sub: 'Siklus 80.000 KM / 18 Bulan', color: 'text-cyan-400 bg-cyan-500/15 border-cyan-500/30', icon: BatteryCharging },
-    { value: 'filter', label: 'Filter Oli / Solar / Udara', sub: 'Siklus 15.000 KM / 4 Bulan', color: 'text-purple-400 bg-purple-500/15 border-purple-500/30', icon: Filter },
-    { value: 'rem', label: 'Sistem Pengereman', sub: 'Siklus 30.000 KM / 8 Bulan', color: 'text-rose-400 bg-rose-500/15 border-rose-500/30', icon: AlertCircle },
-    { value: 'lainnya', label: 'Komponen Lainnya', sub: 'Sesuai kebutuhan servis', color: 'text-slate-300 bg-slate-500/15 border-slate-500/30', icon: Package }
+    { value: 'oli', label: 'Oli Mesin & Pelumas', sub: 'Siklus 10.000 KM / 3 Bulan', color: 'text-amber-600 bg-amber-50 border-amber-200 dark:text-amber-400 dark:bg-amber-500/15 dark:border-amber-500/30', icon: Droplets },
+    { value: 'ban', label: 'Ban & Velg', sub: 'Siklus 50.000 KM / 12 Bulan', color: 'text-emerald-600 bg-emerald-50 border-emerald-200 dark:text-emerald-400 dark:bg-emerald-500/15 dark:border-emerald-500/30', icon: Disc },
+    { value: 'aki', label: 'Aki & Baterai', sub: 'Siklus 80.000 KM / 18 Bulan', color: 'text-blue-600 bg-blue-50 border-blue-200 dark:text-cyan-400 dark:bg-cyan-500/15 dark:border-cyan-500/30', icon: BatteryCharging },
+    { value: 'filter', label: 'Filter Oli / Solar / Udara', sub: 'Siklus 15.000 KM / 4 Bulan', color: 'text-indigo-600 bg-indigo-50 border-indigo-200 dark:text-purple-400 dark:bg-purple-500/15 dark:border-purple-500/30', icon: Filter },
+    { value: 'rem', label: 'Sistem Pengereman', sub: 'Siklus 30.000 KM / 8 Bulan', color: 'text-rose-600 bg-rose-50 border-rose-200 dark:text-rose-400 dark:bg-rose-500/15 dark:border-rose-500/30', icon: AlertCircle },
+    { value: 'lainnya', label: 'Komponen Lainnya', sub: 'Sesuai kebutuhan servis', color: 'text-slate-600 bg-slate-100 border-slate-200 dark:text-slate-300 dark:bg-slate-500/15 dark:border-slate-500/30', icon: Package }
   ];
 
   const formatIndoDateDisplay = (isoDate: string) => {
@@ -164,15 +147,35 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
     return `${parts[2]} ${months[mIdx] || parts[1]} ${parts[0]}`;
   };
 
-  // Subscribe to store updates & sync from MySQL server on mount so Super Admin always sees entries added by other branches/accounts
+  const handleRefreshSync = async () => {
+    setIsSyncing(true);
+    try {
+      await logisticsStore.syncSparePartsFromServer(true);
+      setSpareParts(logisticsStore.getSpareParts());
+      setUsages(logisticsStore.getSparePartUsages());
+      setAllFleets(logisticsStore.getFleets());
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Sync from server on mount + periodic background refresh + store subscription
   useEffect(() => {
+    void logisticsStore.syncSparePartsFromServer(true);
+    const poll = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      void logisticsStore.syncSparePartsFromServer(false);
+    }, 15000);
     const unsubscribe = logisticsStore.subscribe(() => {
       setSpareParts(logisticsStore.getSpareParts());
       setUsages(logisticsStore.getSparePartUsages());
       setAllFleets(logisticsStore.getFleets());
+      setCurrentUser({ ...logisticsStore.getCurrentUser() });
     });
-    void handleRefreshFromServer();
-    return unsubscribe;
+    return () => {
+      clearInterval(poll);
+      unsubscribe();
+    };
   }, []);
 
   // Update usageForm defaults when category changes
@@ -257,9 +260,11 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
   // Submit new Spare Part
   const handleCreatePart = (e: React.FormEvent) => {
     e.preventDefault();
+    const resolvedBranchId = newPart.branchId || (selectedBranchId !== 'ALL' ? selectedBranchId : undefined);
     logisticsStore.addSparePart({
       ...newPart,
-      createdBy: logisticsStore.getCurrentUser().fullName
+      branchId: resolvedBranchId,
+      createdBy: currentUser?.fullName || currentUser?.email || 'Admin'
     });
     setIsAddPartOpen(false);
     setNewPart({
@@ -273,7 +278,8 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
       compatibleVehicles: 'Semua Armada',
       storageLocation: 'Gudang Logistik Banyuwangi',
       lastRestockDate: new Date().toISOString().substring(0, 10),
-      notes: ''
+      notes: '',
+      branchId: undefined
     });
   };
 
@@ -289,10 +295,17 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
   // Submit Usage (Routine Replacement)
   const handleSubmitUsage = (e: React.FormEvent) => {
     e.preventDefault();
-    const selectedFleet = allFleets.find(f => f.id === usageForm.fleetId);
+    const selectedFleet = fleets.find(f => f.id === usageForm.fleetId) || allFleets.find(f => f.id === usageForm.fleetId);
     const selectedPart = spareParts.find(p => p.id === usageForm.partId);
 
     if (!selectedFleet) return;
+
+    const fleetBranchId = branchStore.getFleetBranch(
+      selectedFleet.id,
+      selectedFleet.plateNumber,
+      selectedFleet.initialCode,
+      selectedFleet.branchId
+    ).id;
 
     logisticsStore.recordSparePartUsage({
       fleetId: selectedFleet.id,
@@ -310,18 +323,33 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
       mechanicOrWorkshop: usageForm.mechanicOrWorkshop,
       totalCost: Number(usageForm.totalCost),
       notes: usageForm.notes,
-      performedBy: logisticsStore.getCurrentUser().fullName
+      performedBy: logisticsStore.getCurrentUser().fullName,
+      branchId: fleetBranchId
     });
 
     setIsLogUsageOpen(false);
   };
 
+  // Branch-scoped Spareparts & Usages: ALL = tampilkan seluruh data lintas cabang & lintas user
+  const branchScopedParts = useMemo(() => {
+    if (selectedBranchId === 'ALL') return spareParts;
+    return spareParts.filter(p => !p.branchId || p.branchId === 'ALL' || p.branchId === selectedBranchId);
+  }, [spareParts, selectedBranchId]);
+
+  const branchScopedUsages = useMemo(() => {
+    if (selectedBranchId === 'ALL') return usages;
+    return usages.filter(u => {
+      if (u.branchId && u.branchId !== 'ALL') return u.branchId === selectedBranchId;
+      return branchStore.getFleetBranch(u.fleetId, u.plateNumber, u.initialCode, u.branchId).id === selectedBranchId;
+    });
+  }, [usages, selectedBranchId]);
+
   // KPI Calculations
-  const totalPartsCount = spareParts.length;
-  const totalStockItems = spareParts.reduce((acc, p) => acc + p.stock, 0);
-  const totalInventoryValue = spareParts.reduce((acc, p) => acc + (p.stock * p.costPerUnit), 0);
-  const lowStockParts = spareParts.filter(p => p.stock <= p.minStock);
-  const thisMonthUsages = usages.filter(u => {
+  const totalPartsCount = branchScopedParts.length;
+  const totalStockItems = branchScopedParts.reduce((acc, p) => acc + p.stock, 0);
+  const totalInventoryValue = branchScopedParts.reduce((acc, p) => acc + p.stock * p.costPerUnit, 0);
+  const lowStockParts = branchScopedParts.filter(p => p.stock <= p.minStock);
+  const thisMonthUsages = branchScopedUsages.filter(u => {
     const d = new Date(u.replacementDate);
     const now = new Date();
     return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
@@ -329,23 +357,21 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
   const totalMaintenanceExpenseThisMonth = thisMonthUsages.reduce((acc, u) => acc + u.totalCost, 0);
 
   // Filtered Parts
-  const filteredParts = spareParts.filter(part => {
+  const filteredParts = branchScopedParts.filter(part => {
     const matchSearch =
       part.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       part.partNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      part.compatibleVehicles.toLowerCase().includes(searchQuery.toLowerCase());
+      part.compatibleVehicles.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (part.createdBy || '').toLowerCase().includes(searchQuery.toLowerCase());
     const matchCat = selectedCategory === 'all' || part.category === selectedCategory;
     return matchSearch && matchCat;
   });
 
-  // Filtered Usages (Super Admin 'ALL' sees usages across all branches; specific branch filters to its fleets)
-  const filteredUsages = usages.filter(u => {
-    const matchBranch =
-      selectedBranchId === 'ALL' ||
-      fleets.some(f => f.id === u.fleetId || f.plateNumber === u.plateNumber);
+  // Filtered Usages
+  const filteredUsages = branchScopedUsages.filter(u => {
     const matchFleet = selectedFleetFilter === 'all' || u.fleetId === selectedFleetFilter;
     const matchCat = selectedCategory === 'all' || u.category === selectedCategory;
-    return matchBranch && matchFleet && matchCat;
+    return matchFleet && matchCat;
   });
 
   // Category Icon & Color Helper
@@ -354,37 +380,37 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
       case 'oli':
         return {
           label: 'Oli & Pelumas',
-          color: 'text-amber-400 bg-amber-500/15 border-amber-500/30',
+          color: 'text-amber-700 bg-amber-50 border-amber-200 dark:text-amber-400 dark:bg-amber-500/15 dark:border-amber-500/30',
           icon: Droplets
         };
       case 'ban':
         return {
           label: 'Ban & Velg',
-          color: 'text-emerald-400 bg-emerald-500/15 border-emerald-500/30',
+          color: 'text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-emerald-400 dark:bg-emerald-500/15 dark:border-emerald-500/30',
           icon: Disc
         };
       case 'aki':
         return {
           label: 'Aki & Kelistrikan',
-          color: 'text-cyan-400 bg-cyan-500/15 border-cyan-500/30',
+          color: 'text-blue-700 bg-blue-50 border-blue-200 dark:text-cyan-400 dark:bg-cyan-500/15 dark:border-cyan-500/30',
           icon: BatteryCharging
         };
       case 'filter':
         return {
           label: 'Filter & Udara',
-          color: 'text-purple-400 bg-purple-500/15 border-purple-500/30',
+          color: 'text-indigo-700 bg-indigo-50 border-indigo-200 dark:text-purple-400 dark:bg-purple-500/15 dark:border-purple-500/30',
           icon: Filter
         };
       case 'rem':
         return {
           label: 'Pengereman',
-          color: 'text-rose-400 bg-rose-500/15 border-rose-500/30',
+          color: 'text-rose-700 bg-rose-50 border-rose-200 dark:text-rose-400 dark:bg-rose-500/15 dark:border-rose-500/30',
           icon: AlertCircle
         };
       default:
         return {
           label: 'Lainnya',
-          color: 'text-slate-400 bg-slate-500/15 border-slate-500/30',
+          color: 'text-slate-600 bg-slate-100 border-slate-200 dark:text-slate-400 dark:bg-slate-500/15 dark:border-slate-500/30',
           icon: Package
         };
     }
@@ -421,43 +447,41 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
   };
 
   return (
-    <div className="space-y-6">
-      {/* Top Header Card */}
-      <div className="bg-slate-900 border border-slate-800/80 rounded-2xl p-5 sm:p-6 shadow-xl">
+    <div className="space-y-5 bg-slate-50 dark:bg-slate-950 p-1 rounded-xl">
+      {/* Top Header Card (Flat / Modern Clean Design) */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-6">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-amber-400 mb-1">
-              <Warehouse className="w-4 h-4" />
-              <span>LOGISTIK &amp; PEMELIHARAAN ARMADA {selectedBranchId === 'ALL' ? 'SEMUA CABANG' : selectedBranch.name.toUpperCase()}</span>
+            <div className="text-xs font-semibold text-blue-600 dark:text-blue-400 mb-1">
+              Logistik &amp; Pemeliharaan Armada · {selectedBranchId === 'ALL' ? 'Semua Cabang' : selectedBranch?.name}
             </div>
-            <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+            <h2 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
               Manajemen Sparepart &amp; Komponen Rutin
             </h2>
-            <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-2xl">
-              Pantau ketersediaan stok fisik sparepart gudang dan lacak siklus penggantian komponen rutin tiap armada secara akurat.
+            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1 max-w-2xl">
+              Pantau stok sparepart gudang dan lacak siklus penggantian komponen rutin tiap armada lintas user &amp; cabang.
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2.5">
-            {/* Cabang Selector (Custom Dropdown) */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Cabang Selector */}
             <div className="relative">
               <button
                 type="button"
                 onClick={() => setIsBranchDropdownOpen(prev => !prev)}
-                className="flex items-center justify-between gap-2.5 px-3.5 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-900 border border-slate-800 hover:border-amber-500/50 text-xs font-bold text-white transition cursor-pointer shadow-xs min-w-[230px]"
+                className="flex items-center justify-between gap-2 px-3.5 py-2 rounded-xl bg-white dark:bg-slate-950 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs sm:text-sm font-semibold text-slate-800 dark:text-white transition cursor-pointer whitespace-nowrap"
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  <Warehouse className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <span className="text-[10px] text-slate-400 uppercase font-extrabold tracking-wider">Cabang:</span>
-                  <span className="text-amber-300 truncate font-bold">
+                  <Warehouse className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                  <span className="truncate">
                     {selectedBranchId === 'ALL'
                       ? `Semua Cabang (${allFleets.length} Unit)`
                       : `${selectedBranch?.name || 'Cabang'} (${fleets.length} Unit)`}
                   </span>
                 </div>
                 <ChevronDown
-                  className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform duration-200 ${
-                    isBranchDropdownOpen ? 'rotate-180 text-amber-400' : ''
+                  className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-150 ${
+                    isBranchDropdownOpen ? 'rotate-180 text-blue-600' : ''
                   }`}
                 />
               </button>
@@ -468,25 +492,25 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
                     className="fixed inset-0 z-40"
                     onClick={() => setIsBranchDropdownOpen(false)}
                   />
-                  <div className="absolute right-0 mt-1.5 w-64 z-50 bg-slate-900 border border-slate-700/90 rounded-xl shadow-2xl overflow-hidden divide-y divide-slate-800/70 animate-in fade-in zoom-in-95 duration-150">
+                  <div className="absolute right-0 mt-1.5 w-64 z-50 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden divide-y divide-slate-100 dark:divide-slate-800">
                     <button
                       type="button"
                       onClick={() => {
-                        branchStore.setSelectedOriginBranchId('ALL');
+                        setSelectedBranchId('ALL');
                         setIsBranchDropdownOpen(false);
                       }}
-                      className={`w-full px-3.5 py-2.5 text-left text-xs font-bold flex items-center justify-between gap-2 transition cursor-pointer ${
+                      className={`w-full px-3.5 py-2.5 text-left text-xs font-semibold flex items-center justify-between gap-2 transition cursor-pointer ${
                         selectedBranchId === 'ALL'
-                          ? 'bg-amber-500/15 text-amber-300'
-                          : 'text-slate-200 hover:bg-slate-800'
+                          ? 'bg-blue-600 text-white'
+                          : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800'
                       }`}
                     >
                       <span>Semua Cabang</span>
                       <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-950/70 text-slate-300 border border-slate-800">
+                        <span className={`text-xs font-mono tabular-nums ${selectedBranchId === 'ALL' ? 'text-blue-100' : 'text-slate-500'}`}>
                           {allFleets.length} Unit
                         </span>
-                        {selectedBranchId === 'ALL' && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                        {selectedBranchId === 'ALL' && <Check className="w-3.5 h-3.5 text-white" />}
                       </div>
                     </button>
                     {branches.map((b: any) => {
@@ -499,21 +523,21 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
                           key={b.id}
                           type="button"
                           onClick={() => {
-                            branchStore.setSelectedOriginBranchId(b.id);
+                            setSelectedBranchId(b.id);
                             setIsBranchDropdownOpen(false);
                           }}
-                          className={`w-full px-3.5 py-2.5 text-left text-xs font-bold flex items-center justify-between gap-2 transition cursor-pointer ${
+                          className={`w-full px-3.5 py-2.5 text-left text-xs font-semibold flex items-center justify-between gap-2 transition cursor-pointer ${
                             isSel
-                              ? 'bg-amber-500/15 text-amber-300'
-                              : 'text-slate-200 hover:bg-slate-800'
+                              ? 'bg-blue-600 text-white'
+                              : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800'
                           }`}
                         >
                           <span>Cabang {b.name.replace(/^Cabang\s+/i, '')}</span>
                           <div className="flex items-center gap-2">
-                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-950/70 text-slate-300 border border-slate-800">
+                            <span className={`text-xs font-mono tabular-nums ${isSel ? 'text-blue-100' : 'text-slate-500'}`}>
                               {cnt} Unit
                             </span>
-                            {isSel && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                            {isSel && <Check className="w-3.5 h-3.5 text-white" />}
                           </div>
                         </button>
                       );
@@ -525,133 +549,133 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
 
             <button
               type="button"
-              onClick={() => {
-                void handleRefreshFromServer();
-              }}
-              disabled={isRefreshingServer}
-              className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer disabled:opacity-60"
-              title="Muat ulang data sparepart dari server MySQL"
+              onClick={handleRefreshSync}
+              disabled={isSyncing}
+              className="px-3.5 py-2 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 font-semibold text-xs sm:text-sm flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap disabled:opacity-60"
             >
-              <RefreshCw className={`w-4 h-4 text-blue-400 ${isRefreshingServer ? 'animate-spin' : ''}`} />
-              <span>{isRefreshingServer ? 'Menyegarkan...' : 'Segarkan'}</span>
+              <RefreshCw className={`w-4 h-4 text-slate-500 ${isSyncing ? 'animate-spin' : ''}`} />
+              <span>Segarkan</span>
             </button>
 
             <button
+              type="button"
+              onClick={() => setIsAddPartOpen(true)}
+              className="px-3.5 py-2 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 font-semibold text-xs sm:text-sm flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap"
+            >
+              <Plus className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+              <span>Tambah Master Part</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => {
                 const defaultFleet = fleets[0] || allFleets[0];
                 if (defaultFleet) handleOpenLogForFleet(defaultFleet, 'oli');
               }}
-              className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center gap-2 transition cursor-pointer active:scale-95"
+              className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs sm:text-sm flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap"
             >
               <Wrench className="w-4 h-4" />
               <span>Ganti Sparepart</span>
-            </button>
-
-            <button
-              onClick={() => setIsAddPartOpen(true)}
-              className="px-3.5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
-            >
-              <Plus className="w-4 h-4 text-emerald-400" />
-              <span>Tambah Master Part</span>
             </button>
           </div>
         </div>
 
         {/* 4 Summary Stat Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5 mt-6 pt-5 border-t border-slate-800">
-          <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800/80">
-            <div className="flex items-center justify-between text-slate-400 text-xs mb-1">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5 mt-5 pt-5 border-t border-slate-200 dark:border-slate-800">
+          <div className="bg-slate-50 dark:bg-slate-950/60 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 text-xs font-medium mb-1">
               <span>Master Sparepart</span>
-              <Package className="w-4 h-4 text-blue-400" />
+              <Package className="w-4 h-4 text-blue-600 dark:text-blue-400" />
             </div>
-            <div className="text-xl font-black text-white">
-              {totalPartsCount} <span className="text-xs font-normal text-slate-400">item ({totalStockItems} unit)</span>
+            <div className="text-xl font-bold text-slate-900 dark:text-white font-mono tabular-nums">
+              {totalPartsCount} <span className="text-xs font-sans font-normal text-slate-500">item ({totalStockItems} unit)</span>
             </div>
-            <div className="text-[10px] text-slate-400 mt-1">Terdaftar di master inventaris</div>
+            <div className="text-xs text-slate-500 mt-1">Terdaftar di master inventaris</div>
           </div>
 
-          <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800/80">
-            <div className="flex items-center justify-between text-slate-400 text-xs mb-1">
+          <div className="bg-slate-50 dark:bg-slate-950/60 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 text-xs font-medium mb-1">
               <span>Peringatan Stok Tipis</span>
-              <AlertTriangle className={`w-4 h-4 ${lowStockParts.length > 0 ? 'text-rose-400 animate-pulse' : 'text-slate-500'}`} />
+              <AlertTriangle className={`w-4 h-4 ${lowStockParts.length > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400'}`} />
             </div>
-            <div className={`text-xl font-black ${lowStockParts.length > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
-              {lowStockParts.length} <span className="text-xs font-normal text-slate-400">item perlu restock</span>
+            <div className={`text-xl font-bold font-mono tabular-nums ${lowStockParts.length > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+              {lowStockParts.length} <span className="text-xs font-sans font-normal text-slate-500">item perlu restock</span>
             </div>
-            <div className="text-[10px] text-slate-400 mt-1">Stok &le; batas minimum gudang</div>
+            <div className="text-xs text-slate-500 mt-1">Stok &le; batas minimum gudang</div>
           </div>
 
-          <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800/80">
-            <div className="flex items-center justify-between text-slate-400 text-xs mb-1">
+          <div className="bg-slate-50 dark:bg-slate-950/60 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 text-xs font-medium mb-1">
               <span>Penggantian Bulan Ini</span>
-              <Wrench className="w-4 h-4 text-amber-400" />
+              <Wrench className="w-4 h-4 text-amber-600 dark:text-amber-400" />
             </div>
-            <div className="text-xl font-black text-amber-400">
-              {thisMonthUsages.length} <span className="text-xs font-normal text-slate-400">kali servis</span>
+            <div className="text-xl font-bold text-slate-900 dark:text-amber-400 font-mono tabular-nums">
+              {thisMonthUsages.length} <span className="text-xs font-sans font-normal text-slate-500">kali servis</span>
             </div>
-            <div className="text-[10px] text-slate-400 mt-1">Total biaya: Rp {totalMaintenanceExpenseThisMonth.toLocaleString('id-ID')}</div>
+            <div className="text-xs text-slate-500 mt-1 font-mono tabular-nums">Total: Rp {totalMaintenanceExpenseThisMonth.toLocaleString('id-ID')}</div>
           </div>
 
-          <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800/80">
-            <div className="flex items-center justify-between text-slate-400 text-xs mb-1">
+          <div className="bg-slate-50 dark:bg-slate-950/60 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 text-xs font-medium mb-1">
               <span>Estimasi Nilai Stok</span>
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
             </div>
-            <div className="text-xl font-black text-emerald-400">
-              Rp {(totalInventoryValue / 1000000).toFixed(1)} <span className="text-xs font-normal text-slate-400">Juta</span>
+            <div className="text-xl font-bold text-emerald-700 dark:text-emerald-400 font-mono tabular-nums">
+              Rp {(totalInventoryValue / 1000000).toFixed(1)} <span className="text-xs font-sans font-normal text-slate-500">Juta</span>
             </div>
-            <div className="text-[10px] text-slate-400 mt-1">Aset komponen siap pasang</div>
+            <div className="text-xs text-slate-500 mt-1">Aset komponen siap pasang</div>
           </div>
         </div>
       </div>
 
       {/* Navigation Tabs */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-2">
-        <div className="flex items-center gap-2 bg-slate-900/90 p-1 rounded-xl border border-slate-800">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-1.5 bg-white dark:bg-slate-900 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800">
           <button
+            type="button"
             onClick={() => setActiveTab('fleet_health')}
-            className={`px-4 py-2 rounded-lg text-xs font-black transition cursor-pointer flex items-center gap-2 ${
+            className={`px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
               activeTab === 'fleet_health'
-                ? 'bg-amber-500 text-slate-950 shadow-md'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                ? 'bg-blue-600 text-white'
+                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
             }`}
           >
             <Truck className="w-4 h-4" />
             <span>Kondisi Komponen Tiap Armada</span>
-            <span className="text-[10px] font-bold px-1.5 py-0.2 rounded-full bg-slate-950/30 text-current">
-              {fleets.length} Armada
+            <span className={`text-xs font-mono tabular-nums ${activeTab === 'fleet_health' ? 'text-blue-100' : 'text-slate-400'}`}>
+              {fleets.length}
             </span>
           </button>
 
           <button
+            type="button"
             onClick={() => setActiveTab('inventory')}
-            className={`px-4 py-2 rounded-lg text-xs font-black transition cursor-pointer flex items-center gap-2 ${
+            className={`px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
               activeTab === 'inventory'
-                ? 'bg-amber-500 text-slate-950 shadow-md'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                ? 'bg-blue-600 text-white'
+                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
             }`}
           >
             <Package className="w-4 h-4" />
             <span>Katalog Stok Gudang</span>
-            {lowStockParts.length > 0 && (
-              <span className="text-[10px] font-bold px-1.5 py-0.2 rounded-full bg-rose-500 text-white animate-pulse">
-                {lowStockParts.length}
-              </span>
-            )}
+            <span className={`text-xs font-mono tabular-nums ${activeTab === 'inventory' ? 'text-blue-100' : 'text-slate-400'}`}>
+              {branchScopedParts.length}
+            </span>
           </button>
 
           <button
+            type="button"
             onClick={() => setActiveTab('history')}
-            className={`px-4 py-2 rounded-lg text-xs font-black transition cursor-pointer flex items-center gap-2 ${
+            className={`px-4 py-2 rounded-lg text-xs sm:text-sm font-semibold transition cursor-pointer flex items-center gap-2 whitespace-nowrap ${
               activeTab === 'history'
-                ? 'bg-amber-500 text-slate-950 shadow-md'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                ? 'bg-blue-600 text-white'
+                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
             }`}
           >
             <History className="w-4 h-4" />
-            <span>Riwayat Penggantian & Servis</span>
-            <span className="text-[10px] font-bold px-1.5 py-0.2 rounded-full bg-slate-950/30 text-current">
-              {usages.length} Log
+            <span>Riwayat Penggantian &amp; Servis</span>
+            <span className={`text-xs font-mono tabular-nums ${activeTab === 'history' ? 'text-blue-100' : 'text-slate-400'}`}>
+              {branchScopedUsages.length}
             </span>
           </button>
         </div>
@@ -662,23 +686,19 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
       {/* ========================================================= */}
       {activeTab === 'fleet_health' && (
         <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-900/60 p-4 rounded-xl border border-slate-800 text-xs text-slate-300">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-300">
             <div className="flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
               <span>
                 <strong>Siklus Rekomendasi AKK:</strong> Oli Mesin tiap <strong>10.000 KM</strong> (maks 3 bulan), Ban Truk tiap <strong>50.000 KM</strong>, Aki Kendaraan tiap <strong>18 bulan</strong>.
               </span>
             </div>
-            <div className="flex items-center gap-3 text-[11px]">
-              <span className="flex items-center gap-1 text-emerald-400">
-                <span className="w-2 h-2 rounded-full bg-emerald-400"></span> Prima
-              </span>
-              <span className="flex items-center gap-1 text-amber-400">
-                <span className="w-2 h-2 rounded-full bg-amber-400"></span> Segera Jadwalkan
-              </span>
-              <span className="flex items-center gap-1 text-rose-400">
-                <span className="w-2 h-2 rounded-full bg-rose-400 animate-pulse"></span> Wajib Ganti
-              </span>
+            <div className="flex items-center gap-3 text-xs font-medium shrink-0">
+              <span className="text-emerald-700 dark:text-emerald-400">Prima</span>
+              <span className="text-slate-300">·</span>
+              <span className="text-amber-700 dark:text-amber-400">Segera Jadwalkan</span>
+              <span className="text-slate-300">·</span>
+              <span className="text-rose-700 dark:text-rose-400">Wajib Ganti</span>
             </div>
           </div>
 
@@ -688,83 +708,88 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
               return (
                 <div
                   key={fleet.id}
-                  className="bg-slate-900 border border-slate-800 rounded-2xl p-4.5 hover:border-slate-700 transition flex flex-col justify-between shadow-lg"
+                  className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 hover:border-slate-300 dark:hover:border-slate-700 transition flex flex-col justify-between"
                 >
                   <div>
                     {/* Fleet Header */}
-                    <div className="flex items-start justify-between gap-2 pb-3 border-b border-slate-800">
-                      <div>
+                    <div className="flex items-start justify-between gap-2 pb-3 border-b border-slate-100 dark:border-slate-800">
+                      <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="text-xs font-black px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/40 font-mono">
+                          <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 font-mono">
                             {fleet.initialCode || 'ARMADA'}
                           </span>
-                          <span className="font-mono text-base font-black text-white">
+                          <span className="font-mono text-sm font-semibold text-slate-900 dark:text-white truncate">
                             {fleet.plateNumber}
                           </span>
                         </div>
-                        <div className="text-xs text-slate-400 mt-1">
-                          {fleet.vehicleType} &bull; {fleet.brand || 'Standar'} ({fleet.year || '2023'})
+                        <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                          {fleet.vehicleType} · {fleet.brand || 'Standar'} ({fleet.year || '2023'})
                         </div>
                       </div>
 
-                      <div className="text-right">
-                        <span className="text-[10px] text-slate-400 block">Odometer</span>
-                        <span className="font-mono font-bold text-white text-xs">
+                      <div className="text-right shrink-0">
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400 block">Odometer</span>
+                        <span className="font-mono font-semibold text-slate-900 dark:text-white text-xs tabular-nums">
                           {(fleet.odometerKm || 45000).toLocaleString('id-ID')} KM
                         </span>
                       </div>
                     </div>
 
-                    {/* Routine Components Grid: Oli, Ban, Aki, Filter */}
+                    {/* Routine Components List: Oli, Ban, Aki */}
                     <div className="space-y-2.5 my-3.5">
                       {/* OLI MESIN */}
-                      <div className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800/80 flex items-center justify-between">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/25 flex items-center justify-center text-amber-400 shrink-0">
+                      <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-950/60 border border-slate-200/80 dark:border-slate-800 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="w-8 h-8 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 shrink-0">
                             <Droplets className="w-4 h-4" />
                           </div>
-                          <div>
-                            <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                          <div className="min-w-0">
+                            <div className="text-xs font-semibold text-slate-900 dark:text-white flex items-center gap-1.5 flex-wrap">
                               <span>Oli Mesin</span>
+                              <span className="text-slate-300 dark:text-slate-600">·</span>
                               <span
-                                className={`text-[9px] px-1.5 py-0.2 rounded font-semibold border ${
+                                className={`text-[11px] font-medium ${
                                   status.oil.status === 'urgent'
-                                    ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                                    ? 'text-rose-700 dark:text-rose-400'
                                     : status.oil.status === 'warning'
-                                    ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-                                    : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                                    ? 'text-amber-700 dark:text-amber-400'
+                                    : 'text-emerald-700 dark:text-emerald-400'
                                 }`}
                               >
                                 {status.oil.label}
                               </span>
                             </div>
-                            <div className="text-[10px] text-slate-400">
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate tabular-nums">
                               Terakhir: {status.oil.lastDate} {status.oil.lastKm > 0 && `(${status.oil.lastKm.toLocaleString('id-ID')} KM)`}
                             </div>
                           </div>
                         </div>
                         <button
                           onClick={() => handleOpenLogForFleet(fleet, 'oli')}
-                          className="px-2 py-1 rounded bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-slate-300 text-[10px] font-bold transition cursor-pointer"
+                          className="px-2.5 py-1 rounded-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:border-blue-600 hover:text-blue-600 dark:hover:border-blue-500 dark:hover:text-blue-400 text-slate-700 dark:text-slate-200 text-[11px] font-medium transition cursor-pointer shrink-0"
                           title="Catat Ganti Oli"
                         >
                           Ganti
                         </button>
                       </div>
 
-                      {/* BAN ARMADA (RINGKAS 2x2 GRID: DEPAN KANAN, DEPAN KIRI, BELAKANG KANAN, BELAKANG KIRI) */}
-                      <div className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <div className="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-400 shrink-0">
+                      {/* BAN ARMADA (RINGKAS 2x2 GRID) */}
+                      <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-950/60 border border-slate-200/80 dark:border-slate-800 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className="w-7 h-7 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 shrink-0">
                               <Disc className="w-3.5 h-3.5" />
                             </div>
-                            <div>
-                              <div className="text-xs font-bold text-white leading-tight">Ban Armada (4 Posisi)</div>
-                              <div className="text-[10px] text-slate-400">Klik posisi ban untuk catat penggantian</div>
+                            <div className="min-w-0">
+                              <div className="text-xs font-semibold text-slate-900 dark:text-white leading-tight">
+                                Ban Armada (4 Posisi)
+                              </div>
+                              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                                Klik posisi ban untuk catat penggantian
+                              </div>
                             </div>
                           </div>
-                          <span className="text-[9px] px-1.5 py-0.5 rounded font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/25">
+                          <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 shrink-0 tabular-nums">
                             4 Roda
                           </span>
                         </div>
@@ -778,30 +803,30 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
                           ].map(({ data: tirePos, shortName }) => (
                             <div
                               key={tirePos.positionLabel}
-                              className="px-2.5 py-1.5 rounded-lg bg-slate-900/90 border border-slate-800/90 flex items-center justify-between gap-1.5"
+                              className="px-2.5 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-1.5"
                             >
                               <div className="min-w-0">
-                                <div className="flex items-center gap-1">
+                                <div className="flex items-center gap-1.5">
                                   <span
                                     className={`w-1.5 h-1.5 rounded-full shrink-0 ${
                                       tirePos.status === 'urgent'
-                                        ? 'bg-rose-400'
+                                        ? 'bg-rose-600'
                                         : tirePos.status === 'warning'
-                                        ? 'bg-amber-400'
-                                        : 'bg-emerald-400'
+                                        ? 'bg-amber-500'
+                                        : 'bg-emerald-600'
                                     }`}
                                   />
-                                  <span className="text-[11px] font-bold text-white truncate">
+                                  <span className="text-[11px] font-medium text-slate-800 dark:text-slate-100 truncate">
                                     {shortName}
                                   </span>
                                 </div>
-                                <div className="text-[9px] text-slate-400 truncate pl-2.5">
+                                <div className="text-[10px] text-slate-500 dark:text-slate-400 truncate pl-3 tabular-nums">
                                   {tirePos.lastDate !== '-' ? tirePos.lastDate : tirePos.label}
                                 </div>
                               </div>
                               <button
                                 onClick={() => handleOpenLogForFleet(fleet, 'ban', tirePos.positionLabel)}
-                                className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-emerald-500 hover:text-slate-950 text-slate-300 text-[9px] font-bold transition cursor-pointer shrink-0"
+                                className="px-1.5 py-0.5 rounded bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-blue-600 hover:text-blue-600 dark:hover:border-blue-500 dark:hover:text-blue-400 text-slate-600 dark:text-slate-300 text-[10px] font-medium transition cursor-pointer shrink-0"
                                 title={`Catat Ganti ${tirePos.positionLabel}`}
                               >
                                 Ganti
@@ -812,34 +837,35 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
                       </div>
 
                       {/* AKI */}
-                      <div className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800/80 flex items-center justify-between">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/25 flex items-center justify-center text-cyan-400 shrink-0">
+                      <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-950/60 border border-slate-200/80 dark:border-slate-800 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="w-8 h-8 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 shrink-0">
                             <BatteryCharging className="w-4 h-4" />
                           </div>
-                          <div>
-                            <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                          <div className="min-w-0">
+                            <div className="text-xs font-semibold text-slate-900 dark:text-white flex items-center gap-1.5 flex-wrap">
                               <span>Aki (Baterai)</span>
+                              <span className="text-slate-300 dark:text-slate-600">·</span>
                               <span
-                                className={`text-[9px] px-1.5 py-0.2 rounded font-semibold border ${
+                                className={`text-[11px] font-medium ${
                                   status.battery.status === 'urgent'
-                                    ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                                    ? 'text-rose-700 dark:text-rose-400'
                                     : status.battery.status === 'warning'
-                                    ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-                                    : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                                    ? 'text-amber-700 dark:text-amber-400'
+                                    : 'text-emerald-700 dark:text-emerald-400'
                                 }`}
                               >
                                 {status.battery.label}
                               </span>
                             </div>
-                            <div className="text-[10px] text-slate-400">
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums">
                               Terakhir: {status.battery.lastDate}
                             </div>
                           </div>
                         </div>
                         <button
                           onClick={() => handleOpenLogForFleet(fleet, 'aki')}
-                          className="px-2 py-1 rounded bg-slate-800 hover:bg-cyan-500 hover:text-slate-950 text-slate-300 text-[10px] font-bold transition cursor-pointer"
+                          className="px-2.5 py-1 rounded-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:border-blue-600 hover:text-blue-600 dark:hover:border-blue-500 dark:hover:text-blue-400 text-slate-700 dark:text-slate-200 text-[11px] font-medium transition cursor-pointer shrink-0"
                           title="Catat Ganti Aki"
                         >
                           Ganti
@@ -849,21 +875,21 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
                   </div>
 
                   {/* Card Footer Action */}
-                  <div className="pt-2.5 border-t border-slate-800 flex items-center justify-between">
+                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
                     <button
                       onClick={() => {
                         setSelectedFleetFilter(fleet.id);
                         setActiveTab('history');
                       }}
-                      className="text-slate-400 hover:text-amber-400 text-xs font-semibold flex items-center gap-1 transition cursor-pointer"
+                      className="text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 text-xs font-medium flex items-center gap-1.5 transition cursor-pointer tabular-nums"
                     >
                       <History className="w-3.5 h-3.5" />
-                      <span>Lihat Riwayat ({logisticsStore.getSparePartUsages(fleet.id).length})</span>
+                      <span>Lihat Riwayat ({branchScopedUsages.filter(u => u.fleetId === fleet.id).length})</span>
                     </button>
 
                     <button
                       onClick={() => handleOpenLogForFleet(fleet)}
-                      className="px-3 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500 text-amber-300 hover:text-slate-950 border border-amber-500/30 font-bold text-xs transition cursor-pointer flex items-center gap-1"
+                      className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs transition cursor-pointer flex items-center gap-1.5"
                     >
                       <Wrench className="w-3.5 h-3.5" />
                       <span>Catat Servis</span>
@@ -882,25 +908,26 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
       {activeTab === 'inventory' && (
         <div className="space-y-4">
           {/* Search & Action Bar */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-900 p-3.5 rounded-xl border border-slate-800">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800">
             <div className="relative w-full sm:w-80">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Cari sparepart, part number, tipe truk..."
+                placeholder="Cari sparepart, part number, tipe truk, atau penginput..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-hidden focus:border-amber-500"
+                className="w-full pl-9 pr-3 py-2 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs sm:text-sm text-slate-900 dark:text-white placeholder-slate-400 focus:outline-hidden focus:border-blue-600"
               />
             </div>
 
             <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-              <span className="text-xs text-slate-400">
-                Menampilkan <strong className="text-white">{filteredParts.length}</strong> sparepart
+              <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
+                Menampilkan <strong className="text-slate-900 dark:text-white">{filteredParts.length}</strong> sparepart
               </span>
               <button
+                type="button"
                 onClick={() => setIsAddPartOpen(true)}
-                className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                className="px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap"
               >
                 <Plus className="w-4 h-4" />
                 <span>Tambah Sparepart</span>
@@ -914,90 +941,97 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
               const badge = getCategoryBadge(part.category);
               const Icon = badge.icon;
               const isLowStock = part.stock <= part.minStock;
+              const branchLabel = part.branchId && part.branchId !== 'ALL'
+                ? branchStore.getBranchById(part.branchId)?.name?.replace(/^Cabang\s+/i, '') || part.branchId
+                : 'Semua Cabang';
 
               return (
                 <div
                   key={part.id}
-                  className={`bg-slate-900 border rounded-2xl p-4.5 transition flex flex-col justify-between shadow-md ${
-                    isLowStock ? 'border-rose-500/50 bg-rose-950/10' : 'border-slate-800 hover:border-slate-700'
+                  className={`bg-white dark:bg-slate-900 border rounded-xl p-4 transition flex flex-col justify-between ${
+                    isLowStock ? 'border-rose-300 dark:border-rose-500/50' : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
                   }`}
                 >
                   <div>
-                    <div className="flex items-start justify-between gap-2">
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold border flex items-center gap-1 ${badge.color}`}>
-                        <Icon className="w-3 h-3" />
+                    <div className="flex items-center justify-between gap-2 text-xs">
+                      <span className="font-semibold text-blue-600 dark:text-blue-400 flex items-center gap-1.5">
+                        <Icon className="w-3.5 h-3.5" />
                         <span>{badge.label}</span>
                       </span>
 
                       {isLowStock ? (
-                        <span className="px-2 py-0.5 rounded text-[10px] font-black bg-rose-500/20 text-rose-400 border border-rose-500/40 animate-pulse flex items-center gap-1">
-                          <AlertTriangle className="w-3 h-3" />
-                          <span>STOK TIPIS</span>
+                        <span className="text-xs font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-1">
+                          <AlertTriangle className="w-3.5 h-3.5" />
+                          <span>Stok Tipis</span>
                         </span>
                       ) : (
-                        <span className="text-[10px] text-slate-400">
+                        <span className="text-xs text-slate-500 dark:text-slate-400 font-mono tabular-nums">
                           Min: {part.minStock} {part.unit}
                         </span>
                       )}
                     </div>
 
-                    <h3 className="text-sm font-bold text-white mt-2.5 line-clamp-2" title={part.name}>
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white mt-2 line-clamp-2" title={part.name}>
                       {part.name}
                     </h3>
-                    <div className="text-[11px] font-mono text-slate-400 mt-0.5">
-                      Kode / Part No: <span className="text-amber-400 font-semibold">{part.partNumber}</span>
+                    <div className="text-xs font-mono text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                      <span>{part.partNumber}</span>
+                      <span aria-hidden="true">·</span>
+                      <span className="font-sans">{branchLabel}</span>
+                      {part.createdBy && (
+                        <>
+                          <span aria-hidden="true">·</span>
+                          <span className="font-sans">Input: {part.createdBy}</span>
+                        </>
+                      )}
                     </div>
 
-                    {/* Info Blocks */}
-                    <div className="my-3 space-y-1.5 text-xs text-slate-300">
-                      <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
-                        <span className="text-slate-400 text-[11px]">Kompatibilitas:</span>
-                        <span className="font-medium text-right text-white max-w-[60%] truncate" title={part.compatibleVehicles}>
+                    {/* Info Rows */}
+                    <div className="my-3 space-y-1.5 text-xs text-slate-600 dark:text-slate-300">
+                      <div className="flex items-center justify-between py-1 border-b border-slate-100 dark:border-slate-800/60">
+                        <span className="text-slate-500">Kompatibilitas:</span>
+                        <span className="font-medium text-right text-slate-900 dark:text-white max-w-[60%] truncate" title={part.compatibleVehicles}>
                           {part.compatibleVehicles}
                         </span>
                       </div>
 
-                      <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
-                        <span className="text-slate-400 text-[11px]">Lokasi Rak:</span>
-                        <span className="font-mono text-slate-300 text-[11px]">{part.storageLocation}</span>
+                      <div className="flex items-center justify-between py-1 border-b border-slate-100 dark:border-slate-800/60">
+                        <span className="text-slate-500">Lokasi Rak:</span>
+                        <span className="font-mono text-slate-700 dark:text-slate-300">{part.storageLocation}</span>
                       </div>
 
-                      <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
-                        <span className="text-slate-400 text-[11px]">Harga Satuan (Est):</span>
-                        <span className="font-bold text-amber-400">Rp {part.costPerUnit.toLocaleString('id-ID')}</span>
+                      <div className="flex items-center justify-between py-1 border-b border-slate-100 dark:border-slate-800/60">
+                        <span className="text-slate-500">Harga Satuan (Est):</span>
+                        <span className="font-mono font-bold text-slate-900 dark:text-amber-400 tabular-nums">
+                          Rp {part.costPerUnit.toLocaleString('id-ID')}
+                        </span>
                       </div>
-
-                      {part.createdBy && (
-                        <div className="flex items-center justify-between py-1 border-b border-slate-800/60">
-                          <span className="text-slate-400 text-[11px]">Diinput Oleh:</span>
-                          <span className="font-semibold text-slate-200 text-[11px] truncate max-w-[60%]">{part.createdBy}</span>
-                        </div>
-                      )}
                     </div>
 
                     {part.notes && (
-                      <p className="text-[11px] text-slate-400 italic bg-slate-950/40 p-2 rounded-lg border border-slate-800/60 line-clamp-2">
+                      <p className="text-xs text-slate-500 dark:text-slate-400 italic line-clamp-2">
                         "{part.notes}"
                       </p>
                     )}
                   </div>
 
                   {/* Footer & Stock Controls */}
-                  <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between gap-2">
+                  <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
                     <div>
-                      <span className="text-[10px] text-slate-400 block">Stok Tersedia</span>
-                      <span className={`text-lg font-black ${isLowStock ? 'text-rose-400' : 'text-emerald-400'}`}>
-                        {part.stock} <span className="text-xs font-normal text-slate-400">{part.unit}</span>
+                      <span className="text-xs text-slate-500 block">Stok Tersedia</span>
+                      <span className={`text-lg font-bold font-mono tabular-nums ${isLowStock ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                        {part.stock} <span className="text-xs font-sans font-normal text-slate-500">{part.unit}</span>
                       </span>
                     </div>
 
                     <div className="flex items-center gap-1.5">
                       <button
+                        type="button"
                         onClick={() => {
                           setSelectedPartForRestock(part);
                           setIsRestockOpen(true);
                         }}
-                        className="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs transition cursor-pointer flex items-center gap-1"
+                        className="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs transition cursor-pointer flex items-center gap-1"
                         title="Restock / Tambah Stok Masuk"
                       >
                         <Plus className="w-3.5 h-3.5" />
@@ -1005,46 +1039,25 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
                       </button>
 
                       <button
+                        type="button"
                         onClick={() => {
                           setEditingPart(part);
                           setIsEditPartOpen(true);
                         }}
-                        className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
+                        className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition cursor-pointer"
                         title="Edit Master Part"
                       >
                         <Edit3 className="w-3.5 h-3.5" />
                       </button>
 
-                      {confirmDeletePartId === part.id ? (
-                        <div className="flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              logisticsStore.deleteSparePart(part.id);
-                              setConfirmDeletePartId(null);
-                            }}
-                            className="px-2 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-bold cursor-pointer"
-                          >
-                            Hapus
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setConfirmDeletePartId(null)}
-                            className="px-2 py-1 rounded bg-slate-800 text-slate-300 text-[10px] font-semibold cursor-pointer"
-                          >
-                            Batal
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => setConfirmDeletePartId(part.id)}
-                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-900/60 text-slate-400 hover:text-rose-300 transition cursor-pointer"
-                          title="Hapus Part"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => setDeleteConfirm({ type: 'part', id: part.id, label: part.name })}
+                        className="p-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-rose-600 text-slate-500 dark:text-slate-400 hover:text-white transition cursor-pointer"
+                        title="Hapus Part"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -1060,14 +1073,14 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
       {activeTab === 'history' && (
         <div className="space-y-4">
           {/* Filter Bar */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-900 p-4 rounded-xl border border-slate-800">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
             <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
               <div>
-                <label className="text-[11px] text-slate-400 block mb-1">Filter Armada:</label>
+                <label className="text-xs font-medium text-slate-500 dark:text-slate-400 block mb-1">Filter Armada:</label>
                 <select
                   value={selectedFleetFilter}
                   onChange={(e) => setSelectedFleetFilter(e.target.value)}
-                  className="px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white"
+                  className="px-3 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-semibold text-slate-800 dark:text-white"
                 >
                   <option value="all">Semua Armada ({fleets.length})</option>
                   {fleets.map(f => (
@@ -1079,11 +1092,11 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
               </div>
 
               <div>
-                <label className="text-[11px] text-slate-400 block mb-1">Kategori:</label>
+                <label className="text-xs font-medium text-slate-500 dark:text-slate-400 block mb-1">Kategori:</label>
                 <select
                   value={selectedCategory}
                   onChange={(e) => setSelectedCategory(e.target.value)}
-                  className="px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-white"
+                  className="px-3 py-1.5 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs font-semibold text-slate-800 dark:text-white"
                 >
                   <option value="all">Semua Kategori</option>
                   <option value="oli">Oli Mesin & Pelumas</option>
@@ -1097,19 +1110,21 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
 
             <div className="flex items-center gap-2">
               <button
+                type="button"
                 onClick={handleExportCSV}
-                className="px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold flex items-center gap-1.5 transition cursor-pointer"
+                className="px-3.5 py-2 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
               >
-                <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
-                <span>Export CSV</span>
+                <FileSpreadsheet className="w-4 h-4 text-slate-500" />
+                <span>Ekspor CSV</span>
               </button>
 
               <button
+                type="button"
                 onClick={() => {
-                  const defaultFleet = fleets[0];
+                  const defaultFleet = fleets[0] || allFleets[0];
                   if (defaultFleet) handleOpenLogForFleet(defaultFleet);
                 }}
-                className="px-3.5 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
+                className="px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs flex items-center gap-1.5 transition cursor-pointer"
               >
                 <Wrench className="w-4 h-4" />
                 <span>Ganti Sparepart</span>
@@ -1118,10 +1133,10 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
           </div>
 
           {/* Usages Table */}
-          <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="bg-slate-950/80 text-slate-400 uppercase text-[10px] font-bold tracking-wider border-b border-slate-800">
+                <thead className="bg-slate-50 dark:bg-slate-950/80 text-slate-500 dark:text-slate-400 font-semibold border-b border-slate-200 dark:border-slate-800">
                   <tr>
                     <th className="px-4 py-3">Tanggal Ganti</th>
                     <th className="px-4 py-3">Armada Kendaraan</th>
@@ -1129,12 +1144,12 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
                     <th className="px-4 py-3">Qty</th>
                     <th className="px-4 py-3">KM Servis</th>
                     <th className="px-4 py-3">Target Servis Berikut</th>
-                    <th className="px-4 py-3">Mekanik / Bengkel</th>
+                    <th className="px-4 py-3">Mekanik &amp; Penginput</th>
                     <th className="px-4 py-3 text-right">Biaya (Rp)</th>
                     <th className="px-4 py-3 text-center">Aksi</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800/60 text-slate-300">
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-800/60 text-slate-700 dark:text-slate-300">
                   {filteredUsages.length === 0 ? (
                     <tr>
                       <td colSpan={9} className="px-4 py-8 text-center text-slate-500">
@@ -1147,87 +1162,69 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
                       const Icon = badge.icon;
 
                       return (
-                        <tr key={usage.id} className="hover:bg-slate-800/40 transition">
-                          <td className="px-4 py-3 font-mono text-slate-200">
+                        <tr key={usage.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
+                          <td className="px-4 py-3 font-mono text-slate-900 dark:text-slate-200 tabular-nums whitespace-nowrap">
                             {usage.replacementDate}
                           </td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-1.5">
-                              {usage.initialCode && (
-                                <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-400 font-mono text-[10px] font-bold">
-                                  {usage.initialCode}
-                                </span>
-                              )}
-                              <span className="font-bold text-white font-mono">{usage.plateNumber}</span>
-                            </div>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <span className="font-bold text-slate-900 dark:text-white font-mono">{usage.plateNumber}</span>
+                            {usage.initialCode && (
+                              <span className="text-xs font-mono font-semibold text-blue-600 dark:text-blue-400 ml-1.5">
+                                · {usage.initialCode}
+                              </span>
+                            )}
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-2">
-                              <span className={`p-1 rounded border ${badge.color}`}>
-                                <Icon className="w-3 h-3" />
-                              </span>
+                              <Icon className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                               <div>
-                                <div className="font-semibold text-white">{usage.partName}</div>
+                                <div className="font-semibold text-slate-900 dark:text-white">{usage.partName}</div>
                                 {usage.notes && (
-                                  <div className="text-[10px] text-slate-400 line-clamp-1 italic">
-                                    "{usage.notes}"
+                                  <div className="text-xs text-slate-500 dark:text-slate-400 line-clamp-1">
+                                    {usage.notes}
                                   </div>
                                 )}
                               </div>
                             </div>
                           </td>
-                          <td className="px-4 py-3 font-semibold text-white">
-                            {usage.quantity} <span className="text-[11px] font-normal text-slate-400">{usage.unit}</span>
+                          <td className="px-4 py-3 font-mono font-semibold text-slate-900 dark:text-white tabular-nums whitespace-nowrap">
+                            {usage.quantity} <span className="font-sans font-normal text-slate-500">{usage.unit}</span>
                           </td>
-                          <td className="px-4 py-3 font-mono font-bold text-amber-400">
+                          <td className="px-4 py-3 font-mono font-semibold text-slate-900 dark:text-amber-400 tabular-nums whitespace-nowrap">
                             {usage.odometerKm.toLocaleString('id-ID')} KM
                           </td>
-                          <td className="px-4 py-3 font-mono text-slate-300 text-[11px]">
+                          <td className="px-4 py-3 font-mono text-slate-600 dark:text-slate-300 tabular-nums whitespace-nowrap">
                             {usage.nextReplacementKm ? `${usage.nextReplacementKm.toLocaleString('id-ID')} KM` : '-'}
                             {usage.nextReplacementDate && (
-                              <span className="text-[10px] text-slate-400 block">({usage.nextReplacementDate})</span>
+                              <span className="text-xs text-slate-500 block">({usage.nextReplacementDate})</span>
                             )}
                           </td>
-                          <td className="px-4 py-3 text-slate-300">
-                            <div>{usage.mechanicOrWorkshop}</div>
+                          <td className="px-4 py-3 text-slate-700 dark:text-slate-300">
+                            <div className="font-medium">{usage.mechanicOrWorkshop}</div>
                             {usage.performedBy && (
-                              <div className="text-[10px] text-slate-400">Oleh: {usage.performedBy}</div>
+                              <div className="text-xs text-slate-500 dark:text-slate-400">
+                                Oleh: {usage.performedBy}
+                              </div>
                             )}
                           </td>
-                          <td className="px-4 py-3 text-right font-mono font-bold text-emerald-400">
+                          <td className="px-4 py-3 text-right font-mono font-bold text-emerald-700 dark:text-emerald-400 tabular-nums whitespace-nowrap">
                             Rp {usage.totalCost.toLocaleString('id-ID')}
                           </td>
                           <td className="px-4 py-3 text-center">
-                            {confirmDeleteUsageId === usage.id ? (
-                              <div className="inline-flex items-center gap-1">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    logisticsStore.deleteSparePartUsage(usage.id);
-                                    setConfirmDeleteUsageId(null);
-                                  }}
-                                  className="px-2 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white text-[10px] font-bold cursor-pointer"
-                                >
-                                  Hapus
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setConfirmDeleteUsageId(null)}
-                                  className="px-2 py-1 rounded bg-slate-800 text-slate-300 text-[10px] font-semibold cursor-pointer"
-                                >
-                                  Batal
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => setConfirmDeleteUsageId(usage.id)}
-                                className="p-1 rounded hover:bg-rose-900/60 text-slate-400 hover:text-rose-300 transition cursor-pointer"
-                                title="Hapus Catatan"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setDeleteConfirm({
+                                  type: 'usage',
+                                  id: usage.id,
+                                  label: `${usage.partName} (${usage.plateNumber})`
+                                })
+                              }
+                              className="p-1.5 rounded-lg hover:bg-rose-600 text-slate-400 hover:text-white transition cursor-pointer"
+                              title="Hapus Catatan"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </td>
                         </tr>
                       );
@@ -2160,6 +2157,52 @@ export const SparePartManagement: React.FC<SparePartManagementProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* MODAL KONFIRMASI HAPUS (PENGGANTI window.confirm) */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl w-full max-w-md p-5 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400 font-bold text-base">
+                <Trash2 className="w-4 h-4" />
+                <span>{deleteConfirm.type === 'part' ? 'Hapus Master Sparepart' : 'Hapus Catatan Penggantian'}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDeleteConfirm(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-sm text-slate-600 dark:text-slate-300">
+              Yakin ingin menghapus <strong className="text-slate-900 dark:text-white">{deleteConfirm.label}</strong>? Perubahan ini disinkronkan ke semua perangkat.
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirm(null)}
+                className="px-4 py-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (deleteConfirm.type === 'part') {
+                    logisticsStore.deleteSparePart(deleteConfirm.id);
+                  } else {
+                    logisticsStore.deleteSparePartUsage(deleteConfirm.id);
+                  }
+                  setDeleteConfirm(null);
+                }}
+                className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold cursor-pointer"
+              >
+                Ya, Hapus
+              </button>
+            </div>
           </div>
         </div>
       )}

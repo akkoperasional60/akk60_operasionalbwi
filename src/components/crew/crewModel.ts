@@ -101,6 +101,7 @@ export const FUEL_STATION_CHOICES: readonly FuelStationChoice[] = [
 
 export interface DepartureValidationData {
   summary: {
+    branchId?: string;
     branchName?: string;
     driverName: string;
     helperName: string;
@@ -111,10 +112,10 @@ export interface DepartureValidationData {
     recordedAtWib: string;
   };
   checks?: {
-    waybillMatch?: boolean;
-    documentsReady?: boolean;
+    waybillMatch: boolean;
+    documentsReady: boolean;
   };
-  signerSelections?: Partial<Record<DepartureSignatureKey, string>>;
+  signerNames?: Partial<Record<DepartureSignatureKey, string>>;
   signatures: Record<DepartureSignatureKey, string>;
   signedAt: string;
   signedBy?: string;
@@ -379,82 +380,115 @@ export function isTodayOrTomorrowTrip(trip: FieldTrip): boolean {
   return candidates.some(d => d === today || d === tomorrow);
 }
 
+export function isTodayTrip(trip: FieldTrip): boolean {
+  const { today } = getTodayTomorrowJakarta();
+  const candidates = [
+    trip.date,
+    trip.returnedAt,
+    trip.schedule?.deliveryDate,
+    trip.schedule?.departureDate
+  ]
+    .map(v => {
+      if (!v) return '';
+      const raw = String(v);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+      const d = new Date(raw);
+      return Number.isNaN(d.getTime())
+        ? raw.match(/^\d{4}-\d{2}-\d{2}/)?.[0] || ''
+        : d.toLocaleDateString('sv-SE', { timeZone: 'Asia/Jakarta' });
+    })
+    .filter(Boolean);
+  return candidates.some(d => d === today);
+}
+
 export const isCompleted = (t: FieldTrip): boolean =>
   t.phase === 'returned' ||
   Boolean(t.returnedAt) ||
   String(t.schedule?.status || '').toLowerCase() === 'delivered';
-export const tripPhaseLabel = (t: FieldTrip): string => isCompleted(t) ? 'Selesai' : t.phase === 'going' ? 'Dalam perjalanan' : 'Belum berangkat';
+export const tripPhaseLabel = (t: FieldTrip): string =>
+  isCompleted(t) ? 'Tiba di Gudang / Selesai' : t.phase === 'going' ? 'Dalam perjalanan' : 'Belum berangkat';
 
-let lastKnownGpsFix: { latitude: number; longitude: number; accuracy: number; at: number } | null = null;
-const FALLBACK_WAREHOUSE_GPS = { latitude: -8.2192, longitude: 114.3691, accuracy: 35 };
+type GpsCoord = { latitude: number; longitude: number; accuracy: number };
+let lastKnownGpsFix: (GpsCoord & { capturedAt: number }) | null = null;
 
-export function freshGps(options?: { strict?: boolean }): Promise<{ latitude: number; longitude: number; accuracy: number }> {
+function branchFallbackGps(branchId?: string): GpsCoord {
+  if (branchId === 'cab-sidoarjo') {
+    return { latitude: -7.4478, longitude: 112.7183, accuracy: 35 };
+  }
+  return { latitude: -8.1906, longitude: 114.3708, accuracy: 35 };
+}
+
+export function freshGps(): Promise<GpsCoord> {
   return new Promise((resolve, reject) => {
-    if (lastKnownGpsFix && Date.now() - lastKnownGpsFix.at < 45_000) {
-      resolve({
-        latitude: lastKnownGpsFix.latitude,
-        longitude: lastKnownGpsFix.longitude,
-        accuracy: lastKnownGpsFix.accuracy
-      });
-      return;
-    }
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
-      if (options?.strict) {
-        reject(new Error('GPS tidak tersedia pada perangkat ini.'));
-      } else {
-        resolve({ ...(lastKnownGpsFix || FALLBACK_WAREHOUSE_GPS) });
-      }
+      reject(new Error('GPS tidak tersedia pada perangkat ini.'));
       return;
     }
-
-    let settled = false;
-    const finish = (coords: { latitude: number; longitude: number; accuracy: number }, cache = true) => {
-      if (settled) return;
-      settled = true;
-      window.clearTimeout(hardTimer);
-      if (cache) {
-        lastKnownGpsFix = { ...coords, at: Date.now() };
-      }
-      resolve(coords);
-    };
-
-    const fallbackOrReject = () => {
-      if (options?.strict) {
-        if (!settled) {
-          settled = true;
-          window.clearTimeout(hardTimer);
-          reject(new Error('Lokasi belum bisa dibaca. Periksa GPS lalu coba lagi.'));
-        }
-        return;
-      }
-      finish(
-        lastKnownGpsFix
-          ? { latitude: lastKnownGpsFix.latitude, longitude: lastKnownGpsFix.longitude, accuracy: lastKnownGpsFix.accuracy }
-          : FALLBACK_WAREHOUSE_GPS,
-        false
-      );
-    };
-
-    const hardTimer = window.setTimeout(fallbackOrReject, 3800);
-
     navigator.geolocation.getCurrentPosition(
-      p => finish({ latitude: p.coords.latitude, longitude: p.coords.longitude, accuracy: p.coords.accuracy }),
-      e => {
-        if (e.code === 1) {
-          if (!settled) {
-            settled = true;
-            window.clearTimeout(hardTimer);
-            reject(new Error('Izin lokasi ditolak. Aktifkan GPS untuk melanjutkan.'));
-          }
-          return;
-        }
-        navigator.geolocation.getCurrentPosition(
-          p2 => finish({ latitude: p2.coords.latitude, longitude: p2.coords.longitude, accuracy: p2.coords.accuracy }),
-          fallbackOrReject,
-          { enableHighAccuracy: false, timeout: 1500, maximumAge: 120_000 }
-        );
+      p => {
+        const fix = { latitude: p.coords.latitude, longitude: p.coords.longitude, accuracy: p.coords.accuracy };
+        lastKnownGpsFix = { ...fix, capturedAt: Date.now() };
+        resolve(fix);
       },
-      { enableHighAccuracy: true, timeout: 2200, maximumAge: 45_000 }
+      e => reject(new Error(e.code === 1 ? 'Izin lokasi ditolak. Aktifkan GPS untuk melanjutkan.' :
+        'Lokasi belum bisa dibaca. Periksa GPS lalu coba lagi.')),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 15000 }
+    );
+  });
+}
+
+/**
+ * Bounded GPS lookup for crew actions (KM Awal/Akhir, Berangkat, Tiba di Gudang, Checklist, Form Keluar).
+ * Uses fresh cached fix or resolves within 2.5s with branch fallback so saving never stalls for 20s.
+ */
+export function quickGpsForAction(branchId?: string): Promise<GpsCoord> {
+  if (lastKnownGpsFix && Date.now() - lastKnownGpsFix.capturedAt < 10 * 60 * 1000) {
+    return Promise.resolve({
+      latitude: lastKnownGpsFix.latitude,
+      longitude: lastKnownGpsFix.longitude,
+      accuracy: lastKnownGpsFix.accuracy
+    });
+  }
+  return new Promise(resolve => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      resolve(branchFallbackGps(branchId));
+      return;
+    }
+    let settled = false;
+    const timer = window.setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        resolve(lastKnownGpsFix ? {
+          latitude: lastKnownGpsFix.latitude,
+          longitude: lastKnownGpsFix.longitude,
+          accuracy: lastKnownGpsFix.accuracy
+        } : branchFallbackGps(branchId));
+      }
+    }, 2500);
+    navigator.geolocation.getCurrentPosition(
+      p => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        const fix = {
+          latitude: p.coords.latitude,
+          longitude: p.coords.longitude,
+          accuracy: Math.max(1, Number(p.coords.accuracy) || 25)
+        };
+        lastKnownGpsFix = { ...fix, capturedAt: Date.now() };
+        resolve(fix);
+      },
+      () => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        resolve(lastKnownGpsFix ? {
+          latitude: lastKnownGpsFix.latitude,
+          longitude: lastKnownGpsFix.longitude,
+          accuracy: lastKnownGpsFix.accuracy
+        } : branchFallbackGps(branchId));
+      },
+      { enableHighAccuracy: false, timeout: 2400, maximumAge: 60000 }
     );
   });
 }
